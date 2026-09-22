@@ -1,0 +1,34 @@
+image:
+  repository: ghcr.io/everydaydevopsio/bosun
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+review:
+  provider: codex
+  image: ghcr.io/everydaydevopsio/bosun:latest
+  ttlSecondsAfterFinished: 3600
+
+secrets:
+  # Create these out-of-band. Never commit values here.
+  githubSecretName: bosun-github
+  aiSecretName: bosun-ai
+  webhookSecretName: bosun-webhook
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: nginx
+  host: bosun.example.com
+  tlsSecretName: bosun-tls
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
