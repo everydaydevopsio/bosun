@@ -2,7 +2,6 @@ import os
 import pathlib
 import shutil
 import subprocess
-import sys
 import tempfile
 import requests
 from .github import headers, post_comment
@@ -44,9 +43,11 @@ def main():
 
         prompt = pathlib.Path("/app/bosun/prompts/code-review.md").read_text()
         prompt += f"\n\nRepository: {repo}\nReview ref: {ref}\nCommit: {sha}\n"
+        # Run from /app so bridgectl's bundled provider paths resolve correctly.
+        # The repository path remains /tmp/... and is permitted by local-mode defaults.
         review = run(
             ["bridgectl", "run", "--no-tty", "--provider", provider, "--project", "bosun-review", str(workspace)],
-            cwd=workspace, input_text=prompt,
+            cwd="/app", input_text=prompt,
         )
         output = (review.stdout or "").strip()
         if review.returncode:
