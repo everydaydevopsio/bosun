@@ -33,6 +33,18 @@ Bosun accepts branch creation, selected pull-request lifecycle events, and `@bri
 
 Bosun is orchestration, not another agent runtime. The same review primitive works locally through the bridgectl code-review example and remotely as a Kubernetes Job. Provider selection remains a bridgectl concern.
 
+## Local development — no GitHub required
+
+For the fastest development loop, Bosun includes a Kind environment that can review any local Git checkout, including uncommitted changes:
+
+```bash
+export OPENAI_API_KEY=...
+./scripts/kind-up.sh
+./scripts/review-local.sh ~/src/project-to-review
+```
+
+The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See [docs/local-development.md](docs/local-development.md).
+
 ## Quick start
 
 1. Build and publish this image.
