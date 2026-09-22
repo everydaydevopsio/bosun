@@ -32,3 +32,8 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+development:
+  # Enables installation without GitHub/webhook secrets. Local reviews are
+  # launched directly as Kubernetes Jobs by scripts/review-local.sh.
+  enabled: false
