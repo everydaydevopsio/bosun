@@ -18,4 +18,6 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - uses: azure/setup-helm@v4
       - run: helm lint charts/bosun
+      - run: helm template bosun charts/bosun --set development.enabled=true >/tmp/bosun-dev.yaml
+      - run: grep -q 'local-development-only' /tmp/bosun-dev.yaml
       - run: docker build -t bosun:test .
