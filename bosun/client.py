@@ -37,6 +37,9 @@ log = get_logger("bosun.client")
 
 DEFAULT_START_TIMEOUT = 30
 
+# Extra provider definitions merged into bridgectl's packaged config.
+BRIDGE_CONFIG = os.getenv("BOSUN_BRIDGE_CONFIG", "/app/bosun/config/bridge-bosun.yaml")
+
 
 class BridgeError(RuntimeError):
     pass
@@ -86,19 +89,21 @@ class BridgeClient:
         autostart: bool = True,
         binary: str = "bridgectl",
         env: dict | None = None,
+        config: str | None = None,
     ) -> "BridgeClient":
         directory = directory or state_dir()
         target = discover_target(directory)
         if target is None:
             if not autostart:
                 raise BridgeError(f"no bridge server found in {directory}")
-            target = cls._start_server(directory, timeout, binary, env)
+            target = cls._start_server(directory, timeout, binary, env, config)
         client = cls(target, timeout)
         client.health()
         return client
 
     @staticmethod
-    def _start_server(directory: pathlib.Path, timeout: int, binary: str, env: dict | None = None) -> str:
+    def _start_server(directory: pathlib.Path, timeout: int, binary: str,
+                      env: dict | None = None, config: str | None = None) -> str:
         """Spawn `bridgectl server start`, as the CLI's ensureServer does.
 
         The server is what forks the AI provider, so the provider inherits this
@@ -106,10 +111,15 @@ class BridgeClient:
         away from an agent that is reading untrusted repository content.
         """
         directory.mkdir(parents=True, exist_ok=True)
-        log.info("starting bridge server (%s server start)", binary)
+        command = [binary, "server", "start"]
+        # Adds Bosun's own provider definitions to bridgectl's packaged ones.
+        config = BRIDGE_CONFIG if config is None else config
+        if config and os.path.exists(config):
+            command += ["--config", config]
+        log.info("starting bridge server", extra={"context": {"config": config or "packaged"}})
         try:
             subprocess.Popen(
-                [binary, "server", "start"],
+                command,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True, env=env,
             )
@@ -143,7 +153,14 @@ class BridgeClient:
         return self.stub.ListProviders(pb.ListProvidersRequest(), timeout=self.timeout).providers
 
     def start_session(self, session_id: str, project: str, repo_path: str, provider: str,
-                      cols: int = 200, rows: int = 50):
+                      cols: int = 200, rows: int = 50, agent_opts: dict | None = None):
+        """Start a session.
+
+        `agent_opts` keys prefixed `arg:` are appended to the provider's command
+        line by bridgectl, which is how a non-interactive provider such as
+        `codex exec` receives its prompt. Pass at most one: bridgectl iterates a
+        Go map, so the order of several is not defined.
+        """
         try:
             return self.stub.StartSession(
                 pb.StartSessionRequest(
@@ -151,6 +168,7 @@ class BridgeClient:
                     session_id=session_id,
                     repo_path=str(repo_path),
                     provider=provider,
+                    agent_opts=agent_opts or {},
                     # A wide terminal keeps the provider from hard-wrapping the
                     # Markdown it writes, which would survive into the PR comment.
                     initial_cols=cols,

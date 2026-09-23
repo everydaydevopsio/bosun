@@ -46,6 +46,13 @@ _BOX_DRAWING = set("─│╭╮╰╯┌┐└┘├┤┬┴┼━┃▌▐█
 # repaints. Useful when inspecting a TUI provider's raw stream by hand.
 ALLOW_TUI_OUTPUT = os.getenv("BOSUN_ALLOW_TUI_OUTPUT", "false").lower() == "true"
 
+# Providers that take the prompt as a command-line argument and exit when done,
+# rather than reading it from an interactive session. bridgectl appends any
+# agent_opts key prefixed "arg:" to the provider's command line.
+PROMPT_ARG_PROVIDERS = frozenset(
+    p.strip() for p in os.getenv("BOSUN_PROMPT_ARG_PROVIDERS", "codex-exec").split(",") if p.strip()
+)
+
 
 class ReviewFailed(RuntimeError):
     pass
@@ -208,13 +215,17 @@ def run_review(
     client_id = new_session_id()
     collector = None
     try:
-        if provider in TUI_PROVIDERS:
+        prompt_as_arg = provider in PROMPT_ARG_PROVIDERS
+        if provider in TUI_PROVIDERS and not prompt_as_arg:
             log.warning(
                 "provider renders a terminal UI; its output is unlikely to be a usable review",
                 extra={"context": {"provider": provider}},
             )
         _require_provider(client, provider)
-        client.start_session(session_id, project, str(workspace), provider)
+        # A non-interactive provider receives the prompt on its command line;
+        # an interactive one gets it through WriteInput once attached.
+        agent_opts = {"arg:prompt": prompt} if prompt_as_arg else None
+        client.start_session(session_id, project, str(workspace), provider, agent_opts=agent_opts)
         collector = _Collector(client.attach(session_id, client_id), client_id)
         collector.start()
 
@@ -226,9 +237,11 @@ def run_review(
         log.info(
             "session started",
             extra={"context": {"session": session_id, "provider": provider,
-                               "workspace": str(workspace), "timeout": max_seconds}},
+                               "workspace": str(workspace), "timeout": max_seconds,
+                               "prompt_delivery": "argv" if prompt_as_arg else "write_input"}},
         )
-        client.write_input(session_id, client_id, prompt.encode() + b"\n")
+        if not prompt_as_arg:
+            client.write_input(session_id, client_id, prompt.encode() + b"\n")
 
         deadline = time.monotonic() + max_seconds
         while not collector.finished.is_set():

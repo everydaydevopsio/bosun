@@ -209,5 +209,36 @@ class AllowTUIOverrideTests(unittest.TestCase):
         self.assertIn("BOSUN_ALLOW_TUI_OUTPUT", str(ctx.exception))
 
 
+class PromptDeliveryTests(unittest.TestCase):
+    """Non-interactive providers take the prompt on the command line."""
+
+    def review(self, provider, **kwargs):
+        kwargs.setdefault("idle_seconds", 1)
+        kwargs.setdefault("max_seconds", 15)
+        service = FakeBridge(echo_input=False, exit_after_reply=True)
+        with FakeBridgeServer(service) as server:
+            with BridgeClient(server.target) as client:
+                out = run_review("/ws", provider, "review this", client=client, **kwargs)
+        return service, out
+
+    def test_interactive_provider_uses_write_input(self):
+        service, _ = self.review("echo")
+        self.assertEqual(service.inputs, [b"review this\n"])
+        self.assertEqual(dict(service.started[0].agent_opts), {})
+
+    def test_exec_provider_passes_the_prompt_as_an_argument(self):
+        with mock.patch("bosun.session.PROMPT_ARG_PROVIDERS", frozenset({"echo"})):
+            service, _ = self.review("echo")
+        self.assertEqual(service.inputs, [])
+        self.assertEqual(dict(service.started[0].agent_opts), {"arg:prompt": "review this"})
+
+    def test_only_one_arg_option_is_sent(self):
+        """bridgectl ranges over a Go map, so multiple args would be unordered."""
+        with mock.patch("bosun.session.PROMPT_ARG_PROVIDERS", frozenset({"echo"})):
+            service, _ = self.review("echo")
+        args = [k for k in service.started[0].agent_opts if k.startswith("arg:")]
+        self.assertEqual(len(args), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -51,30 +51,19 @@ class FakeBridge(pb_grpc.BridgeServiceServicer):
         if self.fail_start:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, self.fail_start)
         self.started.append(request)
+        # A non-interactive provider gets its prompt on the command line and
+        # starts working immediately, with no WriteInput to wait for.
+        prompt_args = [v for k, v in request.agent_opts.items() if k.startswith("arg:")]
+        if prompt_args:
+            self._respond_async(prompt_args[0].encode())
         return pb.StartSessionResponse(
             session_id=request.session_id, status=pb.SESSION_STATUS_RUNNING
         )
 
-    def AttachSession(self, request, context):
-        if self.attach_error:
-            self._emit(type=pb.ATTACH_EVENT_TYPE_ERROR, error=self.attach_error)
-        else:
-            self._emit(type=pb.ATTACH_EVENT_TYPE_ATTACHED, session_id=request.session_id)
-        while context.is_active():
-            try:
-                event = self._events.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            if event is None:
-                return
-            yield event
-
-    def WriteInput(self, request, context):
-        self.inputs.append(request.data)
-
+    def _respond_async(self, echo: bytes):
         def respond():
             if self.echo_input:
-                self._emit(type=pb.ATTACH_EVENT_TYPE_OUTPUT, payload=request.data)
+                self._emit(type=pb.ATTACH_EVENT_TYPE_OUTPUT, payload=echo)
             for block in self.thinking:
                 self._emit(type=pb.ATTACH_EVENT_TYPE_THINKING, thinking_text=block)
                 time.sleep(0.05)
@@ -86,6 +75,29 @@ class FakeBridge(pb_grpc.BridgeServiceServicer):
                 self._emit(type=pb.ATTACH_EVENT_TYPE_SESSION_EXIT, exit_code=0)
 
         threading.Thread(target=respond, daemon=True).start()
+
+    def AttachSession(self, request, context):
+        # The real server sends ATTACHED on attach and only then replays
+        # buffered events, so it always arrives first even when the provider
+        # already produced output (a non-interactive provider does).
+        if self.attach_error:
+            yield pb.AttachSessionEvent(type=pb.ATTACH_EVENT_TYPE_ERROR, error=self.attach_error)
+            return
+        yield pb.AttachSessionEvent(
+            type=pb.ATTACH_EVENT_TYPE_ATTACHED, session_id=request.session_id
+        )
+        while context.is_active():
+            try:
+                event = self._events.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if event is None:
+                return
+            yield event
+
+    def WriteInput(self, request, context):
+        self.inputs.append(request.data)
+        self._respond_async(request.data)
         return pb.WriteInputResponse(accepted=True, bytes_written=len(request.data))
 
     def StopSession(self, request, context):

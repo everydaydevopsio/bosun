@@ -115,16 +115,19 @@ This is the difference between a usable review and a wall of noise.
 
 | Provider | Transport | Usable for reviews |
 | --- | --- | --- |
+| `codex-exec` | `codex exec`, no PTY | **yes** — Bosun-defined, see below |
 | `opencode` | stream-JSON server | **yes** — structured text, emits THINKING |
 | `codex` | full-screen PTY TUI | no |
 | `claude` | PTY stdio | marginal |
 | `gemini` | PTY | no |
 | `echo` | PTY | test only |
 
-`codex` renders a full-screen terminal interface. Its PTY stream is *screen
-repaints*, not an answer, so scraping it yields box-drawing frames and repeated
-prompt echoes. A verified run against a two-file repository returned 24 KB that
-looked like this once ANSI codes were stripped:
+### codex
+
+The packaged `codex` provider runs Codex's interactive TUI under a PTY, so its
+stream is *screen repaints* rather than an answer. A verified run against a
+two-file repository returned 24 KB that looked like this once ANSI codes were
+stripped:
 
 ```
 ╭───────────────────────────────────────╮│ >_ OpenAI Codex (v0.155.1)  ...
@@ -145,10 +148,51 @@ anyway — useful when inspecting what a TUI provider actually emits — set
 `BOSUN_ALLOW_TUI_OUTPUT=true`; the review is then posted verbatim, repaints and
 all.
 
+That is a property of the *provider definition*, not of Codex. Codex has a
+non-interactive mode, and Bosun ships a provider that uses it.
+
+### codex-exec
+
+`config/bridge-bosun.yaml` defines a second Codex provider, merged into
+bridgectl's packaged set by `bridgectl server start --config`:
+
+```yaml
+providers:
+  codex-exec:
+    binary: "node"
+    args: ["./node_modules/@openai/codex/bin/codex.js", "exec",
+           "--skip-git-repo-check", "--color", "never", "--sandbox", "read-only"]
+    startup_probe: "none"
+    stream_json: true
+```
+
+Three pieces make this work:
+
+1. **`codex exec` is non-interactive.** It takes the prompt as an argument,
+   writes plain text to stdout, and exits — no terminal to repaint.
+2. **`stream_json: true` opts out of PTY allocation** (bridgectl's config
+   validation says so explicitly). The supervisor then reads stdout line by
+   line; any line that is not an Anthropic-shaped stream event is forwarded
+   verbatim as an output chunk, which is exactly what `codex exec` emits.
+3. **`agent_opts` carries the prompt.** `StdioProvider.BuildCommand` appends
+   every session option whose key starts with `arg:` to the command line, so
+   Bosun passes `{"arg:prompt": prompt}` in `StartSessionRequest` instead of
+   calling `WriteInput`. Pass only one — bridgectl ranges over a Go map, so the
+   order of several is undefined.
+
+Because the process exits when it is done, the review ends on a real
+`SESSION_EXIT` event rather than an idle timeout, and `--sandbox read-only`
+keeps a reviewer from modifying the code it is reviewing.
+
+Auth needs no special handling: `bosun/credentials.py` writes `CODEX_AUTH` to
+`~/.codex/auth.json`, which is where `codex exec` looks.
+
+`BOSUN_PROMPT_ARG_PROVIDERS` (default `codex-exec`) selects which providers get
+the prompt on the command line.
+
 Upstream also defines a `claude-chat` provider — `claude --output-format
 stream-json --verbose`, no PTY, emitting text and thinking deltas — but v1.3.0
-does not register it, so `opencode` is the only structured provider available
-today.
+does not register it.
 
 ### Output is raw PTY text
 

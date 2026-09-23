@@ -12,6 +12,7 @@ RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt -r r
 COPY bosun ./bosun
 COPY prompts ./prompts
 COPY proto ./proto
+COPY config ./config
 COPY scripts/gen-proto.sh ./scripts/gen-proto.sh
 
 # Generate the gRPC stubs Bosun uses to drive bridgectl, then drop the

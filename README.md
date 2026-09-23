@@ -53,9 +53,10 @@ needs to be exported by hand.
 
 The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See [docs/local-development.md](docs/local-development.md).
 
-Choose a provider that emits structured output — `opencode` today. `codex`
-renders a full-screen terminal UI and Bosun rejects its output rather than post
-screen repaints to a pull request. See [docs/bridgectl.md](docs/bridgectl.md#choosing-a-provider).
+Use `codex-exec` (or `opencode`). The packaged `codex` provider runs Codex's
+interactive TUI, so its output is screen repaints and Bosun rejects it rather
+than post that to a pull request; `codex-exec` runs `codex exec` headless
+instead. See [docs/bridgectl.md](docs/bridgectl.md#choosing-a-provider).
 
 ## Quick start
 
