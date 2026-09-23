@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bosun.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: bosun }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bosun }
+    spec:
+      serviceAccountName: {{ include "bosun.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.runAsUser }}
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: bosun
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - containerPort: 8080
+          env:
+            - name: BOSUN_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: BOSUN_REVIEW_PROVIDER
+              value: {{ .Values.review.provider | quote }}
+            - name: BOSUN_REVIEW_IMAGE
+              value: {{ .Values.review.image | quote }}
+            - name: BOSUN_JOB_TTL_SECONDS
+              value: {{ .Values.review.ttlSecondsAfterFinished | quote }}
+            - name: BOSUN_RUN_AS_USER
+              value: {{ .Values.securityContext.runAsUser | quote }}
+            - name: BOSUN_ALLOWED_ASSOCIATIONS
+              value: {{ .Values.review.allowedAssociations | quote }}
+            - name: BOSUN_MAX_CONCURRENT_REVIEWS
+              value: {{ .Values.review.maxConcurrent | quote }}
+            - name: BOSUN_REVIEW_TIMEOUT_SECONDS
+              value: {{ .Values.review.timeoutSeconds | quote }}
+            - name: BOSUN_LOG_FORMAT
+              value: {{ .Values.logging.format | quote }}
+            - name: BOSUN_LOG_LEVEL
+              value: {{ .Values.logging.level | quote }}
+            - name: BOSUN_GITHUB_TOKEN_SECRET
+              value: {{ .Values.secrets.githubSecretName | quote }}
+            - name: BOSUN_AI_SECRET
+              value: {{ .Values.secrets.aiSecretName | quote }}
+{{- if not .Values.development.enabled }}
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.webhookSecretName }}
+                  key: secret
+{{- else }}
+            # Development mode has no webhook secret. Signature verification
+            # fails closed, so the webhook endpoint rejects every delivery and
+            # reviews are driven locally by scripts/review-local.sh instead.
+{{- end }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+{{ toYaml .Values.resources | indent 12 }}

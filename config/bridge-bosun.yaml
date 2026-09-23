@@ -1,0 +1,30 @@
+# Extra bridgectl providers for Bosun. Merged with bridgectl's packaged
+# providers by `bridgectl server start --config`.
+#
+# The packaged `codex` provider runs the interactive Codex TUI under a PTY, so
+# its output stream is screen repaints rather than an answer. `codex exec` is
+# Codex's non-interactive mode: it takes the prompt as an argument, writes plain
+# text to stdout, and exits when it is done.
+#
+# `stream_json: true` opts the provider out of PTY allocation. The supervisor
+# then reads stdout line by line and forwards any line that is not an
+# Anthropic-shaped stream event as a raw output chunk — which is exactly what
+# `codex exec` produces.
+#
+# Auth comes from $CODEX_HOME/auth.json, which bosun/credentials.py writes from
+# the CODEX_AUTH secret, so no provider-specific auth handling is needed.
+providers:
+  codex-exec:
+    binary: "node"
+    args:
+      - "./node_modules/@openai/codex/bin/codex.js"
+      - "exec"
+      - "--skip-git-repo-check"
+      - "--color"
+      - "never"
+      - "--sandbox"
+      - "read-only"
+    startup_timeout: "120s"
+    validate_startup: false
+    startup_probe: "none"
+    stream_json: true

@@ -1,0 +1,60 @@
+image:
+  repository: ghcr.io/everydaydevopsio/bosun
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+review:
+  provider: codex
+  image: ghcr.io/everydaydevopsio/bosun:latest
+  ttlSecondsAfterFinished: 3600
+  # Comment authors permitted to spend model credits with "@bridgectl review".
+  allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
+  # Reviews allowed to run at once. Further requests are rejected with 503
+  # rather than queued, so a busy org cannot exhaust the cluster.
+  maxConcurrent: 3
+  # How long one review may run. The Job deadline is derived from this.
+  timeoutSeconds: 1800
+
+logging:
+  # text (slog-style key=value) or json
+  format: text
+  level: info
+
+securityContext:
+  # UID of the "bridge" user in the bridgectl base image.
+  runAsUser: 1001
+
+secrets:
+  # Create these out-of-band. Never commit values here.
+  githubSecretName: bosun-github
+  aiSecretName: bosun-ai
+  webhookSecretName: bosun-webhook
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: nginx
+  host: bosun.example.com
+  tlsSecretName: bosun-tls
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+networkPolicy:
+  # Restricts reviewer Jobs to DNS and HTTPS so a prompt-injected agent cannot
+  # reach other workloads in the cluster.
+  enabled: false
+
+development:
+  # Enables installation without GitHub/webhook secrets. Local reviews are
+  # launched directly as Kubernetes Jobs by scripts/review-local.sh.
+  enabled: false

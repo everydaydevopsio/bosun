@@ -1,0 +1,310 @@
+syntax = "proto3";
+
+package bridge.v1;
+
+option go_package = "github.com/orchael/bridgectl/gen/bridge/v1;bridgev1";
+
+import "google/protobuf/timestamp.proto";
+
+service BridgeService {
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  rpc AttachSession(AttachSessionRequest) returns (stream AttachSessionEvent);
+  rpc WriteInput(WriteInputRequest) returns (WriteInputResponse);
+  rpc ResizeSession(ResizeSessionRequest) returns (ResizeSessionResponse);
+
+  // ClaimWriter promotes the caller from OBSERVER to WRITER, taking the active
+  // writer slot. Returns ErrWriterConflict (ALREADY_EXISTS) when another client
+  // already holds the slot.
+  rpc ClaimWriter(ClaimWriterRequest) returns (ClaimWriterResponse);
+  // ReleaseWriter demotes the caller from WRITER to OBSERVER, freeing the slot
+  // so another client can claim it.
+  rpc ReleaseWriter(ReleaseWriterRequest) returns (ReleaseWriterResponse);
+
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+
+  // RegisterJWTKey enrolls a client's Ed25519 public key for JWT authentication.
+  // Requires a valid mTLS peer certificate; JWT auth is not required (the mTLS
+  // certificate itself authorizes the enrollment). After registration, the client
+  // can mint JWT tokens signed with the corresponding private key.
+  rpc RegisterJWTKey(RegisterJWTKeyRequest) returns (RegisterJWTKeyResponse);
+
+  // EnrollClient bootstraps a new client identity using a one-time enrollment
+  // token. JWT auth is not required for this RPC. In mTLS mode, the TLS
+  // handshake still requires a client certificate; this RPC is reachable
+  // without a client cert only when the server runs in TLS mode. The
+  // enrollment token provides application-level authorization.
+  rpc EnrollClient(EnrollClientRequest) returns (EnrollClientResponse);
+}
+
+// TelemetryCollectorService durably transfers immutable, bounded JSONL
+// segments. It is intentionally separate from BridgeService so the collector
+// can run as an independently secured and scaled process.
+service TelemetryCollectorService {
+  rpc StreamSegments(stream TelemetrySegment) returns (stream TelemetryAck);
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_STARTING = 1;
+  SESSION_STATUS_RUNNING = 2;
+  SESSION_STATUS_ATTACHED = 3;
+  SESSION_STATUS_STOPPING = 4;
+  SESSION_STATUS_STOPPED = 5;
+  SESSION_STATUS_FAILED = 6;
+}
+
+// AttachRole controls whether the connecting client can send input to the
+// session (WRITER) or only observe the output stream (OBSERVER).
+enum AttachRole {
+  ATTACH_ROLE_UNSPECIFIED = 0;
+  // ATTACH_ROLE_WRITER requests the active-writer slot. The server rejects the
+  // attach with ALREADY_EXISTS when another client already holds the slot.
+  ATTACH_ROLE_WRITER = 1;
+  // ATTACH_ROLE_OBSERVER attaches read-only. The client receives all output
+  // events but WriteInput / ResizeSession calls are rejected.
+  ATTACH_ROLE_OBSERVER = 2;
+}
+
+enum AttachEventType {
+  ATTACH_EVENT_TYPE_UNSPECIFIED = 0;
+  ATTACH_EVENT_TYPE_ATTACHED = 1;
+  ATTACH_EVENT_TYPE_OUTPUT = 2;
+  ATTACH_EVENT_TYPE_REPLAY_GAP = 3;
+  ATTACH_EVENT_TYPE_SESSION_EXIT = 4;
+  ATTACH_EVENT_TYPE_ERROR = 5;
+  // ATTACH_EVENT_TYPE_THINKING carries a thinking block emitted by an agent
+  // before its final response. Only emitted by stream-JSON providers (issue #1).
+  ATTACH_EVENT_TYPE_THINKING = 6;
+  // ATTACH_EVENT_TYPE_WRITER_CLAIMED is sent to all observers when a client
+  // claims the active-writer slot.
+  ATTACH_EVENT_TYPE_WRITER_CLAIMED = 7;
+  // ATTACH_EVENT_TYPE_WRITER_RELEASED is sent to all observers when the active
+  // writer releases the slot.
+  ATTACH_EVENT_TYPE_WRITER_RELEASED = 8;
+}
+
+message StartSessionRequest {
+  string project_id = 1;
+  string session_id = 2;
+  string repo_path = 3;
+  string provider = 4;
+  map<string, string> agent_opts = 5;
+  uint32 initial_cols = 6;
+  uint32 initial_rows = 7;
+}
+
+message StartSessionResponse {
+  string session_id = 1;
+  SessionStatus status = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message StopSessionRequest {
+  string session_id = 1;
+  bool force = 2;
+}
+
+message StopSessionResponse {
+  SessionStatus status = 1;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  string session_id = 1;
+  string project_id = 2;
+  string provider = 3;
+  SessionStatus status = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp stopped_at = 6;
+  string error = 7;
+  bool attached = 8;
+  string attached_client_id = 9;
+  bool exit_recorded = 10;
+  int32 exit_code = 11;
+  uint64 oldest_seq = 12;
+  uint64 last_seq = 13;
+  uint32 cols = 14;
+  uint32 rows = 15;
+  // active_writer_client_id is the client currently holding the writer slot,
+  // or empty when no writer is attached.
+  string active_writer_client_id = 16;
+  // observer_count is the number of read-only observers currently attached.
+  int32 observer_count = 17;
+  // repo_path is the working directory the agent session is running in.
+  string repo_path = 18;
+}
+
+message ListSessionsRequest {
+  string project_id = 1;
+}
+
+message ListSessionsResponse {
+  repeated GetSessionResponse sessions = 1;
+}
+
+message AttachSessionRequest {
+  string session_id = 1;
+  uint64 after_seq = 2;
+  string client_id = 3;
+  // role controls whether this client attaches as a writer or observer.
+  // Defaults to ATTACH_ROLE_WRITER for backwards compatibility.
+  AttachRole role = 4;
+}
+
+message AttachSessionEvent {
+  AttachEventType type = 1;
+  uint64 seq = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string session_id = 4;
+  bytes payload = 5;
+  bool replay = 6;
+  uint64 oldest_seq = 7;
+  uint64 last_seq = 8;
+  bool exit_recorded = 9;
+  int32 exit_code = 10;
+  string error = 11;
+  uint32 cols = 12;
+  uint32 rows = 13;
+  // thinking_text is set when type == ATTACH_EVENT_TYPE_THINKING (issue #1).
+  string thinking_text = 14;
+  // writer_client_id is set on WRITER_CLAIMED / WRITER_RELEASED events to
+  // identify which client claimed or released the writer slot.
+  string writer_client_id = 15;
+}
+
+message WriteInputRequest {
+  string session_id = 1;
+  string client_id = 2;
+  bytes data = 3;
+}
+
+message WriteInputResponse {
+  bool accepted = 1;
+  uint32 bytes_written = 2;
+}
+
+message ResizeSessionRequest {
+  string session_id = 1;
+  string client_id = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message ResizeSessionResponse {
+  bool applied = 1;
+}
+
+message ClaimWriterRequest {
+  string session_id = 1;
+  string client_id = 2;
+  // force, when true, evicts the current writer rather than returning
+  // ALREADY_EXISTS. The evicted writer receives a WRITER_RELEASED event.
+  bool force = 3;
+}
+
+message ClaimWriterResponse {
+  // claimed is true when the caller now holds the writer slot.
+  bool claimed = 1;
+  // previous_writer_client_id is set when force evicted another writer.
+  string previous_writer_client_id = 2;
+}
+
+message ReleaseWriterRequest {
+  string session_id = 1;
+  string client_id = 2;
+}
+
+message ReleaseWriterResponse {
+  // released is true when the caller successfully released the writer slot.
+  bool released = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  repeated ProviderHealth providers = 2;
+  // server_instance_id is a UUID generated once at daemon startup.
+  // Clients can compare this value across Health calls to detect a daemon
+  // restart (a changed ID means the process restarted and all in-memory
+  // session state has been lost).
+  string server_instance_id = 3;
+}
+
+message ProviderHealth {
+  string provider = 1;
+  bool available = 2;
+  string error = 3;
+}
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  repeated ProviderInfo providers = 1;
+}
+
+message ProviderInfo {
+  string provider = 1;
+  bool available = 2;
+  string binary = 3;
+  string version = 4;
+}
+
+message RegisterJWTKeyRequest {
+  // PKIX DER-encoded Ed25519 public key.
+  bytes public_key = 1;
+  // Issuer name for JWT tokens. If empty, defaults to the mTLS peer
+  // certificate's Common Name.
+  string issuer = 2;
+}
+
+message RegisterJWTKeyResponse {
+  // The issuer name that was registered (may differ from the request if
+  // the server defaulted to the mTLS CN).
+  string issuer = 1;
+  string message = 2;
+}
+
+message EnrollClientRequest {
+  // One-time enrollment token (e.g. "brg_enroll_...").
+  string token = 1;
+  // PKCS#10 DER-encoded Certificate Signing Request.
+  bytes csr = 2;
+  // PKIX DER-encoded Ed25519 public key for JWT authentication.
+  // Registered as a JWT issuer upon successful enrollment.
+  bytes jwt_public_key = 3;
+}
+
+message EnrollClientResponse {
+  // PEM-encoded certificate chain issued to the client.
+  bytes certificate = 1;
+  // PEM-encoded CA trust bundle for verifying server certificates.
+  bytes ca_bundle = 2;
+  // JWT issuer name assigned to this client.
+  string issuer = 3;
+  // Certificate Common Name (identity).
+  string identity = 4;
+  // Certificate expiry.
+  google.protobuf.Timestamp expires = 5;
+}
+
+message TelemetrySegment {
+  // id is stable across retries and becomes the collector/S3 object identity.
+  string id = 1;
+  // jsonl contains normalized, redacted schema-v1 or schema-v2 telemetry events.
+  bytes jsonl = 2;
+}
+
+message TelemetryAck {
+  string id = 1;
+  // stored is true for a new segment and false for an idempotent replay.
+  bool stored = 2;
+}

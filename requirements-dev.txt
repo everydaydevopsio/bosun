@@ -1,0 +1,4 @@
+# Build/test-only: generates bosun/gen from proto/bridge/v1/bridge.proto.
+grpcio-tools==1.76.0
+# fastapi.testclient (via starlette) needs httpx.
+httpx==0.28.1
