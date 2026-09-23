@@ -7,17 +7,55 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_WEBHOOK_SECRET: test-only
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Generate gRPC stubs
+        run: ./scripts/gen-proto.sh
       - run: python -m unittest discover -s tests -v
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
       - uses: azure/setup-helm@v4
       - run: helm lint charts/bosun
-      - run: helm template bosun charts/bosun --set development.enabled=true >/tmp/bosun-dev.yaml
-      - run: grep -q 'local-development-only' /tmp/bosun-dev.yaml
-      - run: docker build -t bosun:test .
+      - name: Render production values
+        run: helm template bosun charts/bosun --set ingress.enabled=true > /tmp/bosun-prod.yaml
+      - name: Production mode mounts the webhook secret
+        run: grep -q 'secretKeyRef' /tmp/bosun-prod.yaml
+      - name: Render development values
+        run: helm template bosun charts/bosun --set development.enabled=true > /tmp/bosun-dev.yaml
+      - name: Development mode installs without a webhook secret
+        run: |
+          grep -q 'name: bosun-bosun' /tmp/bosun-dev.yaml
+          ! grep -q 'GITHUB_WEBHOOK_SECRET' /tmp/bosun-dev.yaml
+      - name: Reviewer Jobs can be locked down
+        run: |
+          helm template bosun charts/bosun --set networkPolicy.enabled=true \
+            | grep -q 'kind: NetworkPolicy'
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scripts are executable
+        run: |
+          for f in scripts/*.sh; do
+            [ -x "$f" ] || { echo "$f is not executable"; exit 1; }
+          done
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: shellcheck -S warning scripts/*.sh
+      - run: bash -n scripts/*.sh
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build -t bosun:test .
+      - name: Stubs are generated into the image
+        run: docker run --rm bosun:test python3 -c "from bosun.client import pb; print(pb.DESCRIPTOR.name)"
