@@ -4,12 +4,19 @@ Bosun receives GitHub webhooks and creates one Kubernetes Job per review. Each J
 
 ## 1. Build and publish the image
 
+The bridgectl base image publishes no `latest` tag, so pin the version you run.
+See [bridgectl.md](bridgectl.md) for details.
+
 ```bash
-docker build -t ghcr.io/YOUR_ORG/bosun:0.1.0 .
+docker build --build-arg BRIDGECTL_VERSION="$(bridgectl --version | awk '{print $NF}')" \
+  -t ghcr.io/YOUR_ORG/bosun:0.1.0 .
 docker push ghcr.io/YOUR_ORG/bosun:0.1.0
 ```
 
 Set both `image.repository/tag` and `review.image` to that image.
+
+Tagging a release (`v0.1.0`) runs `.github/workflows/publish.yml`, which builds
+and pushes the image and the packaged chart for you.
 
 ## 2. Create credentials
 
@@ -20,6 +27,8 @@ openssl rand -hex 32
 ```
 
 For this first implementation, create a fine-grained GitHub token scoped only to repositories Bosun reviews. It needs **Contents: read** and **Pull requests: read/write**. Store it in Kubernetes rather than Helm values.
+
+The token is used only by Bosun's own worker process. It is passed to `git` through `GIT_ASKPASS`, so it is never written into the reviewed workspace's `.git/config`, and it is stripped from the environment handed to the AI provider.
 
 For Codex/OpenCode:
 
@@ -80,9 +89,20 @@ Bosun verifies `X-Hub-Signature-256` before accepting an event.
 A review starts when:
 - a branch is created;
 - a PR is opened, reopened, synchronized, or marked ready for review; or
-- someone comments `@bridgectl review` on a PR discussion or review comment.
+- an owner, member, or collaborator comments `@bridgectl review` on a pull request.
 
 Comment-triggered reviews resolve the current PR head at execution time.
+
+Comments from bots are ignored, and comments on plain issues are ignored. Widen
+or narrow who may spend model credits with `review.allowedAssociations`:
+
+```yaml
+review:
+  allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
+```
+
+Retried deliveries map to the same Job name, so GitHub's redeliveries do not
+queue duplicate reviews.
 
 ## 5. Verify
 
@@ -99,6 +119,10 @@ Branch-created reviews have no PR thread to post to, so their initial output is 
 
 ## Security notes
 
-The webhook Deployment can create Jobs only in its namespace. Review Jobs do not mount a Kubernetes service-account token, drop Linux capabilities, have bounded resources and runtime, and are automatically removed after the configured TTL.
+The webhook Deployment can create Jobs only in its namespace. Both the webhook and the review Jobs run as the unprivileged `bridge` user (UID 1001) with `runAsNonRoot`. Review Jobs do not mount a Kubernetes service-account token, drop Linux capabilities, have bounded resources and runtime, and are automatically removed after the configured TTL.
 
-Treat reviewed repositories as untrusted input. The AI is instructed not to modify code, but it can inspect repository text that contains prompt injection. For stronger isolation, add NetworkPolicies, a read-only clone handoff, dedicated review nodes/runtime class, and per-installation GitHub App credentials. A GitHub App is preferable to a long-lived token for a production installation.
+Webhook signature verification fails closed: if `GITHUB_WEBHOOK_SECRET` is unset, every delivery is rejected rather than validated against an empty key.
+
+Enable `networkPolicy.enabled=true` to restrict reviewer Jobs to DNS and outbound HTTPS, so a prompt-injected agent cannot reach other workloads in the cluster.
+
+Treat reviewed repositories as untrusted input. The AI is instructed not to modify code, but it can inspect repository text that contains prompt injection. Bosun keeps the GitHub token out of the agent's environment and out of the workspace, but the provider credential is necessarily present. For stronger isolation, enable the NetworkPolicy, add a read-only clone handoff, use dedicated review nodes or a sandboxed runtime class, and move to per-installation GitHub App credentials. A GitHub App is preferable to a long-lived token for a production installation, and Bosun supports one today — see [github-app.md](github-app.md).
