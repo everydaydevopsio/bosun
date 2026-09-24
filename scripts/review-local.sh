@@ -40,7 +40,7 @@ spec:
         - name: reviewer
           image: ${BOSUN_DEV_IMAGE:-bosun:dev}
           imagePullPolicy: IfNotPresent
-          command: ["python3", "-m", "bosun.worker"]
+          command: ["/usr/local/bin/bosun", "reviewer"]
           env:
             - {name: BOSUN_LOCAL_PATH, value: "/repos/$ID"}
             - {name: BOSUN_REPO, value: "$NAME"}
