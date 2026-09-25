@@ -1,9 +1,6 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-VENV := .venv
-PY := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
 AWS_SECRET ?= /ai-desktops/markcallen/agents
 BRIDGECTL_VERSION ?= v1.3.0
 DEV_IMAGE ?= bosun:dev
@@ -37,13 +34,7 @@ deps: ## Install the tools needed for development
 	@command -v aws >/dev/null || { echo "aws CLI is required for env-secrets" >&2; exit 1; }
 	@echo "All development tools present."
 
-$(VENV)/bin/activate: requirements.txt requirements-dev.txt
-	python3 -m venv $(VENV)
-	$(PIP) install --quiet --upgrade pip
-	$(PIP) install --quiet -r requirements.txt -r requirements-dev.txt
-	@touch $@
-
-setup: deps $(VENV)/bin/activate proto ## Prepare the local shell environment
+setup: deps ## Prepare the local shell environment
 	@set -euo pipefail; \
 	echo "Writing agent credentials to .env from $(AWS_SECRET)"; \
 	env-secrets aws -s "$(AWS_SECRET)" -o .env >/dev/null; \
@@ -58,15 +49,16 @@ setup: deps $(VENV)/bin/activate proto ## Prepare the local shell environment
 env: ## Refresh .env from AWS Secrets Manager
 	@env-secrets aws -s "$(AWS_SECRET)" -o .env >/dev/null && chmod 600 .env && echo "Refreshed .env"
 
-proto: ## Generate the bridgectl gRPC stubs
-	@PATH="$(PWD)/$(VENV)/bin:$$PATH" ./scripts/gen-proto.sh
+proto: ## Regenerate Go gRPC bindings (requires protoc and plugins in GOPATH/bin)
+	@PATH="$$(go env GOPATH)/bin:$$PATH" protoc --go_out=. --go_opt=module=github.com/everydaydevopsio/bosun --go_opt=Mproto/bridge/v1/bridge.proto=github.com/everydaydevopsio/bosun/internal/bridgev1 --go-grpc_out=. --go-grpc_opt=module=github.com/everydaydevopsio/bosun --go-grpc_opt=Mproto/bridge/v1/bridge.proto=github.com/everydaydevopsio/bosun/internal/bridgev1 proto/bridge/v1/bridge.proto
 
 ## ---------------------------------------------------------------- checks
 
-test: proto ## Run the test suite
-	$(PY) -m unittest discover -s tests -v
+test: ## Run the Go test suite
+	go test ./...
 
 lint: ## Lint shell scripts and the Helm chart
+	gofmt -d $$(find cmd internal -name '*.go') | (! grep .)
 	shellcheck -S warning scripts/*.sh
 	helm lint charts/bosun
 	helm template bosun charts/bosun --set ingress.enabled=true >/dev/null
@@ -88,5 +80,4 @@ review: ## Review a repository locally (REPO=/path/to/repo)
 	./scripts/review-local.sh $(REPO)
 
 clean: ## Remove generated files
-	rm -rf $(VENV) bosun/gen .env
-	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+	go clean -testcache
