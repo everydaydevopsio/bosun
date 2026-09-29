@@ -36,6 +36,8 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: false
       securityContext:
+        runAsUser: 1001
+        runAsNonRoot: true
         runAsGroup: $(id -g)
       containers:
         - name: reviewer
