@@ -3,6 +3,9 @@ kind: Role
 metadata:
   name: {{ include "bosun.fullname" . }}
 rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "get", "update"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch"]

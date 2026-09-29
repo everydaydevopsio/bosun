@@ -78,7 +78,10 @@ Or review the current directory:
 ./scripts/review-local.sh .
 ```
 
-The script snapshots the selected repository into Kind's mounted development area, including its `.git` directory and current uncommitted changes. It creates a one-shot reviewer Job, waits for it to succeed or fail, prints the review to your terminal, and exits non-zero if the Job failed — so a calling agent can tell a failed run from a clean review.
+The script creates a self-contained Git snapshot in Kind's mounted development area, including linked worktrees, default-branch refs, staged changes, unstaged changes, and untracked files. `.env` is excluded. It creates a one-shot reviewer Job, waits for it to succeed or fail, prints the review to your terminal, and exits non-zero if the Job failed.
+
+Setup and review commands explicitly select `kind-bosun` (or
+`kind-$BOSUN_KIND_CLUSTER`). They do not use your active Kubernetes context.
 
 This means a coding agent can trigger Bosun locally with:
 
@@ -90,16 +93,13 @@ The repository does not need a GitHub remote. Bosun does not push, commit, or mo
 
 ## Tuning the session
 
-The reviewer holds bridgectl's stdin open until the provider's output goes quiet.
-Two environment variables on the Job control that:
-
-- `BOSUN_REVIEW_IDLE_SECONDS` (default 90) — quiet period that ends the session.
-- `BOSUN_REVIEW_MAX_SECONDS` (default 1500) — hard cap on a single review.
-
-Lower both when iterating with the credential-free `echo` provider:
+The headless provider exits when it finishes. The review only succeeds after
+a successful session exit; partial output and deadlines count as failures.
+`BOSUN_REVIEW_TIMEOUT_SECONDS` (default 1800) limits the review, and the Job's
+deadline includes an additional 120 seconds for startup:
 
 ```bash
-BOSUN_REVIEW_PROVIDER=echo ./scripts/review-local.sh .
+BOSUN_REVIEW_TIMEOUT_SECONDS=600 ./scripts/review-local.sh .
 ```
 
 ## Inspecting a run

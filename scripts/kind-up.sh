@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CLUSTER="${BOSUN_KIND_CLUSTER:-bosun}"
+CONTEXT="kind-$CLUSTER"
 IMAGE="${BOSUN_DEV_IMAGE:-bosun:dev}"
 PROVIDER="${BOSUN_REVIEW_PROVIDER:-codex-exec}"
 
@@ -19,7 +20,7 @@ if [ "${BOSUN_SKIP_BUILD:-}" != "1" ]; then
   kind load docker-image "$IMAGE" --name "$CLUSTER"
 fi
 
-kubectl create namespace bosun --dry-run=client -o yaml | kubectl apply -f -
+kubectl --context "$CONTEXT" create namespace bosun --dry-run=client -o yaml | kubectl --context "$CONTEXT" apply -f -
 
 # Publish whichever provider credentials are present. Each is optional in the
 # Job spec, so a partial secret is fine as long as the selected provider's key
@@ -41,8 +42,8 @@ if [ "${#SECRET_ARGS[@]}" -eq 0 ]; then
   exit 2
 fi
 
-kubectl -n bosun create secret generic bosun-ai "${SECRET_ARGS[@]}" \
-  --dry-run=client -o yaml | kubectl apply -f -
+kubectl --context "$CONTEXT" -n bosun create secret generic bosun-ai "${SECRET_ARGS[@]}" \
+  --dry-run=client -o yaml | kubectl --context "$CONTEXT" apply -f -
 
 case "$PROVIDER" in
   codex|codex-exec)
@@ -57,7 +58,7 @@ case "$PROVIDER" in
     [ -n "${GEMINI_API_KEY:-}" ] || { echo "provider gemini needs GEMINI_API_KEY" >&2; exit 2; } ;;
 esac
 
-helm upgrade --install bosun ./charts/bosun -n bosun \
+helm --kube-context "$CONTEXT" upgrade --install bosun ./charts/bosun -n bosun \
   --set image.repository=bosun \
   --set image.tag=dev \
   --set image.pullPolicy=IfNotPresent \
@@ -65,7 +66,9 @@ helm upgrade --install bosun ./charts/bosun -n bosun \
   --set review.provider="$PROVIDER" \
   --set development.enabled=true
 
-kubectl -n bosun rollout status deployment/bosun-bosun --timeout=180s
+# A reused development image tag does not change the Deployment template.
+kubectl --context "$CONTEXT" -n bosun rollout restart deployment/bosun-bosun
+kubectl --context "$CONTEXT" -n bosun rollout status deployment/bosun-bosun --timeout=180s
 
 echo "Bosun Kind environment is ready (provider: $PROVIDER)."
 echo "Trigger a review with: ./scripts/review-local.sh /path/to/git/repo"

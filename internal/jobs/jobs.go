@@ -53,6 +53,10 @@ func last(s string) string {
 	return s
 }
 
+func repositoryLabel(repo string) string {
+	return Name(repo, "repository", repo)
+}
+
 func Active(ctx context.Context, client kubernetes.Interface, namespace string) (int, error) {
 	list, err := client.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=bosun"})
 	if err != nil {
@@ -67,6 +71,18 @@ func Active(ctx context.Context, client kubernetes.Interface, namespace string) 
 	return n, nil
 }
 func Submit(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string) (string, error) {
+	return withAdmission(ctx, client, cfg.Namespace, func(ctx context.Context) (string, error) {
+		return submitLocked(ctx, client, cfg, req, delivery)
+	})
+}
+
+func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string) (string, error) {
+	name := Name(req.Repo, req.Ref, delivery)
+	if _, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
+		return "", ExistsError{name}
+	} else if !errors.IsNotFound(err) {
+		return "", err
+	}
 	n, err := Active(ctx, client, cfg.Namespace)
 	if err != nil {
 		return "", err
@@ -74,7 +90,6 @@ func Submit(ctx context.Context, client kubernetes.Interface, cfg config.Config,
 	if n >= cfg.MaxConcurrentReviews {
 		return "", CapacityError{n, cfg.MaxConcurrentReviews}
 	}
-	name := Name(req.Repo, req.Ref, delivery)
 	job := build(cfg, req, name)
 	_, err = client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
@@ -96,11 +111,11 @@ func env(cfg config.Config, req review.Request) []corev1.EnvVar {
 func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
 	deadline := cfg.ReviewTimeoutSeconds + 120
 	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"app.kubernetes.io/managed-by": "bosun"}},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"app.kubernetes.io/managed-by": "bosun"}, Annotations: map[string]string{"bosun/repository": req.Repo}},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: ptr(int32(0)), TTLSecondsAfterFinished: &cfg.JobTTLSeconds, ActiveDeadlineSeconds: &deadline,
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app.kubernetes.io/name": "bosun-review", "bosun/repository": strings.ReplaceAll(req.Repo, "/", "-")}},
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app.kubernetes.io/name": "bosun-review", "bosun/repository": repositoryLabel(req.Repo)}, Annotations: map[string]string{"bosun/repository": req.Repo}},
 				Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: ptr(false), Containers: []corev1.Container{{
 					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: env(cfg, req),
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), RunAsNonRoot: ptr(true), RunAsUser: &cfg.RunAsUser, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},

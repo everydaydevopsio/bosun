@@ -43,6 +43,7 @@ func connectBridge(ctx context.Context) (*grpc.ClientConn, error) {
 			config = "/app/bosun/config/bridge-bosun.yaml"
 		}
 		cmd := exec.CommandContext(ctx, "bridgectl", "server", "start", "--config", config)
+		cmd.Env = agentEnvironment()
 		if err := cmd.Start(); err != nil {
 			return nil, fmt.Errorf("start bridgectl: %w", err)
 		}
@@ -114,6 +115,9 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 			}
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
 			out.Write(event.Payload)
+			if provider == "codex-exec" && !strings.HasSuffix(string(event.Payload), "\n") {
+				out.WriteByte('\n')
+			}
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT:
 			if event.ExitCode != 0 || event.Error != "" {
 				return "", fmt.Errorf("agent session failed (exit %d): %s", event.ExitCode, event.Error)

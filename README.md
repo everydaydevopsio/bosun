@@ -71,11 +71,11 @@ See [docs/setup.md](docs/setup.md) for exact commands, permissions, Helm values,
 
 ## Operations
 
-- `review.maxConcurrent` (default 3) caps simultaneous reviewer Jobs; further deliveries get a 503 rather than queueing.
+- `review.maxConcurrent` (default 3) caps simultaneous reviewer Jobs; a namespace-scoped Kubernetes Lease serializes admission across replicas, and further deliveries get a 503 when capacity is full.
 - `review.timeoutSeconds` (default 1800) is the single timeout for a review; the Job deadline is derived from it.
 - `logging.format` (`text` or `json`) and `logging.level` mirror bridgectl's slog setup.
 - Production installs should use a GitHub App rather than a PAT — see [docs/github-app.md](docs/github-app.md).
 
 ## Current scope
 
-The first working version posts PR reviews as conversation comments. Branch-created reviews run immediately but remain in Job logs until a PR exists. The next production hardening step is GitHub App authentication plus Checks API output, which removes the long-lived GitHub token and gives branch-only reviews a first-class GitHub surface.
+PR reviews are posted as conversation comments. GitHub App installation tokens are supported, with a PAT fallback. Branch-created reviews remain in Job logs; Checks API output is not implemented yet.
