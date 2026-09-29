@@ -17,7 +17,7 @@ providers:
   codex-exec:
     binary: "node"
     args:
-      - "./node_modules/@openai/codex/bin/codex.js"
+      - "/app/node_modules/@openai/codex/bin/codex.js"
       - "exec"
       - "--skip-git-repo-check"
       - "--color"
