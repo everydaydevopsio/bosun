@@ -11,7 +11,7 @@
 # Anthropic-shaped stream event as a raw output chunk — which is exactly what
 # `codex exec` produces.
 #
-# Auth comes from $CODEX_HOME/auth.json, which bosun/credentials.py writes from
+# Auth comes from $CODEX_HOME/auth.json, which internal/review/credentials.go writes from
 # the CODEX_AUTH secret, so no provider-specific auth handling is needed.
 providers:
   codex-exec:

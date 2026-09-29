@@ -22,7 +22,14 @@ func Run(ctx context.Context, cfg config.Config) error {
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
 		return fmt.Errorf("local review path is not a git repository: %w", err)
 	}
-	prompt := fmt.Sprintf("Review repository %s at %s. Identify correctness, security, and test issues. Do not modify files.", repo, ref)
+	if err := materialiseCredentials(); err != nil {
+		return err
+	}
+	instructions, err := os.ReadFile("/app/bosun/prompts/code-review.md")
+	if err != nil {
+		return fmt.Errorf("read review prompt: %w", err)
+	}
+	prompt := fmt.Sprintf("%s\nRepository: %s\nBranch: %s\n", instructions, repo, ref)
 	output, err := runBridge(ctx, workspace, cfg.ReviewProvider, prompt, time.Duration(cfg.ReviewTimeoutSeconds)*time.Second)
 	if err != nil {
 		return err

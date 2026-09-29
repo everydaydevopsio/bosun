@@ -38,12 +38,22 @@ func bridgeTarget() string {
 func connectBridge(ctx context.Context) (*grpc.ClientConn, error) {
 	target := bridgeTarget()
 	if target == "" {
-		if err := exec.Command("bridgectl", "server", "start").Start(); err != nil {
+		config := os.Getenv("BOSUN_BRIDGE_CONFIG")
+		if config == "" {
+			config = "/app/bosun/config/bridge-bosun.yaml"
+		}
+		cmd := exec.CommandContext(ctx, "bridgectl", "server", "start", "--config", config)
+		if err := cmd.Start(); err != nil {
 			return nil, fmt.Errorf("start bridgectl: %w", err)
 		}
+		go cmd.Wait()
 		deadline := time.Now().Add(30 * time.Second)
 		for target == "" && time.Now().Before(deadline) {
-			time.Sleep(200 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
 			target = bridgeTarget()
 		}
 		if target == "" {
@@ -51,52 +61,73 @@ func connectBridge(ctx context.Context) (*grpc.ClientConn, error) {
 		}
 	}
 	return grpc.DialContext(ctx, target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return net.Dial("unix", strings.TrimPrefix(target, "unix://"))
+		dialer := net.Dialer{}
+		if strings.HasPrefix(target, "unix://") {
+			return dialer.DialContext(ctx, "unix", strings.TrimPrefix(target, "unix://"))
+		}
+		return dialer.DialContext(ctx, "tcp", target)
 	}))
 }
 func runBridge(ctx context.Context, workspace, provider, prompt string, max time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, max)
+	defer cancel()
 	conn, err := connectBridge(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
 	client := bridgev1.NewBridgeServiceClient(conn)
+	return runSession(ctx, client, workspace, provider, prompt)
+}
+
+func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, workspace, provider, prompt string) (string, error) {
 	sessionID, clientID := uuid.NewString(), uuid.NewString()
-	if _, err = client.StartSession(ctx, &bridgev1.StartSessionRequest{ProjectId: "bosun-review", SessionId: sessionID, RepoPath: workspace, Provider: provider, InitialCols: 200, InitialRows: 50}); err != nil {
+	var opts map[string]string
+	if provider == "codex-exec" {
+		opts = map[string]string{"arg:prompt": prompt}
+	}
+	if _, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{ProjectId: "bosun-review", SessionId: sessionID, RepoPath: workspace, Provider: provider, AgentOpts: opts, InitialCols: 200, InitialRows: 50}); err != nil {
 		return "", fmt.Errorf("start bridge session: %w", err)
 	}
-	defer client.StopSession(context.Background(), &bridgev1.StopSessionRequest{SessionId: sessionID})
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		client.StopSession(stopCtx, &bridgev1.StopSessionRequest{SessionId: sessionID, Force: true})
+	}()
 	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{SessionId: sessionID, ClientId: clientID, Role: bridgev1.AttachRole_ATTACH_ROLE_WRITER})
 	if err != nil {
 		return "", fmt.Errorf("attach bridge session: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, max)
-	defer cancel()
 	var out strings.Builder
 	for {
 		event, e := stream.Recv()
 		if e != nil {
-			if out.Len() > 0 {
-				return CleanOutput(out.String()), nil
-			}
-			return "", e
+			return "", fmt.Errorf("review stream ended before successful session exit: %w", e)
 		}
 		switch event.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED:
+			if opts != nil {
+				continue
+			}
 			if _, e = client.WriteInput(ctx, &bridgev1.WriteInputRequest{SessionId: sessionID, ClientId: clientID, Data: append([]byte(prompt), '\n')}); e != nil {
 				return "", e
 			}
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
 			out.Write(event.Payload)
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT:
-			if out.Len() == 0 {
+			if event.ExitCode != 0 || event.Error != "" {
+				return "", fmt.Errorf("agent session failed (exit %d): %s", event.ExitCode, event.Error)
+			}
+			if strings.TrimSpace(out.String()) == "" {
 				return "", fmt.Errorf("agent session produced no output")
 			}
 			return CleanOutput(out.String()), nil
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
+			return "", fmt.Errorf("agent session error: %s", event.Error)
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("review exceeded %s", max)
+			return "", ctx.Err()
 		default:
 		}
 	}

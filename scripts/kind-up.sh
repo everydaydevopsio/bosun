@@ -3,7 +3,7 @@ set -euo pipefail
 
 CLUSTER="${BOSUN_KIND_CLUSTER:-bosun}"
 IMAGE="${BOSUN_DEV_IMAGE:-bosun:dev}"
-PROVIDER="${BOSUN_REVIEW_PROVIDER:-codex}"
+PROVIDER="${BOSUN_REVIEW_PROVIDER:-codex-exec}"
 
 command -v kind >/dev/null || { echo "kind is required" >&2; exit 2; }
 command -v kubectl >/dev/null || { echo "kubectl is required" >&2; exit 2; }
@@ -45,9 +45,9 @@ kubectl -n bosun create secret generic bosun-ai "${SECRET_ARGS[@]}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 case "$PROVIDER" in
-  codex)
+  codex|codex-exec)
     [ -n "${OPENAI_API_KEY:-}${CODEX_AUTH:-}" ] || {
-      echo "provider codex needs OPENAI_API_KEY or CODEX_AUTH" >&2; exit 2; } ;;
+      echo "provider $PROVIDER needs OPENAI_API_KEY or CODEX_AUTH" >&2; exit 2; } ;;
   opencode)
     [ -n "${OPENAI_API_KEY:-}" ] || { echo "provider opencode needs OPENAI_API_KEY" >&2; exit 2; } ;;
   claude)

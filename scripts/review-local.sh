@@ -12,8 +12,10 @@ ID="${NAME}-$(date +%s)"
 DEST="/tmp/bosun-repos/$ID"
 
 mkdir -p "$DEST"
+cleanup() { rm -rf "$DEST"; }
+trap cleanup EXIT
 # Copy the working tree including uncommitted changes and .git metadata.
-tar -C "$REPO" -cf - . | tar -C "$DEST" -xf -
+tar -C "$REPO" --exclude='./.env' -cf - . | tar -C "$DEST" -xf -
 
 JOB="$(kubectl -n bosun create -o name -f - <<EOF
 apiVersion: batch/v1
@@ -41,7 +43,7 @@ spec:
             - {name: BOSUN_REF, value: "$BRANCH"}
             - {name: BOSUN_SHA, value: ""}
             - {name: BOSUN_TRIGGER, value: "local-kind"}
-            - {name: BOSUN_REVIEW_PROVIDER, value: "${BOSUN_REVIEW_PROVIDER:-codex}"}
+            - {name: BOSUN_REVIEW_PROVIDER, value: "${BOSUN_REVIEW_PROVIDER:-codex-exec}"}
             - {name: BOSUN_PR_NUMBER, value: ""}
             - {name: BOSUN_REVIEW_TIMEOUT_SECONDS, value: "$REVIEW_TIMEOUT"}
             - {name: BOSUN_LOG_FORMAT, value: "${BOSUN_LOG_FORMAT:-text}"}
@@ -68,9 +70,6 @@ spec:
           hostPath: {path: /repos, type: Directory}
 EOF
 )"
-
-cleanup() { rm -rf "$DEST"; }
-trap cleanup EXIT
 
 echo "Started $JOB reviewing $REPO ($BRANCH)" >&2
 
