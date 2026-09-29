@@ -42,14 +42,14 @@ Bosun speaks bridgectl's gRPC `BridgeService` directly rather than shelling out:
 For the fastest development loop, Bosun includes a Kind environment that can review any local Git checkout, including uncommitted changes:
 
 ```bash
-make deps && make setup
-source ./scripts/activate.sh
+make setup
+export OPENAI_API_KEY='your-api-key'
+export BOSUN_REVIEW_PROVIDER=codex-exec
 make kind-up
 make review REPO=~/src/project-to-review
 ```
 
-Provider credentials are pulled from AWS Secrets Manager at run time; nothing
-needs to be exported by hand.
+Set provider credentials manually in your shell before starting Kind.
 
 The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See [docs/local-development.md](docs/local-development.md).
 

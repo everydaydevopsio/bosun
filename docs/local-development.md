@@ -4,21 +4,20 @@ You can exercise Bosun's Kubernetes reviewer without configuring GitHub, creatin
 
 ## Requirements
 
-Run `make deps` to install Docker, Kind, kubectl, Helm, shellcheck and
-`env-secrets`, then `make setup` to create the virtualenv, generate the gRPC
-stubs and write `.env`:
+Install Go 1.26 or newer for local builds and tests. Run `make setup` to check
+development tools (Docker, Kind, kubectl, Helm and
+shellcheck), installing missing tools through Homebrew when available.
+Setup does not fetch credentials or write `.env`.
 
 ```bash
-make deps
 make setup
-source ./scripts/activate.sh
 ```
 
-Provider credentials come from AWS Secrets Manager
-(`/ai-desktops/markcallen/agents`, override with `BOSUN_AWS_SECRET`). The
-scripts fetch them per-run through `scripts/with-secrets.sh`, so nothing is
-written to disk unless you ask for it. Set `BOSUN_SKIP_SECRETS=1` to use
-credentials already exported in your shell.
+Configure credentials manually by exporting the variables for your provider
+before `make kind-up`, using the examples below. `make kind-up` copies the
+exported credentials into the local cluster's `bosun-ai` Secret; reviews use
+that Secret without fetching credentials from an external service. After
+changing credentials, run `make kind-up` again to update the cluster.
 
 Recognised credentials:
 
@@ -31,14 +30,14 @@ Recognised credentials:
 | `GEMINI_API_KEY` | gemini | environment variable |
 
 Pick a provider that produces structured output — see
-[bridgectl.md](bridgectl.md#choosing-a-provider). `opencode` is the only one in
-v1.3.0; `codex` renders a terminal UI and its output is rejected.
+[bridgectl.md](bridgectl.md#choosing-a-provider). Use `codex-exec` or `opencode`;
+`codex` renders a terminal UI and its output is rejected.
 
 Codex/OpenCode:
 
 ```bash
 export OPENAI_API_KEY=...
-export BOSUN_REVIEW_PROVIDER=codex
+export BOSUN_REVIEW_PROVIDER=codex-exec
 ```
 
 Claude:

@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"
-
-# Load the agent provider keys from AWS Secrets Manager unless they are already
-# in the environment (see scripts/with-secrets.sh).
-if [ -z "${BOSUN_SECRETS_LOADED:-}" ] && [ "${BOSUN_SKIP_SECRETS:-}" != "1" ]; then
-  exec "$HERE/with-secrets.sh" "$0" "$@"
-fi
 
 CLUSTER="${BOSUN_KIND_CLUSTER:-bosun}"
 IMAGE="${BOSUN_DEV_IMAGE:-bosun:dev}"
@@ -44,7 +37,7 @@ if [ "${#SECRET_ARGS[@]}" -eq 0 ]; then
   echo "No provider credentials found in the environment." >&2
   echo "Expected one of OPENAI_API_KEY, CODEX_AUTH, CLAUDE_CODE_OAUTH_TOKEN," >&2
   echo "CLAUDE_CREDENTIALS, ANTHROPIC_API_KEY or GEMINI_API_KEY" >&2
-  echo "in ${BOSUN_AWS_SECRET:-/ai-desktops/markcallen/agents}, or exported directly." >&2
+  echo "Export credentials before running this script; see docs/local-development.md." >&2
   exit 2
 fi
 

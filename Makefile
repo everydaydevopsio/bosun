@@ -1,11 +1,10 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-AWS_SECRET ?= /ai-desktops/markcallen/agents
 BRIDGECTL_VERSION ?= v1.3.0
 DEV_IMAGE ?= bosun:dev
 
-.PHONY: help deps setup env proto test lint build kind-up kind-down review clean
+.PHONY: help deps setup proto test lint build kind-up kind-down review clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -29,25 +28,14 @@ deps: ## Install the tools needed for development
 	    exit 1; \
 	  fi; \
 	fi
-	@command -v node >/dev/null || { echo "node is required for env-secrets; install Node 20+" >&2; exit 1; }
-	@command -v env-secrets >/dev/null || { echo "Installing env-secrets"; npm install -g env-secrets; }
-	@command -v aws >/dev/null || { echo "aws CLI is required for env-secrets" >&2; exit 1; }
 	@echo "All development tools present."
 
-setup: deps ## Prepare the local shell environment
-	@set -euo pipefail; \
-	echo "Writing agent credentials to .env from $(AWS_SECRET)"; \
-	env-secrets aws -s "$(AWS_SECRET)" -o .env >/dev/null; \
-	chmod 600 .env
+setup: deps ## Check development tools and show credential setup instructions
 	@echo
-	@echo "Ready. Load the environment into your shell with:"
-	@echo
-	@echo "    source ./scripts/activate.sh"
+	@echo "Tools ready. Set provider credentials manually (see docs/local-development.md)."
+	@echo "Export credentials in your shell before running make kind-up."
 	@echo
 	@echo "Then: make test, make kind-up, make review REPO=/path/to/repo"
-
-env: ## Refresh .env from AWS Secrets Manager
-	@env-secrets aws -s "$(AWS_SECRET)" -o .env >/dev/null && chmod 600 .env && echo "Refreshed .env"
 
 proto: ## Regenerate Go gRPC bindings (requires protoc and plugins in GOPATH/bin)
 	@PATH="$$(go env GOPATH)/bin:$$PATH" protoc --go_out=. --go_opt=module=github.com/everydaydevopsio/bosun --go_opt=Mproto/bridge/v1/bridge.proto=github.com/everydaydevopsio/bosun/internal/bridgev1 --go-grpc_out=. --go-grpc_opt=module=github.com/everydaydevopsio/bosun --go-grpc_opt=Mproto/bridge/v1/bridge.proto=github.com/everydaydevopsio/bosun/internal/bridgev1 proto/bridge/v1/bridge.proto

@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"
-
-# Provider keys come from AWS Secrets Manager unless already exported.
-if [ -z "${BOSUN_SECRETS_LOADED:-}" ] && [ "${BOSUN_SKIP_SECRETS:-}" != "1" ]; then
-  exec "$HERE/with-secrets.sh" "$0" "$@"
-fi
 
 REVIEW_TIMEOUT="${BOSUN_REVIEW_TIMEOUT_SECONDS:-1800}"
 REPO="${1:-$PWD}"

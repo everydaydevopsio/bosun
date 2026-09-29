@@ -102,12 +102,12 @@ the session ends because Bosun called `StopSession`, not because a pipe closed.
 `proto/bridge/v1/bridge.proto` is vendored from bridgectl. After updating it:
 
 ```bash
-pip install -r requirements-dev.txt
-./scripts/gen-proto.sh
+make proto
 ```
 
-Stubs land in `bosun/gen/` (git-ignored) and are generated during the Docker
-build and in CI.
+This requires `protoc` and the `protoc-gen-go` and `protoc-gen-go-grpc` plugins
+in `GOPATH/bin`. Generated Go bindings live in `internal/bridgev1/` and are
+checked into Git, so normal builds and tests do not require regeneration.
 
 ## Choosing a provider
 
