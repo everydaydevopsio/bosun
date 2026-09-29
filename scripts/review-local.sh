@@ -16,6 +16,9 @@ cleanup() { rm -rf "$DEST"; }
 trap cleanup EXIT
 # Copy the working tree including uncommitted changes and .git metadata.
 tar -C "$REPO" --exclude='./.env' -cf - . | tar -C "$DEST" -xf -
+# bridgectl requires a writable workspace. Share the disposable snapshot with
+# the host user's group while keeping the reviewer unprivileged.
+chmod -R g+rwX "$DEST"
 
 JOB="$(kubectl -n bosun create -o name -f - <<EOF
 apiVersion: batch/v1
@@ -32,6 +35,8 @@ spec:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      securityContext:
+        runAsGroup: $(id -g)
       containers:
         - name: reviewer
           image: ${BOSUN_DEV_IMAGE:-bosun:dev}
@@ -48,6 +53,10 @@ spec:
             - {name: BOSUN_REVIEW_TIMEOUT_SECONDS, value: "$REVIEW_TIMEOUT"}
             - {name: BOSUN_LOG_FORMAT, value: "${BOSUN_LOG_FORMAT:-text}"}
             - {name: BOSUN_LOG_LEVEL, value: "${BOSUN_LOG_LEVEL:-info}"}
+            # This explicitly selected local snapshot belongs to the host user.
+            - {name: GIT_CONFIG_COUNT, value: "1"}
+            - {name: GIT_CONFIG_KEY_0, value: "safe.directory"}
+            - {name: GIT_CONFIG_VALUE_0, value: "/repos/$ID"}
             - name: OPENAI_API_KEY
               valueFrom: {secretKeyRef: {name: bosun-ai, key: openai-api-key, optional: true}}
             - name: CLAUDE_CODE_OAUTH_TOKEN
