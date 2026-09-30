@@ -14,14 +14,33 @@
 # Auth comes from $CODEX_HOME/auth.json, which internal/review/credentials.go writes from
 # the CODEX_AUTH secret, so no provider-specific auth handling is needed.
 providers:
-  codex-exec:
+  codex-bosun:
     binary: "sh"
     args:
       - "-c"
       # Codex reads piped stdin even with a positional prompt. bridgectl keeps
       # its input pipe open, so use /dev/null for this argument-only provider.
-      - 'exec node /app/node_modules/@openai/codex/bin/codex.js exec --skip-git-repo-check --color never --sandbox read-only "$@" </dev/null'
-      - "bosun-codex-exec"
+      - 'CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}" exec node /app/node_modules/@openai/codex/bin/codex.js exec --skip-git-repo-check --color never --sandbox read-only "$@" </dev/null'
+      - "codex-bosun"
+    startup_timeout: "120s"
+    validate_startup: false
+    startup_probe: "none"
+    stream_json: true
+
+  # Headless Claude: argument-only prompt and plain final output, like Codex.
+  # dontAsk denies operations outside the read/search/Git inspection allowlist.
+  # This is a tool permission policy, not an OS-level filesystem sandbox.
+  claude-bosun:
+    binary: "sh"
+    args:
+      - "-c"
+      - >-
+        exec /app/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+        --print --output-format text --no-session-persistence
+        --permission-mode dontAsk --tools 'Read,Glob,Grep,Bash'
+        --allowedTools 'Read,Glob,Grep,Bash(git diff *),Bash(git show *),Bash(git log *),Bash(git status *),Bash(git ls-files *),Bash(git rev-parse *),Bash(git merge-base *)'
+        -- "$@" </dev/null
+      - "claude-bosun"
     startup_timeout: "120s"
     validate_startup: false
     startup_probe: "none"

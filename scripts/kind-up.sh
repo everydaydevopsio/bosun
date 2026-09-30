@@ -4,7 +4,7 @@ set -euo pipefail
 CLUSTER="${BOSUN_KIND_CLUSTER:-bosun}"
 CONTEXT="kind-$CLUSTER"
 IMAGE="${BOSUN_DEV_IMAGE:-bosun:dev}"
-PROVIDER="${BOSUN_REVIEW_PROVIDER:-codex-exec}"
+PROVIDER="${BOSUN_REVIEW_PROVIDER:-codex-bosun}"
 
 command -v kind >/dev/null || { echo "kind is required" >&2; exit 2; }
 command -v kubectl >/dev/null || { echo "kubectl is required" >&2; exit 2; }
@@ -46,14 +46,14 @@ kubectl --context "$CONTEXT" -n bosun create secret generic bosun-ai "${SECRET_A
   --dry-run=client -o yaml | kubectl --context "$CONTEXT" apply -f -
 
 case "$PROVIDER" in
-  codex|codex-exec)
+  codex|codex-bosun)
     [ -n "${OPENAI_API_KEY:-}${CODEX_AUTH:-}" ] || {
       echo "provider $PROVIDER needs OPENAI_API_KEY or CODEX_AUTH" >&2; exit 2; } ;;
   opencode)
     [ -n "${OPENAI_API_KEY:-}" ] || { echo "provider opencode needs OPENAI_API_KEY" >&2; exit 2; } ;;
-  claude)
+  claude|claude-bosun)
     [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}${CLAUDE_CREDENTIALS:-}" ] || {
-      echo "provider claude needs CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS" >&2; exit 2; } ;;
+      echo "provider $PROVIDER needs CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS" >&2; exit 2; } ;;
   gemini)
     [ -n "${GEMINI_API_KEY:-}" ] || { echo "provider gemini needs GEMINI_API_KEY" >&2; exit 2; } ;;
 esac

@@ -5,7 +5,7 @@ image:
 
 replicaCount: 1
 review:
-  provider: codex-exec
+  provider: codex-bosun
   image: ghcr.io/everydaydevopsio/bosun:latest
   ttlSecondsAfterFinished: 3600
   # Comment authors permitted to spend model credits with "@bridgectl review".

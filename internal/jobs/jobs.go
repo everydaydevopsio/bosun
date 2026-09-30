@@ -124,3 +124,40 @@ func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
 		},
 	}
 }
+
+// SubmitLocal shares admission and credential construction with hosted reviews.
+func SubmitLocal(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, snapshot, base string, committed bool, group int64) (string, error) {
+	return withAdmission(ctx, client, cfg.Namespace, func(ctx context.Context) (string, error) {
+		n, err := Active(ctx, client, cfg.Namespace)
+		if err != nil {
+			return "", err
+		}
+		if n >= cfg.MaxConcurrentReviews {
+			return "", CapacityError{n, cfg.MaxConcurrentReviews}
+		}
+		name := Name(req.Repo, req.Ref, snapshot)
+		job := build(cfg, req, name)
+		job.Labels["bosun/local"] = "true"
+		job.Annotations["bosun/snapshot"] = snapshot
+		pod := &job.Spec.Template.Spec
+		pod.SecurityContext = &corev1.PodSecurityContext{RunAsGroup: &group, RunAsUser: &cfg.RunAsUser, RunAsNonRoot: ptr(true)}
+		pod.Volumes = []corev1.Volume{{Name: "repos", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/repos", Type: ptr(corev1.HostPathDirectory)}}}}
+		c := &pod.Containers[0]
+		// Local jobs do not need GitHub credentials.
+		filtered := c.Env[:0]
+		for _, v := range c.Env {
+			if v.Name != "GITHUB_TOKEN" && v.Name != "BOSUN_GITHUB_APP_ID" && v.Name != "BOSUN_GITHUB_PRIVATE_KEY" {
+				filtered = append(filtered, v)
+			}
+		}
+		c.Env = filtered
+		c.VolumeMounts = []corev1.VolumeMount{{Name: "repos", MountPath: "/repos"}}
+		path := "/repos/" + snapshot
+		c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_LOCAL_PATH", Value: path}, corev1.EnvVar{Name: "BOSUN_EVENTS", Value: "1"}, corev1.EnvVar{Name: "BOSUN_RUN_ID", Value: name}, corev1.EnvVar{Name: "BOSUN_EVENT_FILE", Value: path + ".events"}, corev1.EnvVar{Name: "BOSUN_BASE_SHA", Value: base}, corev1.EnvVar{Name: "GIT_CONFIG_COUNT", Value: "1"}, corev1.EnvVar{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"}, corev1.EnvVar{Name: "GIT_CONFIG_VALUE_0", Value: path})
+		if committed {
+			c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_COMMITTED_ONLY", Value: "1"})
+		}
+		_, err = client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
+		return name, err
+	})
+}

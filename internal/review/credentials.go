@@ -7,6 +7,36 @@ import (
 	"path/filepath"
 )
 
+// The headless provider needs either an invocation key or saved CLI auth.
+// Check after materialisation so CODEX_AUTH is represented by its auth file.
+func checkCodexCredentials() error {
+	if os.Getenv("CODEX_API_KEY") != "" || os.Getenv("OPENAI_API_KEY") != "" {
+		return nil
+	}
+	dir := os.Getenv("CODEX_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		dir = filepath.Join(home, ".codex")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if err == nil && json.Valid(data) {
+		var auth struct {
+			APIKey string `json:"OPENAI_API_KEY"`
+			Tokens struct {
+				AccessToken  string `json:"access_token"`
+				RefreshToken string `json:"refresh_token"`
+			} `json:"tokens"`
+		}
+		if json.Unmarshal(data, &auth) == nil && (auth.APIKey != "" || auth.Tokens.AccessToken != "" || auth.Tokens.RefreshToken != "") {
+			return nil
+		}
+	}
+	return fmt.Errorf("codex-bosun has no usable credentials: configure openai-api-key or codex-auth in the Bosun AI Kubernetes Secret (OPENAI_API_KEY or CODEX_AUTH); --provider selects a provider but does not provision credentials")
+}
+
 func materialiseCredentials() error {
 	home, err := os.UserHomeDir()
 	if err != nil {

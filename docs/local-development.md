@@ -23,28 +23,28 @@ Recognised credentials:
 
 | Variable | Used by | Delivered as |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | codex, opencode | environment variable |
-| `CODEX_AUTH` | codex | written to `~/.codex/auth.json` |
-| `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | claude | environment variable |
-| `CLAUDE_CREDENTIALS` | claude | written to `~/.claude/.credentials.json` |
+| `OPENAI_API_KEY` | codex-bosun, opencode | environment variable |
+| `CODEX_AUTH` | codex-bosun | written to `~/.codex/auth.json` |
+| `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | claude-bosun | environment variable |
+| `CLAUDE_CREDENTIALS` | claude-bosun | written to `~/.claude/.credentials.json` |
 | `GEMINI_API_KEY` | gemini | environment variable |
 
 Pick a provider that produces structured output — see
-[bridgectl.md](bridgectl.md#choosing-a-provider). Use `codex-exec` or `opencode`;
+[bridgectl.md](bridgectl.md#choosing-a-provider). Use `codex-bosun` or `claude-bosun`;
 `codex` renders a terminal UI and its output is rejected.
 
 Codex/OpenCode:
 
 ```bash
 export OPENAI_API_KEY=...
-export BOSUN_REVIEW_PROVIDER=codex-exec
+export BOSUN_REVIEW_PROVIDER=codex-bosun
 ```
 
 Claude:
 
 ```bash
 export CLAUDE_CODE_OAUTH_TOKEN=...
-export BOSUN_REVIEW_PROVIDER=claude
+export BOSUN_REVIEW_PROVIDER=claude-bosun
 ```
 
 ## Start the environment
@@ -122,3 +122,66 @@ Run `./scripts/kind-up.sh` again. It rebuilds and reloads `bosun:dev` and upgrad
 ```
 
 This deletes the Kind cluster and the temporary repository snapshots under `/tmp/bosun-repos`.
+
+## Native review command
+
+Build the CLI with `make cli` (creates `bin/bosun`), or install it on your Go
+binary path with `make install`. Run `make kind-up` once after updating Bosun to
+rebuild the worker image. The CLI and worker image must both include the event
+protocol; an old image cannot provide a complete structured result.
+
+```bash
+bosun review "$PWD"
+bosun review "$PWD" --branch feature/login --base main --provider claude-bosun
+bosun review "$PWD" --provider codex-bosun --timeout 20m
+bosun review "$PWD" --json
+bosun review "$PWD" --detach
+bosun review-status <job-name> --follow
+```
+
+Without `--branch`, the snapshot includes the current commit and staged,
+unstaged, and untracked files. An explicit `--branch` selects committed content
+only, even if it names the current branch. It never switches your checkout.
+`--base` selects the comparison base; Bosun resolves the default branch when
+possible and requests an explicit base when ambiguous. No implicit fetch occurs.
+
+Flags work before or after the path. `--provider` overrides
+`BOSUN_REVIEW_PROVIDER`; it does not change cluster credentials. Export the
+credentials and rerun `make kind-up` when adding or refreshing them.
+
+The backend is the configured local Kind cluster, whose node must mount
+`/tmp/bosun-repos` at `/repos`. Remote clusters are not supported by this snapshot
+transport. The CLI honors `KUBECONFIG`, explicitly selects `kind-bosun` (or
+`kind-$BOSUN_KIND_CLUSTER`), and accepts `--context` and `--namespace` overrides.
+It never silently chooses the active Kubernetes context.
+
+Progress goes to stderr and the final review to stdout. JSON mode emits
+versioned `bosun_event: 1` records on stdout. Updates include stage, elapsed time,
+quiet time, session state, pod warnings, and deadline remaining. Provider
+activity is distinct from a heartbeat; no percentage is fabricated. Detailed
+file/tool actions are not available in the current bridgectl session schema.
+
+Run metadata and completed results are stored privately in
+`$XDG_STATE_HOME/bosun` (default `~/.local/state/bosun`), overridable with
+`BOSUN_STATE_DIR`. Worker event journals beside snapshots preserve detached-run
+results even after Kubernetes logs expire. Invoke `review-status` to collect a
+detached result. Snapshots are removed only after pod termination is confirmed;
+if cleanup cannot be confirmed, the path is retained for inspection.
+
+Ctrl-C in `bosun review` cancels its job and waits for pod termination before
+cleanup. Ctrl-C in `review-status --follow` only stops watching. `--detach`
+returns the job name and leaves the review running.
+
+Duration estimates require at least five comparable successful runs for the
+same repository, provider, image, and similar change size. They are approximate:
+model configuration and provider load can differ. Until sufficient history
+exists, the command reports that an estimate is unavailable. The execution
+limit is always displayed separately.
+
+Exit codes: 0 for a successful review (including one with findings), 1 for an
+execution failure, 2 for invalid input/configuration, 124 for timeout, and 130
+for interruption. `make review REPO=... ARGS='--provider claude-bosun'` and
+`scripts/review-local.sh` delegate to the native CLI.
+
+Set `BOSUN_QUIET_WARNING_AFTER=2m` to change when silent-provider updates are
+flagged as unconfirmed progress. A quiet warning never kills the review by itself.

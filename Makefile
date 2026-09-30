@@ -65,7 +65,17 @@ kind-down: ## Delete the Kind cluster
 
 REPO ?= $(PWD)
 review: ## Review a repository locally (REPO=/path/to/repo)
-	./scripts/review-local.sh $(REPO)
+	./scripts/review-local.sh "$(REPO)" $(ARGS)
 
 clean: ## Remove generated files
 	go clean -testcache
+
+.PHONY: cli install review-status
+cli: ## Build the native Bosun CLI
+	go build -o bin/bosun ./cmd/bosun
+
+install: ## Install Bosun into GOBIN or GOPATH/bin
+	go install ./cmd/bosun
+
+review-status: ## Inspect a review (JOB=name, ARGS=--follow)
+	go run ./cmd/bosun review-status "$(JOB)" $(ARGS)

@@ -21,7 +21,7 @@ type fakeBridge struct {
 
 func (f *fakeBridge) StartSession(_ context.Context, r *pb.StartSessionRequest, _ ...grpc.CallOption) (*pb.StartSessionResponse, error) {
 	f.request = r
-	return &pb.StartSessionResponse{}, nil
+	return &pb.StartSessionResponse{SessionId: r.SessionId, Status: pb.SessionStatus_SESSION_STATUS_RUNNING}, nil
 }
 func (f *fakeBridge) StopSession(_ context.Context, _ *pb.StopSessionRequest, _ ...grpc.CallOption) (*pb.StopSessionResponse, error) {
 	f.stopped = true
@@ -65,33 +65,101 @@ func TestReviewRequiresSuccessfulExit(t *testing.T) {
 		{"error", &pb.AttachSessionEvent{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_ERROR, Error: "failed"}, false},
 		{"truncated stream", nil, false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeBridge{events: []*pb.AttachSessionEvent{
-				{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED},
-				{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("Review findings")},
-			}}
-			if tc.ending != nil {
-				f.events = append(f.events, tc.ending)
-			}
-			out, err := runSession(context.Background(), f, "/repo", "codex-exec", "review branch")
-			if (err == nil) != tc.success {
-				t.Fatalf("output %q, error %v", out, err)
-			}
-			if f.request.AgentOpts["arg:prompt"] != "review branch" || f.writes != 0 {
-				t.Fatal("prompt must be delivered once via session arguments")
-			}
-			if !f.stopped {
-				t.Fatal("session not stopped")
-			}
-		})
+		for _, provider := range []string{"codex-bosun", "claude-bosun"} {
+			t.Run(provider+"/"+tc.name, func(t *testing.T) {
+				f := &fakeBridge{events: []*pb.AttachSessionEvent{
+					{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED},
+					{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("Review findings")},
+				}}
+				if tc.ending != nil {
+					f.events = append(f.events, tc.ending)
+				}
+				out, err := runSession(context.Background(), f, "/repo", provider, "review branch")
+				if (err == nil) != tc.success {
+					t.Fatalf("output %q, error %v", out, err)
+				}
+				if f.request.AgentOpts["arg:prompt"] != "review branch" || f.writes != 0 {
+					t.Fatal("prompt must be delivered once via session arguments")
+				}
+				if !f.stopped {
+					t.Fatal("session not stopped")
+				}
+			})
+		}
 	}
 }
 func TestSilentReviewHonorsDeadline(t *testing.T) {
 	f := &fakeBridge{silent: true}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err := runSession(ctx, f, "/repo", "codex-exec", "review")
+	_, err := runSession(ctx, f, "/repo", "codex-bosun", "review")
 	if err == nil || !f.stopped {
 		t.Fatalf("expected cancelled session, got %v", err)
+	}
+}
+
+func TestReplayGapRejectsPartialReview(t *testing.T) {
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("partial")}, {Type: pb.AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP}, {Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT}}}
+	out, err := runSession(context.Background(), f, "/repo", "codex-bosun", "review")
+	if err == nil || out != "" {
+		t.Fatalf("accepted incomplete output: %q %v", out, err)
+	}
+}
+func TestRejectedPromptFails(t *testing.T) {
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED}}}
+	_, err := runSession(context.Background(), f, "/repo", "claude", "review")
+	if err == nil || f.writes != 1 {
+		t.Fatalf("rejected input: %v writes %d", err, f.writes)
+	}
+}
+func TestReplayedOutputIsDeduplicated(t *testing.T) {
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Seq: 1, Payload: []byte("findings")}, {Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Seq: 1, Payload: []byte("findings"), Replay: true}, {Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT, Seq: 2}}}
+	out, err := runSession(context.Background(), f, "/repo", "codex-bosun", "review")
+	if err != nil || out != "findings" {
+		t.Fatalf("%q %v", out, err)
+	}
+}
+
+type recoveringBridge struct {
+	fakeBridge
+	attaches int
+	after    uint64
+	changed  bool
+}
+
+func (f *recoveringBridge) Health(context.Context, *pb.HealthRequest, ...grpc.CallOption) (*pb.HealthResponse, error) {
+	id := "instance"
+	if f.changed {
+		id = "restarted"
+	}
+	return &pb.HealthResponse{ServerInstanceId: id}, nil
+}
+func (f *recoveringBridge) WriteInput(_ context.Context, r *pb.WriteInputRequest, _ ...grpc.CallOption) (*pb.WriteInputResponse, error) {
+	f.writes++
+	return &pb.WriteInputResponse{Accepted: true, BytesWritten: uint32(len(r.Data))}, nil
+}
+func (f *recoveringBridge) AttachSession(ctx context.Context, r *pb.AttachSessionRequest, _ ...grpc.CallOption) (grpc.ServerStreamingClient[pb.AttachSessionEvent], error) {
+	f.attaches++
+	f.after = r.AfterSeq
+	events := []*pb.AttachSessionEvent{{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED}, {Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Seq: 1, Payload: []byte("findings")}}
+	if f.attaches > 1 {
+		events = append(events, &pb.AttachSessionEvent{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT, Seq: 2})
+	}
+	return &fakeStream{ctx: ctx, events: events}, nil
+}
+func TestReconnectDoesNotResendPrompt(t *testing.T) {
+	f := &recoveringBridge{}
+	ctx := context.WithValue(context.Background(), bridgeInstanceKey{}, "instance")
+	out, err := runSession(ctx, f, "/repo", "claude", "review")
+	if err != nil || out != "findings" || f.writes != 1 || f.attaches != 2 || f.after != 1 {
+		t.Fatalf("out %q err %v writes %d attaches %d after %d", out, err, f.writes, f.attaches, f.after)
+	}
+}
+func TestDaemonRestartDoesNotRerunReview(t *testing.T) {
+	f := &recoveringBridge{changed: true}
+	ctx := context.WithValue(context.Background(), bridgeInstanceKey{}, "instance")
+	_, err := runSession(ctx, f, "/repo", "claude", "review")
+	if err == nil || f.attaches != 1 || f.writes != 1 {
+		t.Fatalf("err %v attaches %d writes %d", err, f.attaches, f.writes)
 	}
 }

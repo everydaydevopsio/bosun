@@ -119,7 +119,7 @@ func TestWebhookToPinnedCheckoutAndPublishedReview(t *testing.T) {
 				}
 			}))
 			defer api.Close()
-			cfg := config.Config{Namespace: "test", MaxConcurrentReviews: 3, ReviewTimeoutSeconds: 30, ReviewProvider: "codex-exec", ReviewCommand: "@bridgectl review", AllowedAssociations: map[string]bool{"OWNER": true}, WebhookSecret: "webhook-secret"}
+			cfg := config.Config{Namespace: "test", MaxConcurrentReviews: 3, ReviewTimeoutSeconds: 30, ReviewProvider: "codex-bosun", ReviewCommand: "@bridgectl review", AllowedAssociations: map[string]bool{"OWNER": true}, WebhookSecret: "webhook-secret"}
 			client := fake.NewSimpleClientset()
 			h := server.Handler{Config: cfg, Submitter: jobSubmitter{client, cfg}}
 			req := httptest.NewRequest("POST", "/webhooks/github", strings.NewReader(tc.payload))

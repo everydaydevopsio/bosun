@@ -44,18 +44,24 @@ For the fastest development loop, Bosun includes a Kind environment that can rev
 ```bash
 make setup
 export OPENAI_API_KEY='your-api-key'
-export BOSUN_REVIEW_PROVIDER=codex-exec
+export BOSUN_REVIEW_PROVIDER=codex-bosun
 make kind-up
-make review REPO=~/src/project-to-review
+make cli
+./bin/bosun review ~/src/project-to-review --provider codex-bosun
 ```
+
+Use `make install` to install the `bosun` command on your Go binary path. Review
+another branch with `bosun review "$PWD" --branch feature/name --base main`.
+The CLI shows progress, elapsed time, errors, and history-based duration estimates.
+`make review REPO=...` remains a compatibility entrypoint.
 
 Set provider credentials manually in your shell before starting Kind.
 
 The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See [docs/local-development.md](docs/local-development.md).
 
-Use `codex-exec` (or `opencode`). The packaged `codex` provider runs Codex's
+Use `codex-bosun` or `claude-bosun`. The packaged `codex` provider runs Codex's
 interactive TUI, so its output is screen repaints and Bosun rejects it rather
-than post that to a pull request; `codex-exec` runs `codex exec` headless
+than post that to a pull request; `codex-bosun` runs `codex exec` headless
 instead. See [docs/bridgectl.md](docs/bridgectl.md#choosing-a-provider).
 
 ## Quick start
