@@ -1,0 +1,19 @@
+# Set image.repository, image.tag and review.image to the same tested build.
+# No credentials belong in this file.
+replicaCount: 1
+review:
+  provider: codex-bosun
+  maxConcurrent: 3
+  timeoutSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  allowedAssociations: OWNER,MEMBER,COLLABORATOR
+logging:
+  format: json
+  level: info
+networkPolicy:
+  enabled: true
+ingress:
+  enabled: true
+  className: nginx
+  host: bosun.example.com
+  tlsSecretName: bosun-tls

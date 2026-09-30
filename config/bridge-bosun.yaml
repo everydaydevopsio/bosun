@@ -1,0 +1,47 @@
+# Extra bridgectl providers for Bosun. Merged with bridgectl's packaged
+# providers by `bridgectl server start --config`.
+#
+# The packaged `codex` provider runs the interactive Codex TUI under a PTY, so
+# its output stream is screen repaints rather than an answer. `codex exec` is
+# Codex's non-interactive mode: it takes the prompt as an argument, writes plain
+# text to stdout, and exits when it is done.
+#
+# `stream_json: true` opts the provider out of PTY allocation. The supervisor
+# then reads stdout line by line and forwards any line that is not an
+# Anthropic-shaped stream event as a raw output chunk — which is exactly what
+# `codex exec` produces.
+#
+# Auth comes from $CODEX_HOME/auth.json, which internal/review/credentials.go writes from
+# the CODEX_AUTH secret, so no provider-specific auth handling is needed.
+providers:
+  codex-bosun:
+    binary: "sh"
+    args:
+      - "-c"
+      # Codex reads piped stdin even with a positional prompt. bridgectl keeps
+      # its input pipe open, so use /dev/null for this argument-only provider.
+      - 'CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}" exec node /app/node_modules/@openai/codex/bin/codex.js exec --skip-git-repo-check --color never --sandbox read-only "$@" </dev/null'
+      - "codex-bosun"
+    startup_timeout: "120s"
+    validate_startup: false
+    startup_probe: "none"
+    stream_json: true
+
+  # Headless Claude: argument-only prompt and plain final output, like Codex.
+  # dontAsk denies operations outside the read/search/Git inspection allowlist.
+  # This is a tool permission policy, not an OS-level filesystem sandbox.
+  claude-bosun:
+    binary: "sh"
+    args:
+      - "-c"
+      - >-
+        exec /app/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+        --print --output-format text --no-session-persistence
+        --permission-mode dontAsk --tools 'Read,Glob,Grep,Bash'
+        --allowedTools 'Read,Glob,Grep,Bash(git diff *),Bash(git show *),Bash(git log *),Bash(git status *),Bash(git ls-files *),Bash(git rev-parse *),Bash(git merge-base *)'
+        -- "$@" </dev/null
+      - "claude-bosun"
+    startup_timeout: "120s"
+    validate_startup: false
+    startup_probe: "none"
+    stream_json: true
