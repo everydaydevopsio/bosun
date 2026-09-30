@@ -19,6 +19,9 @@ func TestCancellationOnlyCleansAfterConfirmedShutdown(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "confirmed", true: "unconfirmed"}[fail], func(t *testing.T) {
 			t.Setenv("BOSUN_STATE_DIR", t.TempDir())
+			if err := os.MkdirAll("/tmp/bosun-repos", 0755); err != nil {
+				t.Fatal(err)
+			}
 			dir, e := os.MkdirTemp("/tmp/bosun-repos", "review.")
 			if e != nil {
 				t.Fatal(e)
