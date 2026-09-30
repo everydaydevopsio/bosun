@@ -122,11 +122,9 @@ kubectl -n bosun patch secret bosun-github --type=json \
 
 ## What this does not do yet
 
-Bosun still posts reviews as pull-request conversation comments. The `checks`
-permission above is requested so that publishing reviews through the Checks API
-— which is what would finally give branch-created reviews a first-class GitHub
-surface instead of leaving them in Job logs — needs no permission change when it
-lands.
+Bosun posts reviews as pull-request conversation comments. Installation tokens
+request only `contents: read` and `pull_requests: write`; no Checks permission
+is requested. Branch-only reviews remain in Job logs.
 
 ## Notes
 
@@ -134,4 +132,4 @@ lands.
   older than 10. Bosun backdates `iat` by 60s to tolerate clock drift.
 - Installation tokens last an hour, comfortably longer than the 1800s review cap.
 - The private key is stripped from the environment handed to the AI provider,
-  along with `GITHUB_TOKEN` — see `SECRET_ENV` in `bosun/worker.py`.
+  along with `GITHUB_TOKEN` — see `agentEnvironment` in `internal/review/clone.go`.
