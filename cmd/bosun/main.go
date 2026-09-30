@@ -2,17 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/everydaydevopsio/bosun/internal/localreview"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/jobs"
+	"github.com/everydaydevopsio/bosun/internal/localreview"
 	"github.com/everydaydevopsio/bosun/internal/review"
 	"github.com/everydaydevopsio/bosun/internal/server"
 	"k8s.io/client-go/kubernetes"
@@ -26,7 +28,9 @@ type submitter struct {
 }
 
 func (s submitter) Submit(ctx context.Context, r review.Request, d string) (string, error) {
-	return jobs.Submit(ctx, s.client, s.cfg, r, d)
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	return jobs.SubmitAuthenticated(ctx, s.client, s.cfg, r, d, review.GitHubToken)
 }
 func kubeClient() (kubernetes.Interface, error) {
 	cfg, err := rest.InClusterConfig()
@@ -36,6 +40,7 @@ func kubeClient() (kubernetes.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Timeout = 5 * time.Second
 	return kubernetes.NewForConfig(cfg)
 }
 func main() {
@@ -86,8 +91,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "configure Kubernetes client:", err)
 		os.Exit(1)
 	}
+	srv := &http.Server{Addr: ":8080", Handler: server.Handler{Config: cfg, Submitter: submitter{client, cfg}}, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdown)
+	}()
 	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews)
-	if err := http.ListenAndServe(":8080", server.Handler{Config: cfg, Submitter: submitter{client, cfg}}); err != nil {
+	if err = srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}

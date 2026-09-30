@@ -57,10 +57,25 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.webhookSecretName }}
                   key: secret
-{{- else }}
-            # Development mode has no webhook secret. Signature verification
-            # fails closed, so the webhook endpoint rejects every delivery and
-            # reviews are driven locally by scripts/review-local.sh instead.
+            # Signing credentials belong only to this trusted controller.
+            - name: BOSUN_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubSecretName }}
+                  key: app-id
+                  optional: true
+            - name: BOSUN_GITHUB_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubSecretName }}
+                  key: private-key
+                  optional: true
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubSecretName }}
+                  key: token
+                  optional: true
 {{- end }}
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }

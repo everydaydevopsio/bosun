@@ -34,7 +34,9 @@ func redact(text string, extra ...string) string {
 			text = strings.ReplaceAll(text, value, "[REDACTED]")
 		}
 	}
-	return text
+	// Results go to PR comments as well as logs. Scrub model credentials and
+	// nested credential JSON, not only GitHub credentials, on both paths.
+	return diagnosticRedactor()(text)
 }
 func cloneRepository(ctx context.Context, base, workspace string, req Request, token string) (string, error) {
 	if !validRepository(req.Repo) {
@@ -56,7 +58,6 @@ func cloneRepository(ctx context.Context, base, workspace string, req Request, t
 	if err = os.WriteFile(askpass, []byte(script), 0700); err != nil {
 		return "", err
 	}
-	// Ignore inherited Git overrides and credential helpers during authentication.
 	var env []string
 	for _, entry := range agentEnvironment() {
 		key, _, _ := strings.Cut(entry, "=")
@@ -90,7 +91,6 @@ func cloneRepository(ctx context.Context, base, workspace string, req Request, t
 	}
 	revision := "FETCH_HEAD"
 	if req.SHA != "" {
-		// Pin the event's exact commit even if the branch/PR advanced meanwhile.
 		if _, err = git(workspace, "fetch", "--no-tags", "origin", req.SHA); err != nil {
 			return "", err
 		}

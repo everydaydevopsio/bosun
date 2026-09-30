@@ -6,24 +6,31 @@ metadata:
 spec:
   podSelector:
     matchLabels: { app.kubernetes.io/name: bosun-review }
-  policyTypes: [Egress]
+  policyTypes: [Ingress, Egress]
+  ingress: []
   egress:
-    # DNS resolution.
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
           podSelector:
             matchLabels: { k8s-app: kube-dns }
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
-    # GitHub and the AI provider APIs, but nothing inside the cluster.
+    # Broad public HTTPS, not a domain allowlist. Adapt for NodeLocal DNS,
+    # custom Service CIDRs and your CNI's NAT policy behavior before deployment.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
+              - 0.0.0.0/8
               - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
               - 172.16.0.0/12
               - 192.168.0.0/16
+              - 224.0.0.0/4
       ports:
         - { protocol: TCP, port: 443 }
 {{- end }}
