@@ -57,13 +57,18 @@ image:
   tag: 0.1.0
 review:
   image: ghcr.io/YOUR_ORG/bosun:0.1.0
-  provider: codex
+  provider: codex-bosun
 ingress:
   enabled: true
   className: nginx
   host: bosun.example.com
   tlsSecretName: bosun-tls
 ```
+
+Use `codex-bosun` or `claude-bosun`, not the packaged provider names. The
+packaged `codex` provider runs an interactive terminal UI, so its output is
+screen repaints that Bosun rejects rather than post to a pull request. See
+[bridgectl.md](bridgectl.md#choosing-a-provider).
 
 Then install:
 
