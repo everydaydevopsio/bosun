@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/everydaydevopsio/bosun/internal/localreview"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/jobs"
@@ -87,8 +89,27 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews)
-	if err := http.ListenAndServe(":8080", server.Handler{Config: cfg, Submitter: submitter{client, cfg}}); err != nil {
+	srv := &http.Server{Addr: ":8080", Handler: server.Handler{Config: cfg, Submitter: submitter{client, cfg}}}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-ctx.Done()
+		// Restore default signal handling so a second interrupt exits now.
+		stop()
+		slog.Info("shutdown requested; draining in-flight deliveries")
+		// Finish inside the default 30s termination grace period: a delivery
+		// still holding the admission lease must release it before SIGKILL.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("drain did not finish", "error", err)
+			return
+		}
+		slog.Info("drain complete")
+	}()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+	<-drained
 }
