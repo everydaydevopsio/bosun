@@ -192,7 +192,7 @@ jobs:
 
       # arm64 is built under emulation, so the scan covers the same layers the
       # manifest will advertise rather than a native-only stand-in.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
       - name: Extract image metadata
