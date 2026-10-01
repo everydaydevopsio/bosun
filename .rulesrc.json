@@ -7,12 +7,10 @@
     "local-dev",
     "docs",
     "cicd",
-    "observability",
     "publishing",
     "git-hooks",
     "tasks",
     "plan-lifecycle",
-    "spec-kit",
     "testing-process",
     "core",
     "linting",
@@ -21,17 +19,11 @@
   ],
   "skills": [
     "owasp-security-scan",
-    "aws-health-review",
-    "aws-live-health-review",
-    "aws-weekly-security-review",
     "github-health-check",
     "github-pr-copilot-cycle",
     "ballast-audit",
     "agent-performance-audit",
     "ballast-project-maintenance",
-    "speckit-bootstrap",
-    "speckit-reverse-engineer",
-    "speckit-delivery",
     "docker-registry-publish"
   ],
   "ballastVersion": "5.21.3",
@@ -60,5 +52,8 @@
     ]
   },
   "taskSystem": "github",
-  "deploymentModel": "none"
+  "deploymentModel": "kubernetes",
+  "publishingProfiles": [
+    "apps"
+  ]
 }

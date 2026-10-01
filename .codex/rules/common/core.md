@@ -1,4 +1,4 @@
-<!-- ballast:rule id="go/core" version="5.21.3" checksum="f3ef35b24c080408cd370ea27602ff234103dc0424c6329430d9b38ba68ba2b2" -->
+<!-- ballast:rule id="go/core" version="5.21.3" checksum="b081fb2e3b760cf28ec8bac1444bf4ed18394b3b571f2cc2ea675aeb4c211bc3" -->
 # Ballast Core Rules
 
 Compact engineering invariants for this repository (`ruleProfile: minimal`). The full Ballast rule set is not emitted in this profile; switch `ruleProfile` to `full` in `.rulesrc.json` and re-run `ballast install --refresh-config` when detailed guidance should be installed.
@@ -15,3 +15,8 @@ Compact engineering invariants for this repository (`ruleProfile: minimal`). The
 
 - Lint/format: `gofmt -w .` (or `gofumpt`), `golangci-lint run`.
 - Test: `go test ./...` with `-cover`; coverage gate enforced in CI.
+
+## Commands — Docker
+
+- Lint: `hadolint Dockerfile`, `docker compose config`, `trivy config .`.
+- Test: build the real Dockerfile, smoke-test the built image, and scan with `trivy image` before publishing.

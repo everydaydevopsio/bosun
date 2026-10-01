@@ -1,4 +1,4 @@
-<!-- ballast:rule id="go/publishing/apps" version="5.21.3" checksum="1eeb1d916634d9ca9a62b60707e659dc83081fd177f1c09dbbc2c9a3cb8339ed" -->
+<!-- ballast:rule id="go/publishing/apps" version="5.21.3" checksum="dd99a0ee0fbfa3d850133583f37a767aeabed512865deed27fd657cca840a966" -->
 # Publishing Apps Agent
 
 ## Goals
@@ -10,7 +10,13 @@ Follow the shared publishing release pattern (`publishing` rule) for the bump-an
 
 ## App Deployment Model
 
-No app deployment model is configured (`deploymentModel: none`). Deployment guidance is reference-only. Deployment is inactive: keep library, SDK, CLI, and optional container publishing guidance active, but do not create deploy-on-main workflows, deployment-state updates, Kubernetes, serverless, hosted-platform, Docker registry, or self-managed server deployment ownership until the repository sets an active `deploymentModel`.
+Deployment guidance is active (`deploymentModel: kubernetes`). Apply web/API deployment workflow guidance for repositories that own this deployment model.
+
+Kubernetes deployment model:
+- Treat app deployment ownership as Kubernetes-native unless repo docs say otherwise.
+- Keep application Helm charts in the app repository under `charts/<app>/` with chart tests and schema validation.
+- Keep ArgoCD `Application` or `ApplicationSet` resources, environment values, and promotion state in the configured GitOps repository.
+- CI should publish immutable images and charts; GitOps changes should promote those versions by environment.
 
 ### Container Publishing
 
