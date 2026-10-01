@@ -48,9 +48,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      # fallback covers the first release, when the repo has no tags at all and
+      # the action would otherwise fail. From 0.0.0 a patch gives 0.0.1, a minor
+      # gives 0.1.0, and a major gives 1.0.0.
       - name: Get previous tag
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v2
+        with:
+          fallback: 0.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
