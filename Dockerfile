@@ -2,7 +2,7 @@
 # version. Override with --build-arg BRIDGECTL_VERSION=vX.Y.Z.
 ARG BRIDGECTL_VERSION=v1.4.1
 
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 # Stamped into the binary so `bosun version` inside the image reports the
 # release it was built from. Defaults to "dev" for local builds.
 ARG VERSION=dev
