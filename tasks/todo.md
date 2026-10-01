@@ -232,3 +232,8 @@
   receives no credentials at all.
 - Windows follow-up recorded on
   [#5](https://github.com/everydaydevopsio/bosun/issues/5#issuecomment-5942148215).
+- Discovered while running `scripts/kind-up.sh` against a cluster holding the
+  0.1.0 release, promoted to
+  [#19](https://github.com/everydaydevopsio/bosun/issues/19): the chart's
+  Deployment `spec.selector` gained a label between 0.1.0 and 0.1.1, and that
+  field is immutable, so every 0.1.0 install fails to upgrade.
