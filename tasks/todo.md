@@ -225,6 +225,10 @@
 - Result: a released CLI reaches a working review with one command.
 - Evidence: `go test ./...`, `gofmt -l .`, `go vet ./...`, `shellcheck -S warning
   scripts/*.sh`, plus the live round trip recorded above.
-- Discovered, promoted to GitHub: the `opencode` provider is documented as using
-  `OPENAI_API_KEY` but `credentials.ForProvider` matches only `codex*`, `claude*`
-  and `gemini*` prefixes, so an opencode Job receives no credentials at all.
+- Discovered, promoted to GitHub as
+  [#18](https://github.com/everydaydevopsio/bosun/issues/18): the `opencode`
+  provider is documented as using `OPENAI_API_KEY` but `credentials.ForProvider`
+  matches only `codex*`, `claude*` and `gemini*` prefixes, so an opencode Job
+  receives no credentials at all.
+- Windows follow-up recorded on
+  [#5](https://github.com/everydaydevopsio/bosun/issues/5#issuecomment-5942148215).
