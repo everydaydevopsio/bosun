@@ -1,0 +1,64 @@
+{
+  "targets": [
+    "claude",
+    "codex"
+  ],
+  "agents": [
+    "local-dev",
+    "docs",
+    "cicd",
+    "observability",
+    "publishing",
+    "git-hooks",
+    "tasks",
+    "plan-lifecycle",
+    "spec-kit",
+    "testing-process",
+    "core",
+    "linting",
+    "logging",
+    "testing"
+  ],
+  "skills": [
+    "owasp-security-scan",
+    "aws-health-review",
+    "aws-live-health-review",
+    "aws-weekly-security-review",
+    "github-health-check",
+    "github-pr-copilot-cycle",
+    "ballast-audit",
+    "agent-performance-audit",
+    "ballast-project-maintenance",
+    "speckit-bootstrap",
+    "speckit-reverse-engineer",
+    "speckit-delivery",
+    "docker-registry-publish"
+  ],
+  "ballastVersion": "5.21.3",
+  "languages": [
+    "go",
+    "docker"
+  ],
+  "paths": {
+    "docker": [
+      "."
+    ],
+    "go": [
+      "."
+    ]
+  },
+  "tools": {
+    "docker": [
+      "docker",
+      "hadolint",
+      "trivy"
+    ],
+    "go": [
+      "go",
+      "gofumpt",
+      "golangci-lint"
+    ]
+  },
+  "taskSystem": "github",
+  "deploymentModel": "none"
+}
