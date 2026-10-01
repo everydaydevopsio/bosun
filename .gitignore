@@ -4,3 +4,6 @@
 .ballast/
 __pycache__/
 *.pyc
+
+/dist/
+coverage.out

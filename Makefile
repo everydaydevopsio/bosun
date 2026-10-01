@@ -3,8 +3,11 @@ SHELL := /usr/bin/env bash
 
 BRIDGECTL_VERSION ?= v1.4.1
 DEV_IMAGE ?= bosun:dev
+# Stamped into the binary and image. Releases override this with the tag; local
+# builds report the nearest tag plus commit, or "dev" outside a git checkout.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: help deps setup proto test lint build kind-up kind-down review clean
+.PHONY: help deps setup proto test coverage lint build kind-up kind-down review clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -45,6 +48,10 @@ proto: ## Regenerate Go gRPC bindings (requires protoc and plugins in GOPATH/bin
 test: ## Run the Go test suite
 	go test ./...
 
+coverage: ## Run the Go test suite with a coverage profile
+	go test ./... -covermode=atomic -coverprofile=coverage.out
+	go tool cover -func=coverage.out | tail -1
+
 lint: ## Lint shell scripts and the Helm chart
 	gofmt -d $$(find cmd internal -name '*.go') | (! grep .)
 	shellcheck -S warning scripts/*.sh
@@ -55,7 +62,7 @@ lint: ## Lint shell scripts and the Helm chart
 ## ---------------------------------------------------------------- run
 
 build: ## Build the Bosun image
-	docker build --build-arg BRIDGECTL_VERSION=$(BRIDGECTL_VERSION) -t $(DEV_IMAGE) .
+	docker build --build-arg BRIDGECTL_VERSION=$(BRIDGECTL_VERSION) --build-arg VERSION=$(VERSION) -t $(DEV_IMAGE) .
 
 kind-up: ## Create the Kind cluster and install Bosun
 	./scripts/kind-up.sh
@@ -72,10 +79,17 @@ clean: ## Remove generated files
 
 .PHONY: cli install review-status
 cli: ## Build the native Bosun CLI
-	go build -o bin/bosun ./cmd/bosun
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/bosun ./cmd/bosun
 
 install: ## Install Bosun into GOBIN or GOPATH/bin
-	go install ./cmd/bosun
+	go install -ldflags "-X main.version=$(VERSION)" ./cmd/bosun
+
+.PHONY: release-check release-snapshot
+release-check: ## Validate the GoReleaser config
+	goreleaser check --config .goreleaser.yaml
+
+release-snapshot: ## Build release archives locally without publishing or signing
+	goreleaser release --snapshot --clean --config .goreleaser.yaml
 
 review-status: ## Inspect a review (JOB=name, ARGS=--follow)
 	go run ./cmd/bosun review-status "$(JOB)" $(ARGS)

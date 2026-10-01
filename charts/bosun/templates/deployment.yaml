@@ -18,7 +18,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: bosun
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -32,7 +32,7 @@ spec:
             - name: BOSUN_REVIEW_PROVIDER
               value: {{ .Values.review.provider | quote }}
             - name: BOSUN_REVIEW_IMAGE
-              value: {{ .Values.review.image | quote }}
+              value: {{ .Values.review.image | default (printf "%s:%s" .Values.image.repository .Chart.AppVersion) | quote }}
             - name: BOSUN_JOB_TTL_SECONDS
               value: {{ .Values.review.ttlSecondsAfterFinished | quote }}
             - name: BOSUN_RUN_AS_USER

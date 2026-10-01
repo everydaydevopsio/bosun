@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/everydaydevopsio/bosun/internal/localreview"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,6 +22,35 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// version is the release version, stamped at build time with
+// -ldflags "-X main.version=<version>". An unstamped build reports "dev".
+var version = "dev"
+
+const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]
+       bosun review-status JOB [--follow]
+       bosun serve
+       bosun reviewer
+       bosun version
+`
+
+// metaCommand handles the commands that need neither configuration nor a
+// Kubernetes client, so a released binary can answer them anywhere. It reports
+// whether args named one of them.
+func metaCommand(args []string, stdout io.Writer) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "help", "--help", "-h":
+		fmt.Fprint(stdout, usage)
+		return true
+	case "version", "--version", "-v":
+		fmt.Fprintf(stdout, "bosun %s\n", version)
+		return true
+	}
+	return false
+}
 
 type submitter struct {
 	client kubernetes.Interface
@@ -58,13 +88,13 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if metaCommand(os.Args[1:], os.Stdout) {
+		return
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "review", "review-status":
 			os.Exit(localreview.Run(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr))
-		case "help", "--help", "-h":
-			fmt.Println("Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]\n       bosun review-status JOB [--follow]\n       bosun serve\n       bosun reviewer")
-			return
 		case "serve", "reviewer":
 			if len(os.Args) > 2 {
 				fmt.Fprintln(os.Stderr, "unexpected arguments")

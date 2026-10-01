@@ -1,5 +1,10 @@
 # Bosun
 
+[![CI](https://github.com/everydaydevopsio/bosun/actions/workflows/ci.yml/badge.svg)](https://github.com/everydaydevopsio/bosun/actions/workflows/ci.yml)
+[![Publish](https://github.com/everydaydevopsio/bosun/actions/workflows/publish.yml/badge.svg)](https://github.com/everydaydevopsio/bosun/actions/workflows/publish.yml)
+[![License](https://img.shields.io/github/license/everydaydevopsio/bosun)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/everydaydevopsio/bosun)](https://github.com/everydaydevopsio/bosun/releases)
+
 Bosun is an event-driven AI code-review controller built on [orchael/bridgectl](https://github.com/orchael/bridgectl).
 
 It replaces the hosted-reviewer shape with infrastructure you control:
@@ -64,6 +69,36 @@ interactive TUI, so its output is screen repaints and Bosun rejects it rather
 than post that to a pull request; `codex-bosun` runs `codex exec` headless
 instead. See [docs/bridgectl.md](docs/bridgectl.md#choosing-a-provider).
 
+## Install
+
+### CLI (macOS and Linux)
+
+```bash
+brew install everydaydevopsio/bosun/bosun
+bosun version
+```
+
+macOS builds are signed with a Developer ID certificate and notarized by Apple, so
+they run without a Gatekeeper prompt. Windows binaries are not published yet.
+
+Or download a release archive from the
+[releases page](https://github.com/everydaydevopsio/bosun/releases) and verify it
+against `checksums.txt`. To build from source:
+
+```bash
+make cli    # ./bin/bosun, version-stamped from git describe
+make install
+```
+
+### Controller (Kubernetes)
+
+```bash
+helm install bosun oci://ghcr.io/everydaydevopsio/charts/bosun --version <version>
+```
+
+The chart's `image.tag` defaults to its `appVersion`, so it always pulls the image
+it was released with. No `latest` tag is published — pin a version or a digest.
+
 ## Quick start
 
 1. Build and publish this image, pinning the bridgectl version you run (see [docs/bridgectl.md](docs/bridgectl.md)).
@@ -85,3 +120,14 @@ See [docs/setup.md](docs/setup.md) for exact commands, permissions, Helm values,
 ## Current scope
 
 PR reviews are posted as conversation comments. GitHub App installation tokens are supported, with a PAT fallback. Branch-created reviews remain in Job logs; Checks API output is not implemented yet.
+
+## Releasing
+
+Releases are cut from **Actions → Publish** with a `patch`/`minor`/`major` choice;
+one tag produces the image, the chart, and the signed CLI archives. See
+[docs/releasing.md](docs/releasing.md) for the required secrets and the recovery
+procedure for a release that fails after tagging.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.

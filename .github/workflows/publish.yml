@@ -1,83 +1,345 @@
 name: Publish
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: Image tag to publish (e.g. 0.1.0)
+      release_type:
+        description: 'Release type (patch/minor/major)'
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+        default: 'patch'
         required: true
-        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
 
 concurrency:
-  group: publish
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  image:
+  # Gate the release on the same checks CI runs, so a broken tree is never
+  # tagged or published.
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  bump_and_tag:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs:
+      - validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_notes: ${{ steps.notes.outputs.release_notes }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: previoustag
+        uses: WyriHaximus/github-action-get-previous-tag@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get next versions
+        id: semvers
+        uses: WyriHaximus/github-action-next-semvers@v1
+        with:
+          version: ${{ steps.previoustag.outputs.tag }}
+
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event.inputs.release_type }}" = "major" ]; then
+            echo "version=${{ steps.semvers.outputs.major }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.inputs.release_type }}" = "minor" ]; then
+            echo "version=${{ steps.semvers.outputs.minor }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ steps.semvers.outputs.patch }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The chart version and appVersion must equal the release version, or a
+      # `helm install` pulls a chart that points at a different image tag than
+      # the release it was published with.
+      - name: Bump the chart version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s/^version: .*/version: ${VERSION}/" charts/bosun/Chart.yaml
+          sed -i -E "s/^appVersion: .*/appVersion: \"${VERSION}\"/" charts/bosun/Chart.yaml
+          grep -q "^version: ${VERSION}$" charts/bosun/Chart.yaml
+          grep -q "^appVersion: \"${VERSION}\"$" charts/bosun/Chart.yaml
+
+      # castoff reads `git describe --tags --abbrev=0 HEAD^` and logs from there
+      # to HEAD, so it runs before the release commit is made and the tag is
+      # created. OPENAI_API_KEY is an organization secret, so a missing key means
+      # misconfiguration, not an opt-out: fail here rather than tag a release
+      # whose changelog and release notes were quietly skipped. Scoped to this
+      # step so the key is never exported to the whole job, where every
+      # third-party action would inherit it.
+      - name: Require OpenAI API key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY//[[:space:]]/}" ]; then
+            echo "::error::OPENAI_API_KEY is not available to this repository. Grant the organization secret to everydaydevopsio/bosun." >&2
+            exit 1
+          fi
+
+      - name: Generate AI release notes
+        id: notes
+        uses: everydaydevopsio/castoff/castoff@v2
+        env:
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          tag: v${{ steps.version.outputs.version }}
+
+      # No guard on changelog_entry: the action rejects an empty entry, which is
+      # the signal that castoff produced nothing usable.
+      - name: Update CHANGELOG.md
+        uses: everydaydevopsio/castoff/changelog@v2
+        with:
+          version: ${{ steps.version.outputs.version }}
+          entry: ${{ steps.notes.outputs.changelog_entry }}
+
+      - name: Commit and create tag
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add charts/bosun/Chart.yaml CHANGELOG.md
+          git commit -m "chore(release): bump version to ${VERSION} [skip ci]"
+
+          git tag "v${VERSION}"
+
+      - name: Push commit and tag
+        run: |
+          set -euo pipefail
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "v${{ steps.version.outputs.version }}"
+
+  # `always() && ...` is required: GitHub skips a job whose needed job was
+  # skipped, and bump_and_tag is skipped on tag-triggered runs. The
+  # `github.actor != 'github-actions[bot]'` guard excludes the tag that
+  # bump_and_tag itself just pushed, so a dispatch run does not publish twice.
+  publish_image:
+    if: ${{ always() && needs.validate.result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.bump_and_tag.result == 'success') || (github.event_name == 'push' && github.actor != 'github-actions[bot]')) }}
+    needs:
+      - validate
+      - bump_and_tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', needs.bump_and_tag.outputs.version) || github.ref }}
 
       - name: Resolve version
         id: version
+        env:
+          DISPATCH_VERSION: ${{ needs.bump_and_tag.outputs.version }}
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
-            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "value=${DISPATCH_VERSION}" >> "$GITHUB_OUTPUT"
           else
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Extract image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ steps.version.outputs.value }}
             type=sha,prefix=sha-,format=short
 
+      # Scan before the push: a fixable HIGH/CRITICAL must abort the release
+      # rather than ship and be caught afterwards. Built for the runner's own
+      # platform only, so the scan step does not pay for the arm64 build twice.
+      - name: Build the image for scanning
+        run: |
+          docker build \
+            --build-arg VERSION="${{ steps.version.outputs.value }}" \
+            --build-arg BRIDGECTL_VERSION="${{ vars.BRIDGECTL_VERSION || 'v1.4.1' }}" \
+            -t bosun:scan .
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: bosun:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        id: build
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
+            VERSION=${{ steps.version.outputs.value }}
             BRIDGECTL_VERSION=${{ vars.BRIDGECTL_VERSION || 'v1.4.1' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  chart:
+  publish_chart:
+    if: ${{ always() && needs.validate.result == 'success' && needs.publish_image.result == 'success' }}
+    needs:
+      - validate
+      - bump_and_tag
+      - publish_image
     runs-on: ubuntu-latest
-    needs: image
     permissions:
       contents: read
       packages: write
+
     steps:
-      - uses: actions/checkout@v5
-      - uses: azure/setup-helm@v4
-      - name: Package chart
-        run: helm package charts/bosun --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}"
-        if: github.event_name == 'push'
-      - name: Push chart to GHCR
-        if: github.event_name == 'push'
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', needs.bump_and_tag.outputs.version) || github.ref }}
+
+      - uses: azure/setup-helm@v5
+
+      - name: Resolve version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ needs.bump_and_tag.outputs.version }}
         run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "value=${DISPATCH_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package chart
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: helm package charts/bosun --version "${VERSION}" --app-version "${VERSION}"
+
+      - name: Push chart to GHCR
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm push "bosun-${GITHUB_REF_NAME#v}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+          helm push "bosun-${VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+  # macOS runner: codesign and notarytool only exist there, and the archives
+  # this job publishes are the macOS release channel.
+  publish_cli:
+    if: ${{ always() && needs.validate.result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.bump_and_tag.result == 'success') || (github.event_name == 'push' && github.actor != 'github-actions[bot]')) }}
+    needs:
+      - validate
+      - bump_and_tag
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', needs.bump_and_tag.outputs.version) || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Set up App Store Connect API key
+        run: |
+          set -euo pipefail
+          key="${HOME}/.private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+          mkdir -p "${HOME}/.private_keys"
+          printf '%s' "$APPLE_API_KEY_CONTENT" | base64 -D > "${key}"
+          chmod 600 "${key}"
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+
+      - name: Verify build
+        run: go build -o /tmp/bosun-verify ./cmd/bosun
+
+      # GoReleaser writes the GitHub Release body. Hand it the castoff notes when
+      # they exist; fall back to GoReleaser's own changelog otherwise, so
+      # tag-triggered runs (where bump_and_tag is skipped) still publish.
+      - name: Prepare release notes
+        id: release_notes
+        env:
+          NOTES: ${{ needs.bump_and_tag.outputs.release_notes }}
+        run: |
+          set -euo pipefail
+          if [ -n "${NOTES}" ]; then
+            printf '%s\n' "${NOTES}" > "${RUNNER_TEMP}/release-notes.md"
+            echo "args=--release-notes=${RUNNER_TEMP}/release-notes.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Signing and notarization run as GoReleaser post-build hooks, before any
+      # artifact is uploaded. A notarization failure therefore aborts the whole
+      # release rather than leaving signed-but-unnotarized archives published on
+      # the GitHub Release and advertised by the Homebrew tap.
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: 'v2.15.4'
+          args: release --clean --config .goreleaser.yaml ${{ steps.release_notes.outputs.args }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_ISSUER_ID: ${{ secrets.APPLE_API_KEY_ISSUER_ID }}

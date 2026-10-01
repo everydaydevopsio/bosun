@@ -1,12 +1,16 @@
 image:
   repository: ghcr.io/everydaydevopsio/bosun
-  tag: latest
+  # Empty means the chart appVersion, which the release workflow sets to the
+  # released version. The publish workflow never pushes a "latest" tag, so a
+  # literal default here would point at an image that does not exist.
+  tag: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 1
 review:
   provider: codex-bosun
-  image: ghcr.io/everydaydevopsio/bosun:latest
+  # Empty means image.repository at the chart appVersion.
+  image: ""
   ttlSecondsAfterFinished: 3600
   # Comment authors permitted to spend model credits with "@bridgectl review".
   allowedAssociations: "OWNER,MEMBER,COLLABORATOR"

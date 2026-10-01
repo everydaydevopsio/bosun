@@ -1,0 +1,86 @@
+name: Validate
+
+# The single definition of "is this tree releasable". publish.yml calls it
+# before anything is tagged, so a broken tree is never tagged or published.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to validate
+        required: false
+        type: string
+
+# No workflow-level concurrency: this workflow only runs when called, and
+# `github.workflow` resolves to the caller's name, so a group built from it
+# collides with the group the calling run already holds -- the called job then
+# never starts. Callers serialize their own releases.
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./... -covermode=atomic -coverprofile=coverage.out
+
+      - name: Build the CLI
+        run: go build -o /tmp/bosun-verify ./cmd/bosun
+
+      - name: CLI reports a version
+        run: /tmp/bosun-verify version
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5
+
+      - name: Lint and render the chart
+        run: |
+          set -euo pipefail
+          helm lint charts/bosun
+          helm template bosun charts/bosun --set ingress.enabled=true >/dev/null
+          helm template bosun charts/bosun --set development.enabled=true >/dev/null
+
+      # The published chart must reference the image published alongside it. A
+      # literal tag here silently drifts from the release; `latest` is never
+      # pushed at all.
+      - name: Rendered images track the chart appVersion
+        run: |
+          set -euo pipefail
+          appVersion="$(grep '^appVersion:' charts/bosun/Chart.yaml | cut -d'"' -f2)"
+          helm template bosun charts/bosun > /tmp/bosun-default.yaml
+          grep -q "image: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
+          grep -q "value: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
+          ! grep -q ':latest' /tmp/bosun-default.yaml
+      - name: Lint shell scripts
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck -S warning scripts/*.sh
+
+      - name: Build the image
+        run: docker build --build-arg VERSION=validate -t bosun:validate .
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /usr/local/bin/bosun bosun:validate version
+          echo "SMOKE TEST PASSED"

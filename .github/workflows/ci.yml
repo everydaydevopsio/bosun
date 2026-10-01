@@ -1,24 +1,104 @@
 name: CI
+
 on:
   pull_request:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  test:
+  go-lint:
+    name: Go lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.x"
-      - run: go test ./...
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  go-tests:
+    name: Go tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests with coverage
+        run: go test ./... -covermode=atomic -coverprofile=coverage.out
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          flags: go
+          name: codecov-go
+          fail_ci_if_error: false
+
+  cli:
+    name: CLI build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build the CLI
+        # Written to /tmp so the build never leaves an unstamped bosun in the
+        # working tree for a later step to pick up.
+        run: go build -o /tmp/bosun ./cmd/bosun
+
+      - name: CLI reports a version
+        run: /tmp/bosun version
+
+  goreleaser:
+    name: GoReleaser config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Catches a broken release config on the PR that breaks it, rather than
+      # mid-release after the tag has already been pushed.
+      - name: Check the release config
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: 'v2.15.4'
+          args: check --config .goreleaser.yaml
 
   chart:
+    name: Helm chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
       - run: helm lint charts/bosun
       - name: Render production values
         run: helm template bosun charts/bosun --set ingress.enabled=true > /tmp/bosun-prod.yaml
@@ -30,15 +110,27 @@ jobs:
         run: |
           grep -q 'name: bosun-bosun' /tmp/bosun-dev.yaml
           ! grep -q 'GITHUB_WEBHOOK_SECRET' /tmp/bosun-dev.yaml
+      # The published chart must reference the image published alongside it. A
+      # literal tag here silently drifts from the release; `latest` is never
+      # pushed at all.
+      - name: Rendered images track the chart appVersion
+        run: |
+          set -euo pipefail
+          appVersion="$(grep '^appVersion:' charts/bosun/Chart.yaml | cut -d'"' -f2)"
+          helm template bosun charts/bosun > /tmp/bosun-default.yaml
+          grep -q "image: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
+          grep -q "value: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
+          ! grep -q ':latest' /tmp/bosun-default.yaml
       - name: Reviewer Jobs can be locked down
         run: |
           helm template bosun charts/bosun --set networkPolicy.enabled=true \
             | grep -q 'kind: NetworkPolicy'
 
   scripts:
+    name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Scripts are executable
         run: |
           for f in scripts/*.sh; do
@@ -49,10 +141,38 @@ jobs:
       - run: bash -n scripts/*.sh
 
   image:
+    name: Image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+
+      - name: Lint the Dockerfile
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+
       - name: Build image
-        run: docker build -t bosun:test .
+        run: docker build --build-arg VERSION=ci -t bosun:test .
+
       - name: Go binary is present in the image
         run: docker run --rm --entrypoint test bosun:test -x /usr/local/bin/bosun
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          version="$(docker run --rm --entrypoint /usr/local/bin/bosun bosun:test version)"
+          [ "$version" = "bosun ci" ] || { echo "SMOKE TEST FAILED: $version"; exit 1; }
+          echo "SMOKE TEST PASSED"
+
+      # Reports without failing the build: the base image is bridgectl's, so a
+      # newly published CVE would otherwise break every run in this repo with no
+      # change here and no fix available to make. Publication is gated on the
+      # same scan in publish.yml, where a fixable HIGH/CRITICAL finding fails.
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: bosun:test
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+          format: table
