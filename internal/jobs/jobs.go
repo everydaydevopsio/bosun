@@ -101,9 +101,52 @@ func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.C
 	return name, nil
 }
 func ptr[T any](v T) *T { return &v }
+
+// secretKey names one environment variable sourced from a Kubernetes Secret.
+type secretKey struct{ variable, key string }
+
+// aiCredentials reports the AI Secret keys the given review provider can
+// actually use.
+//
+// A reviewer Job runs an untrusted agent over untrusted repository content, so
+// handing every Job every provider's credentials makes a prompt injection in
+// one provider's review enough to exfiltrate the others' keys. An unrecognised
+// provider gets none: failing with a missing-credential error is better than
+// handing an unknown binary every key in the Secret.
+func aiCredentials(provider string) []secretKey {
+	switch {
+	case strings.HasPrefix(provider, "codex"):
+		return []secretKey{
+			{"OPENAI_API_KEY", "openai-api-key"},
+			{"CODEX_AUTH", "codex-auth"},
+		}
+	case strings.HasPrefix(provider, "claude"):
+		return []secretKey{
+			{"CLAUDE_CODE_OAUTH_TOKEN", "claude-code-oauth-token"},
+			{"ANTHROPIC_API_KEY", "anthropic-api-key"},
+			{"CLAUDE_CREDENTIALS", "claude-credentials"},
+		}
+	case strings.HasPrefix(provider, "gemini"):
+		return []secretKey{{"GEMINI_API_KEY", "gemini-api-key"}}
+	}
+	return nil
+}
+
 func env(cfg config.Config, req review.Request) []corev1.EnvVar {
 	base := []corev1.EnvVar{{Name: "BOSUN_REPO", Value: req.Repo}, {Name: "BOSUN_REF", Value: req.Ref}, {Name: "BOSUN_SHA", Value: req.SHA}, {Name: "BOSUN_TRIGGER", Value: req.Trigger}, {Name: "BOSUN_REVIEW_PROVIDER", Value: cfg.ReviewProvider}, {Name: "BOSUN_REVIEW_TIMEOUT_SECONDS", Value: fmt.Sprint(cfg.ReviewTimeoutSeconds)}, {Name: "BOSUN_PR_NUMBER", Value: fmt.Sprint(req.PRNumber)}}
-	for _, x := range []struct{ n, s, k string }{{"GITHUB_TOKEN", cfg.GitHubTokenSecret, "token"}, {"OPENAI_API_KEY", cfg.AISecret, "openai-api-key"}, {"CLAUDE_CODE_OAUTH_TOKEN", cfg.AISecret, "claude-code-oauth-token"}, {"ANTHROPIC_API_KEY", cfg.AISecret, "anthropic-api-key"}, {"GEMINI_API_KEY", cfg.AISecret, "gemini-api-key"}, {"CODEX_AUTH", cfg.AISecret, "codex-auth"}, {"CLAUDE_CREDENTIALS", cfg.AISecret, "claude-credentials"}, {"BOSUN_GITHUB_APP_ID", cfg.GitHubTokenSecret, "app-id"}, {"BOSUN_GITHUB_PRIVATE_KEY", cfg.GitHubTokenSecret, "private-key"}} {
+
+	// GitHub credentials are how the reviewer clones and posts, so they are not
+	// provider-scoped.
+	refs := []struct{ n, s, k string }{
+		{"GITHUB_TOKEN", cfg.GitHubTokenSecret, "token"},
+		{"BOSUN_GITHUB_APP_ID", cfg.GitHubTokenSecret, "app-id"},
+		{"BOSUN_GITHUB_PRIVATE_KEY", cfg.GitHubTokenSecret, "private-key"},
+	}
+	for _, c := range aiCredentials(cfg.ReviewProvider) {
+		refs = append(refs, struct{ n, s, k string }{c.variable, cfg.AISecret, c.key})
+	}
+
+	for _, x := range refs {
 		base = append(base, corev1.EnvVar{Name: x.n, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: x.s}, Key: x.k, Optional: ptr(true)}}})
 	}
 	return base

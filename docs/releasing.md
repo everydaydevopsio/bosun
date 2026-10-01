@@ -8,6 +8,22 @@ Bosun releases one version across three artifacts, all built from the same tag:
 | Helm chart | `oci://ghcr.io/everydaydevopsio/charts/bosun:<version>` |
 | CLI archives | GitHub Release assets, plus the `everydaydevopsio/homebrew-bosun` cask |
 
+> **Before the first release:** GHCR packages are created **private**. The image
+> and the chart each become a separate package on their first push, and both
+> start private regardless of the repository being public. Until their
+> visibility is changed, `helm install oci://ghcr.io/...` and the chart's
+> default image pull fail for anyone without GHCR credentials — including the
+> install commands in the README.
+>
+> After the first successful release, set both to public at
+> <https://github.com/orgs/everydaydevopsio/packages>:
+>
+> - `bosun` (container)
+> - `charts/bosun` (chart)
+>
+> Package settings → **Danger Zone** → *Change visibility* → **Public**. This is
+> a one-time step; later releases inherit the setting.
+
 ## Cutting a release
 
 1. Open **Actions → Publish → Run workflow** on `main`.

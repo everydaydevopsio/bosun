@@ -4,7 +4,8 @@ metadata:
   name: {{ include "bosun.fullname" . }}
 spec:
   type: {{ .Values.service.type }}
-  selector: { app.kubernetes.io/name: bosun }
+  selector:
+    {{- include "bosun.selectorLabels" . | nindent 4 }}
   ports:
     - port: {{ .Values.service.port }}
       targetPort: 8080

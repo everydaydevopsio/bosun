@@ -70,6 +70,26 @@ func kubeClient() (kubernetes.Interface, error) {
 	}
 	return kubernetes.NewForConfig(cfg)
 }
+
+// newWebhookServer bounds every phase of a request. The endpoint is
+// internet-facing and verifies the GitHub signature only after reading the
+// body, so without these a client can hold connections open with slow headers
+// or a slow body and exhaust the pod's file descriptors before any
+// authentication runs.
+//
+// WriteTimeout sits above the 35s admission wait in internal/jobs: a shorter
+// one would cut off a delivery that is still legitimately queued for capacity.
+func newWebhookServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":8080",
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
 func main() {
 	level := slog.LevelInfo
 	switch strings.ToLower(os.Getenv("BOSUN_LOG_LEVEL")) {
@@ -119,7 +139,7 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews)
-	srv := &http.Server{Addr: ":8080", Handler: server.Handler{Config: cfg, Submitter: submitter{client, cfg}}}
+	srv := newWebhookServer(server.Handler{Config: cfg, Submitter: submitter{client, cfg}})
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)

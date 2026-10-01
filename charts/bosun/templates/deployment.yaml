@@ -5,10 +5,12 @@ metadata:
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
-    matchLabels: { app.kubernetes.io/name: bosun }
+    matchLabels:
+      {{- include "bosun.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      labels: { app.kubernetes.io/name: bosun }
+      labels:
+        {{- include "bosun.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "bosun.fullname" . }}
       securityContext:

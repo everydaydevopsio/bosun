@@ -139,45 +139,53 @@ func snapshot(ctx context.Context, path, branch, base string) (s Snapshot, err e
 				}
 			}
 		}
-		err = filepath.WalkDir(s.Repo, func(p string, d os.DirEntry, e error) error {
-			if e != nil {
-				return e
-			}
-			rel, e := filepath.Rel(s.Repo, p)
-			if e != nil {
-				return e
-			}
-			if rel == "." {
-				return nil
-			}
-			if rel == ".git" || rel == ".env" {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			dest := filepath.Join(s.Path, rel)
-			info, e := d.Info()
-			if e != nil {
-				return e
-			}
-			if d.IsDir() {
-				return os.MkdirAll(dest, info.Mode().Perm()|0700)
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				target, e := os.Readlink(p)
-				if e != nil {
-					return e
-				}
-				return os.Symlink(target, dest)
-			}
-			if !info.Mode().IsRegular() {
-				return nil
-			}
-			return copyFile(p, dest, info.Mode().Perm())
-		})
+		// Enumerate from git rather than walking the filesystem. A walk copies
+		// every regular file under the worktree, which means Git-ignored
+		// secrets -- .env.local, nested .env files, .npmrc, credential caches --
+		// are handed to the remote AI agent even though they are neither
+		// tracked nor part of the changes under review. ls-files with
+		// --exclude-standard yields exactly the tracked files plus the
+		// untracked-but-not-ignored ones, which is what a reviewer needs to
+		// see.
+		var listed string
+		listed, err = git(ctx, s.Repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 		if err != nil {
 			return
+		}
+		for _, rel := range strings.Split(listed, "\x00") {
+			if rel == "" || rel == ".env" {
+				continue
+			}
+			source := filepath.Join(s.Repo, rel)
+			info, e := os.Lstat(source)
+			if e != nil {
+				// Listed in the index but deleted from the worktree: the
+				// deletion is itself part of the uncommitted change.
+				if os.IsNotExist(e) {
+					continue
+				}
+				return s, e
+			}
+			dest := filepath.Join(s.Path, rel)
+			if err = os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
+				return
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, e := os.Readlink(source)
+				if e != nil {
+					return s, e
+				}
+				if err = os.Symlink(target, dest); err != nil {
+					return
+				}
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				continue
+			}
+			if err = copyFile(source, dest, info.Mode().Perm()); err != nil {
+				return
+			}
 		}
 		after, e := git(ctx, s.Repo, "status", "--porcelain=v1", "--untracked-files=all")
 		if e != nil {

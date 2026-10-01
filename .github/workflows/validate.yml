@@ -48,6 +48,16 @@ jobs:
       - name: CLI reports a version
         run: /tmp/bosun-verify version
 
+      # CI checks this too, but the pre-tag gate is what protects the
+      # irreversible tag: a malformed config must fail here, not in publish_cli
+      # after the tag exists.
+      - name: Check the release config
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: 'v2.15.4'
+          args: check --config .goreleaser.yaml
+
       - name: Setup Helm
         uses: azure/setup-helm@v5
 
@@ -79,8 +89,15 @@ jobs:
       - name: Build the image
         run: docker build --build-arg VERSION=validate -t bosun:validate .
 
+      # Asserts the value, not just the exit code: if VERSION propagation
+      # regresses the binary still exits 0 while reporting "bosun dev", and the
+      # release would ship an artifact whose version does not match its tag.
       - name: Smoke test the image
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint /usr/local/bin/bosun bosun:validate version
+          version="$(docker run --rm --entrypoint /usr/local/bin/bosun bosun:validate version)"
+          if [ "$version" != "bosun validate" ]; then
+            echo "SMOKE TEST FAILED: expected 'bosun validate', got '$version'"
+            exit 1
+          fi
           echo "SMOKE TEST PASSED"

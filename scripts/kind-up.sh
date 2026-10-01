@@ -4,6 +4,13 @@ set -euo pipefail
 CLUSTER="${BOSUN_KIND_CLUSTER:-bosun}"
 CONTEXT="kind-$CLUSTER"
 IMAGE="${BOSUN_DEV_IMAGE:-bosun:dev}"
+# The controller Deployment must request the image Kind actually loaded. Split
+# on the tag separator only in the final path segment, so a registry port such
+# as localhost:5000/bosun is not mistaken for a tag.
+case "${IMAGE##*/}" in
+  *:*) IMAGE_REPOSITORY="${IMAGE%:*}"; IMAGE_TAG="${IMAGE##*:}" ;;
+  *)   IMAGE_REPOSITORY="$IMAGE";      IMAGE_TAG="latest" ;;
+esac
 PROVIDER="${BOSUN_REVIEW_PROVIDER:-codex-bosun}"
 
 command -v kind >/dev/null || { echo "kind is required" >&2; exit 2; }
@@ -59,8 +66,8 @@ case "$PROVIDER" in
 esac
 
 helm --kube-context "$CONTEXT" upgrade --install bosun ./charts/bosun -n bosun \
-  --set image.repository=bosun \
-  --set image.tag=dev \
+  --set image.repository="$IMAGE_REPOSITORY" \
+  --set image.tag="$IMAGE_TAG" \
   --set image.pullPolicy=IfNotPresent \
   --set review.image="$IMAGE" \
   --set review.provider="$PROVIDER" \
