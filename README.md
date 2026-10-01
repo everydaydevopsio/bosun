@@ -44,13 +44,33 @@ Bosun speaks bridgectl's gRPC `BridgeService` directly rather than shelling out:
 
 ## Local development — no GitHub required
 
-For the fastest development loop, Bosun includes a Kind environment that can review any local Git checkout, including uncommitted changes:
+Bosun reviews any local Git checkout, including uncommitted changes, in a Kind
+cluster it creates for you. With the released CLI and an authenticated `codex` or
+`claude` on your machine, that is one command:
+
+```bash
+bosun review ~/src/project-to-review --local-credentials
+```
+
+The first run creates the Kind cluster, creates the namespace, copies this
+machine's provider sign-in into the cluster's `bosun-ai` Secret, and runs the
+review. Later runs reuse all of it. `bosun down` removes the cluster and its
+snapshots; `bosun up --local-credentials` prepares a cluster ahead of time or
+refreshes credentials after you re-authenticate.
+
+`--local-credentials` looks for an already-exported variable
+(`OPENAI_API_KEY`, `CODEX_AUTH`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`CLAUDE_CREDENTIALS`, `GEMINI_API_KEY`), then `codex`'s `auth.json`, then
+`claude`'s credentials — from the macOS Keychain, or `~/.claude/.credentials.json`
+elsewhere. Only the selected provider's credentials are mounted into the reviewer
+Job. Without the flag, nothing is copied and the cluster uses whatever Secret is
+already there.
+
+Working from a source checkout instead, where the reviewer image is built locally:
 
 ```bash
 make setup
-export OPENAI_API_KEY='your-api-key'
-export BOSUN_REVIEW_PROVIDER=codex-bosun
-make kind-up
+make kind-up    # builds bosun:dev, loads it, and installs the chart
 make cli
 ./bin/bosun review ~/src/project-to-review --provider codex-bosun
 ```
@@ -59,8 +79,6 @@ Use `make install` to install the `bosun` command on your Go binary path. Review
 another branch with `bosun review "$PWD" --branch feature/name --base main`.
 The CLI shows progress, elapsed time, errors, and history-based duration estimates.
 `make review REPO=...` remains a compatibility entrypoint.
-
-Set provider credentials manually in your shell before starting Kind.
 
 The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See [docs/local-development.md](docs/local-development.md).
 

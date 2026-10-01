@@ -26,9 +26,16 @@ import (
 
 const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]
        bosun review-status JOB [--follow]
+       bosun up [--local-credentials] [--cluster NAME]
+       bosun down [--keep-snapshots] [--cluster NAME]
        bosun serve
        bosun reviewer
        bosun version
+
+bosun review creates the local Kind cluster when it is missing, so bosun up is
+only needed to prepare one ahead of time or to refresh credentials. Pass
+--local-credentials to copy this machine's codex or claude sign-in into the
+cluster; bosun down removes the cluster and its snapshots.
 `
 
 // metaCommand handles the commands that need neither configuration nor a
@@ -110,7 +117,7 @@ func main() {
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "review", "review-status":
+		case "review", "review-status", "up", "down":
 			os.Exit(localreview.Run(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr))
 		case "serve", "reviewer":
 			if len(os.Args) > 2 {
