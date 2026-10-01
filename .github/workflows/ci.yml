@@ -166,8 +166,9 @@ jobs:
 
       # Reports without failing the build: the base image is bridgectl's, so a
       # newly published CVE would otherwise break every run in this repo with no
-      # change here and no fix available to make. Publication is gated on the
-      # same scan in publish.yml, where a fixable HIGH/CRITICAL finding fails.
+      # change here and no fix available to make. publish.yml scans the same way
+      # and is likewise non-blocking -- see the note there for why gating on
+      # these findings is not workable, and #14 for how they are tracked.
       - name: Scan the image
         uses: aquasecurity/trivy-action@v0.36.0
         with:

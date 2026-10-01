@@ -39,8 +39,9 @@ The workflow then:
    `charts/bosun/Chart.yaml` `version` and `appVersion`, generates release notes and
    a `CHANGELOG.md` entry with [castoff](https://github.com/everydaydevopsio/castoff),
    commits, and pushes the `v<version>` tag. **This is the point of no return.**
-3. **publish_image** — builds the multi-arch image from the tag, scans it with Trivy,
-   and pushes to GHCR only if no fixable HIGH/CRITICAL finding exists.
+3. **publish_image** — builds the multi-arch image from the tag, scans both
+   published platforms with Trivy for the record, and pushes to GHCR. The scan
+   does not block the push; see *Image vulnerability scanning* below.
 4. **publish_chart** — packages and pushes the chart at the same version.
 5. **publish_cli** — on `macos-latest`, GoReleaser builds darwin and linux archives,
    signs and notarizes the darwin binaries as a post-build hook, publishes the
@@ -79,6 +80,32 @@ publishes twice.
 
 `everydaydevopsio/homebrew-bosun` must exist and be public before the first
 release. GoReleaser writes `Casks/bosun.rb` into it.
+
+## Image vulnerability scanning
+
+Both published platforms are scanned with Trivy (HIGH/CRITICAL, `ignore-unfixed`)
+before the push, and the results appear in the job log. **The scan reports; it
+does not gate the release.**
+
+This is deliberate. The runtime image is built `FROM ghcr.io/orchael/bridgectl`,
+and essentially every finding belongs to that base: its Ubuntu packages, its
+bundled npm tree, `step-cli`, and the `bridgectl` binary's compiled-in Go
+dependencies. Bosun's own binary is built from this repository's `go.mod`, which
+is kept current by Dependabot.
+
+`ignore-unfixed` filters on *fixed upstream*, which is not the same as *fixable
+here*. The v0.1.0 release was blocked by 47 such findings, none in Bosun's code,
+and `bridgectl:v1.4.2` carries an identical set — so a version bump was no
+remedy. Gating on them would hold every Bosun release hostage to another
+project's release cadence with no action available in this repository.
+
+What this means in practice:
+
+- Read the scan output on each release; it is the inventory of what shipped.
+- Findings in Bosun's own layers are a release blocker in review, even though CI
+  will not stop the push. Fix them in `go.mod` and re-release.
+- Base image findings are tracked in issue #14. The lever is `BRIDGECTL_VERSION`:
+  when orchael publishes a patched image, bump the variable and release.
 
 ## Versioning rules
 
