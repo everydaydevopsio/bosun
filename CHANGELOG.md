@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.1.1] - 2026-10-01
+
+### Highlights
+Image scanning now reports findings without blocking releases.
+
+### Fixes
+- Prevented image scan results from gating the release workflow. (#15)
+
+### Changes
+- Switched the release image scan from an enforcement step to a reporting step.
+
 ## [0.1.0] - 2026-10-01
 
 Bosun’s first release introduces automated GitHub reviews and GitHub-free local repository reviews, with a Go runtime, Helm deployment, and a Kind-based development workflow.
