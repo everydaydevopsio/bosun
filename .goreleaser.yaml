@@ -13,7 +13,7 @@ builds:
     binary: bosun
     main: ./cmd/bosun
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w -X github.com/everydaydevopsio/bosun/internal/version.Version={{ .Version }}
     flags:
       - -trimpath
     env:

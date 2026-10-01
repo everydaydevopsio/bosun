@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/everydaydevopsio/bosun/internal/version"
 )
 
 // metaCommand backs `bosun version` and `bosun help`, the two commands a release
@@ -27,9 +29,9 @@ func TestMetaCommand(t *testing.T) {
 		{name: "unknown command", args: []string{"nope"}, want: false},
 	}
 
-	original := version
-	version = "9.9.9"
-	t.Cleanup(func() { version = original })
+	original := version.Version
+	version.Version = "9.9.9"
+	t.Cleanup(func() { version.Version = original })
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,14 +50,6 @@ func TestMetaCommand(t *testing.T) {
 				t.Fatalf("output %q does not contain %q", out.String(), tc.contains)
 			}
 		})
-	}
-}
-
-// An unstamped build must still answer `bosun version` rather than printing an
-// empty string, so a locally built binary is distinguishable from a release one.
-func TestVersionDefaultsToDev(t *testing.T) {
-	if version != "dev" {
-		t.Fatalf("default version = %q, want %q", version, "dev")
 	}
 }
 

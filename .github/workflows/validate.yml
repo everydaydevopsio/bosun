@@ -101,3 +101,16 @@ jobs:
             exit 1
           fi
           echo "SMOKE TEST PASSED"
+
+      # `bosun review` refuses to submit a Job when the image on the Kind node is
+      # not labelled as Bosun, because the base image's own labels mean the image
+      # has no bosun binary. A regression here would make every local review
+      # refuse to run, so assert the label survives the build.
+      - name: Image identifies itself as Bosun
+        run: |
+          set -euo pipefail
+          title="$(docker image inspect bosun:validate --format '{{ index .Config.Labels "org.opencontainers.image.title" }}')"
+          if [ "$title" != "bosun" ]; then
+            echo "image title label is '$title', want 'bosun'"
+            exit 1
+          fi

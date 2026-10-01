@@ -149,6 +149,37 @@ Flags work before or after the path. `--provider` overrides
 `BOSUN_REVIEW_PROVIDER`; it does not change cluster credentials. Export the
 credentials and rerun `make kind-up` when adding or refreshing them.
 
+### Which image a review runs
+
+`bosun review` resolves the reviewer image in this order:
+
+1. `BOSUN_DEV_IMAGE`, then `BOSUN_REVIEW_IMAGE`, when either is set;
+2. `ghcr.io/everydaydevopsio/bosun:<version>` when the CLI is a release build,
+   that is when `bosun version` reports an exact `MAJOR.MINOR.PATCH`;
+3. `bosun:dev` otherwise, the tag `./scripts/kind-up.sh` builds and loads.
+
+A binary from `make cli` reports a `git describe` version such as
+`v0.1.1-2-gabc1234`, which names no published image, so it stays on `bosun:dev`.
+
+Before submitting any work, the CLI inspects that image on the Kind node and
+refuses to run when it is not a Bosun image:
+
+```text
+image bosun:dev on the Kind node is a "bridgectl" image, so it has no bosun
+binary to run; rebuild and reload it with ./scripts/kind-up.sh
+```
+
+That is what a Kind cluster left over from an earlier version of Bosun looks
+like. Without the check the Job is created and the kubelet fails it with
+`exec: "/usr/local/bin/bosun": stat ...: no such file or directory`, after the
+snapshot has already been taken. A locally built tag that is missing from the
+node is refused the same way, since nothing can pull it.
+
+Two cases warn instead of failing: an image whose version label differs from the
+CLI version, and a check that cannot run at all because `docker` or `crictl` is
+unavailable. An image you named yourself through the environment is never
+refused, only reported.
+
 The backend is the configured local Kind cluster, whose node must mount
 `/tmp/bosun-repos` at `/repos`. Remote clusters are not supported by this snapshot
 transport. The CLI honors `KUBECONFIG`, explicitly selects `kind-bosun` (or

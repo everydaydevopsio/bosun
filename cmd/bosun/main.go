@@ -18,14 +18,11 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/jobs"
 	"github.com/everydaydevopsio/bosun/internal/review"
 	"github.com/everydaydevopsio/bosun/internal/server"
+	"github.com/everydaydevopsio/bosun/internal/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
-
-// version is the release version, stamped at build time with
-// -ldflags "-X main.version=<version>". An unstamped build reports "dev".
-var version = "dev"
 
 const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]
        bosun review-status JOB [--follow]
@@ -46,7 +43,7 @@ func metaCommand(args []string, stdout io.Writer) bool {
 		fmt.Fprint(stdout, usage)
 		return true
 	case "version", "--version", "-v":
-		fmt.Fprintf(stdout, "bosun %s\n", version)
+		fmt.Fprintf(stdout, "bosun %s\n", version.Version)
 		return true
 	}
 	return false

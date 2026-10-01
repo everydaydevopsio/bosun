@@ -18,6 +18,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/jobs"
 	"github.com/everydaydevopsio/bosun/internal/progress"
 	"github.com/everydaydevopsio/bosun/internal/review"
+	"github.com/everydaydevopsio/bosun/internal/version"
 	"github.com/spf13/pflag"
 	"golang.org/x/sys/unix"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -241,7 +242,25 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		fmt.Fprintln(errout, "Kind /repos mount is missing or inaccessible; run make kind-up on this host")
 		return 2
 	}
+	// Verify the reviewer image before snapshotting: a wrong image fails inside
+	// the kubelet with an opaque exec error, long after the snapshot is taken.
+	image, explicit := reviewImage(version.Version)
+	imageCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	warning, e := checkImage(imageCtx, image, version.Version, kindInspector(cluster))
+	cancel()
+	// An image the user named themselves is their call to make; only an image
+	// this CLI chose on their behalf is worth refusing to run.
+	if e != nil {
+		if !explicit {
+			fmt.Fprintln(errout, e)
+			return 2
+		}
+		warning = e.Error()
+	}
 	started := time.Now()
+	if warning != "" {
+		notice(warning)
+	}
 	notice("Preparing repository snapshot")
 	s, e := snapshot(ctx, path, o.branch, o.base)
 	if e != nil {
@@ -273,7 +292,7 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	cfg.Namespace = o.namespace
 	cfg.ReviewProvider = o.provider
 	cfg.ReviewTimeoutSeconds = int64(o.timeout.Seconds())
-	cfg.ReviewImage = env("BOSUN_DEV_IMAGE", "bosun:dev")
+	cfg.ReviewImage = image
 	expectedJob := jobs.Name(filepath.Base(s.Repo), s.Branch, filepath.Base(s.Path))
 	r := record{Job: expectedJob, Context: o.context, Namespace: o.namespace, Snapshot: s.Path, Repo: s.Repo, Provider: o.provider, Image: cfg.ReviewImage, Started: started, Changes: s.Changes}
 	if e = save(&r); e != nil {

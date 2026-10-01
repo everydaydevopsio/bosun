@@ -79,10 +79,10 @@ clean: ## Remove generated files
 
 .PHONY: cli install review-status
 cli: ## Build the native Bosun CLI
-	go build -ldflags "-X main.version=$(VERSION)" -o bin/bosun ./cmd/bosun
+	go build -ldflags "-X github.com/everydaydevopsio/bosun/internal/version.Version=$(VERSION)" -o bin/bosun ./cmd/bosun
 
 install: ## Install Bosun into GOBIN or GOPATH/bin
-	go install -ldflags "-X main.version=$(VERSION)" ./cmd/bosun
+	go install -ldflags "-X github.com/everydaydevopsio/bosun/internal/version.Version=$(VERSION)" ./cmd/bosun
 
 .PHONY: release-check release-snapshot
 release-check: ## Validate the GoReleaser config
