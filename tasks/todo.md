@@ -89,3 +89,71 @@
 - [ ] Replace Dockerfile, Makefile, scripts, and docs with Go runtime commands (GO-3).
 - [ ] Run unit tests, lint, image build, Helm rendering, and the credential-free local smoke path.
 - [ ] Record evidence, rollback guidance, and lessons.
+
+# Task: Reviewer image preflight and release-aware image default
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-01
+- Mode: Autonomous
+- PRD Section: n/a (local review UX)
+- Requirement IDs: n/a
+
+## Scope
+- In scope: how `bosun review` chooses the reviewer image, a preflight that
+  verifies that image on the Kind node, and an image label that makes the check
+  possible.
+- Out of scope: the hosted (webhook) path, which takes its image from
+  `BOSUN_REVIEW_IMAGE` through the chart and pulls from a registry.
+
+## Acceptance Criteria
+- AC1: A Kind node holding a stale non-Bosun image under the reviewer tag fails
+  before a snapshot is taken, with a message naming the fix. ✅
+- AC2: A released CLI does not default to `bosun:dev`; it defaults to the image
+  published alongside it. ✅
+- AC3: A `make cli` build keeps using `bosun:dev`, since `git describe` names no
+  published image. ✅
+
+## Constraints
+- The probe reads image metadata only; it never inspects container state or
+  credentials.
+- A check that cannot run must not block a review.
+
+## Risks and Tradeoffs
+- Risk: an image built before this change carries no `bosun` title label and is
+  now refused. Accepted: such an image also predates the event protocol, so the
+  review would have failed later and less clearly.
+- Tradeoff: identity is read from an OCI label rather than by executing the
+  binary, which cannot be done without starting a container.
+
+## Execution Checklist
+- [x] `internal/version` holds the stamped version so the CLI and the image
+      resolver read one value; ldflags updated in Makefile, Dockerfile, GoReleaser
+- [x] `reviewImage` resolves env override → published release image → dev tag
+- [x] `checkImage` + `kindInspector` preflight, wired in before snapshotting
+- [x] Dockerfile sets `org.opencontainers.image.*` so the image stops reporting
+      the bridgectl base's identity
+- [x] `docs/local-development.md` documents resolution order and the preflight
+
+## Test Strategy
+- Unit: `internal/localreview/image_test.go` — table tests over resolution
+  (release, `git describe`, unstamped, both env overrides) and over every
+  preflight outcome.
+- Integration: ran the built CLI against a Kind cluster still holding the
+  pre-Go-migration image and confirmed exit 2 before any snapshot.
+- Failure-path tests: foreign image, unlabelled image, absent local tag, absent
+  pullable image, probe that cannot run, unparseable probe output.
+- Requirement-to-test mapping: AC1 → `TestCheckImage`, AC2/AC3 → `TestReviewImage`.
+
+## Rollback Strategy
+- Trigger: the preflight refuses an image that is in fact a working Bosun image.
+- Rollback steps: set `BOSUN_DEV_IMAGE` to the same tag, which downgrades any
+  refusal to a warning, or revert this change.
+- Validation after rollback: `bosun review` reaches the snapshot stage again.
+
+## Outcome
+- Result: the opaque `stat /usr/local/bin/bosun: no such file or directory` Job
+  failure is now a one-second preflight error that names the fix.
+- Evidence: `go test ./...`, `gofmt -l .`, `go vet ./...`, `hadolint Dockerfile`,
+  `make cli && ./bin/bosun version`, and a live run against the stale cluster.
+- PRD updates: none.
