@@ -5,7 +5,7 @@ Bosun runs its Go reviewer inside the bridgectl image and drives the local
 
 ## Base image pinning
 
-The Dockerfile pins `ghcr.io/orchael/bridgectl:v1.3.0`; the image publishes
+The Dockerfile pins `ghcr.io/orchael/bridgectl:v1.4.1`; the image publishes
 version tags, not `latest`. Override the pin with `BRIDGECTL_VERSION` for
 `make build` / `make kind-up`, or `--build-arg BRIDGECTL_VERSION=vX.Y.Z` for
 Docker. Keep the pin aligned with the version used in your environment.

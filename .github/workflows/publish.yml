@@ -58,7 +58,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            BRIDGECTL_VERSION=${{ vars.BRIDGECTL_VERSION || 'v1.3.0' }}
+            BRIDGECTL_VERSION=${{ vars.BRIDGECTL_VERSION || 'v1.4.1' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

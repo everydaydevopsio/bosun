@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-BRIDGECTL_VERSION ?= v1.3.0
+BRIDGECTL_VERSION ?= v1.4.1
 DEV_IMAGE ?= bosun:dev
 
 .PHONY: help deps setup proto test lint build kind-up kind-down review clean

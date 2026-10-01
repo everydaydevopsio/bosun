@@ -1,6 +1,6 @@
 # bridgectl publishes only version tags (no :latest), so pin an explicit
 # version. Override with --build-arg BRIDGECTL_VERSION=vX.Y.Z.
-ARG BRIDGECTL_VERSION=v1.3.0
+ARG BRIDGECTL_VERSION=v1.4.1
 
 FROM golang:1.26-bookworm AS build
 WORKDIR /src

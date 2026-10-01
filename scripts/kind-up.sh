@@ -16,7 +16,7 @@ kind get clusters | grep -qx "$CLUSTER" || kind create cluster --name "$CLUSTER"
 
 # BOSUN_SKIP_BUILD=1 reuses an image already loaded into the cluster.
 if [ "${BOSUN_SKIP_BUILD:-}" != "1" ]; then
-  docker build --build-arg BRIDGECTL_VERSION="${BRIDGECTL_VERSION:-v1.3.0}" -t "$IMAGE" .
+  docker build --build-arg BRIDGECTL_VERSION="${BRIDGECTL_VERSION:-v1.4.1}" -t "$IMAGE" .
   kind load docker-image "$IMAGE" --name "$CLUSTER"
 fi
 
