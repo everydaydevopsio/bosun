@@ -1,0 +1,76 @@
+version: 2
+
+project_name: bosun
+
+release:
+  name_template: "bosun v{{ .Version }}"
+  # Allow a re-run to overwrite its own assets instead of failing the whole
+  # release with 422 already_exists on every upload.
+  mode: replace
+
+builds:
+  - id: bosun
+    binary: bosun
+    main: ./cmd/bosun
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    hooks:
+      post:
+        # Runs inside the build phase, before any artifact is uploaded, so a
+        # signing or notarization failure aborts the release instead of leaving
+        # unnotarized archives on a published GitHub Release and in the tap.
+        # No `env:` block: hooks inherit the process environment, so the
+        # APPLE_* values set on the workflow step reach the script. Listing them
+        # here instead would template them at config-load time and hard-fail any
+        # run without them, including a local snapshot build.
+        - cmd: ./scripts/sign-and-notarize-darwin.sh "{{ .Os }}" "{{ .Path }}" "{{ .IsSnapshot }}"
+
+archives:
+  - id: bosun
+    ids:
+      - bosun
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+homebrew_casks:
+  - name: bosun
+    ids:
+      - bosun
+    binaries:
+      - bosun
+    homepage: https://github.com/everydaydevopsio/bosun
+    description: Event-driven AI code-review controller for Kubernetes
+    license: MIT
+    repository:
+      owner: everydaydevopsio
+      name: homebrew-bosun
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: github-actions[bot]
+      email: github-actions[bot]@users.noreply.github.com
+    directory: Casks
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'

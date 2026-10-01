@@ -1,0 +1,59 @@
+{
+  "targets": [
+    "claude",
+    "codex"
+  ],
+  "agents": [
+    "local-dev",
+    "docs",
+    "cicd",
+    "publishing",
+    "git-hooks",
+    "tasks",
+    "plan-lifecycle",
+    "testing-process",
+    "core",
+    "linting",
+    "logging",
+    "testing"
+  ],
+  "skills": [
+    "owasp-security-scan",
+    "github-health-check",
+    "github-pr-copilot-cycle",
+    "ballast-audit",
+    "agent-performance-audit",
+    "ballast-project-maintenance",
+    "docker-registry-publish"
+  ],
+  "ballastVersion": "5.21.3",
+  "languages": [
+    "go",
+    "docker"
+  ],
+  "paths": {
+    "docker": [
+      "."
+    ],
+    "go": [
+      "."
+    ]
+  },
+  "tools": {
+    "docker": [
+      "docker",
+      "hadolint",
+      "trivy"
+    ],
+    "go": [
+      "go",
+      "gofumpt",
+      "golangci-lint"
+    ]
+  },
+  "taskSystem": "github",
+  "deploymentModel": "kubernetes",
+  "publishingProfiles": [
+    "apps"
+  ]
+}

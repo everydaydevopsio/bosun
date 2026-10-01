@@ -1,0 +1,9 @@
+.env
+
+/bin/
+.ballast/
+__pycache__/
+*.pyc
+
+/dist/
+coverage.out

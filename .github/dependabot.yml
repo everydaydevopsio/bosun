@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+      grpc-protobuf:
+        patterns:
+          - "google.golang.org/grpc"
+          - "google.golang.org/protobuf"
+          - "google.golang.org/genproto*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Tracks the golang build stage. The bridgectl runtime base image is pinned by
+  # the BRIDGECTL_VERSION build arg, which Dependabot cannot see; bump it in the
+  # Dockerfile and the publish workflow's BRIDGECTL_VERSION variable together.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
