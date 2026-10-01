@@ -71,7 +71,7 @@ issue.
 - [x] Write the GoReleaser config and the notarization hook
 - [x] Docs, badges, changelog, license, Dependabot
 - [x] Verify locally (tests, gofmt, vet, helm, shellcheck, actionlint, goreleaser check)
-- [x] File the Windows release issue
+- [x] File the Windows release issue (#5)
 
 ## Verification
 

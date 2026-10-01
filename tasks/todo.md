@@ -12,7 +12,7 @@
 - In scope: CI gates, a reusable release-validation workflow, semver bump-and-tag
   releases, GHCR image and Helm chart publishing, signed and notarized macOS CLI
   archives with a Homebrew tap, Dependabot, release docs, badges, license.
-- Out of scope: Windows release (issue #1), golangci-lint adoption (issue #2),
+- Out of scope: Windows release (#5), golangci-lint adoption (#6),
   the Go migration items tracked below.
 
 ## Acceptance Criteria
@@ -50,7 +50,7 @@
 - [x] Dockerfile passes hadolint with documented ignores
 - [x] `.github/dependabot.yml`, `LICENSE`, `CHANGELOG.md`, README badges
 - [x] `docs/releasing.md` and `docs/README.md`
-- [x] File the Windows release issue
+- [x] File the Windows release issue (#5) and the golangci-lint issue (#6)
 - [ ] Grant `OPENAI_API_KEY`, `APPLE_*`, `HOMEBREW_TAP_GITHUB_TOKEN`, `CODECOV_TOKEN`
       to `everydaydevopsio/bosun` (repository configuration, not a code change)
 - [ ] Create the public `everydaydevopsio/homebrew-bosun` repository
