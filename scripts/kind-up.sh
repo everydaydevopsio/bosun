@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Every path below is relative to the repository, not to the caller's directory.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+cd "$HERE/.."
+
+# The CLI owns the cluster lifecycle. Prefer the checkout's own CLI over an
+# installed one so the script cannot drift from the source it sits in;
+# BOSUN_BIN overrides it, which is also the seam the script test uses.
+bosun_cli() {
+  if [ -n "${BOSUN_BIN:-}" ]; then
+    "$BOSUN_BIN" "$@"
+    return
+  fi
+  go run ./cmd/bosun "$@"
+}
+
 CLUSTER="${BOSUN_KIND_CLUSTER:-bosun}"
 CONTEXT="kind-$CLUSTER"
 IMAGE="${BOSUN_DEV_IMAGE:-bosun:dev}"
@@ -18,17 +33,6 @@ command -v kubectl >/dev/null || { echo "kubectl is required" >&2; exit 2; }
 command -v helm >/dev/null || { echo "helm is required" >&2; exit 2; }
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
-mkdir -p /tmp/bosun-repos
-kind get clusters | grep -qx "$CLUSTER" || kind create cluster --name "$CLUSTER" --config kind-config.yaml
-
-# BOSUN_SKIP_BUILD=1 reuses an image already loaded into the cluster.
-if [ "${BOSUN_SKIP_BUILD:-}" != "1" ]; then
-  docker build --build-arg BRIDGECTL_VERSION="${BRIDGECTL_VERSION:-v1.4.1}" -t "$IMAGE" .
-  kind load docker-image "$IMAGE" --name "$CLUSTER"
-fi
-
-kubectl --context "$CONTEXT" create namespace bosun --dry-run=client -o yaml | kubectl --context "$CONTEXT" apply -f -
-
 # Publish whichever provider credentials are present. Each is optional in the
 # Job spec, so a partial secret is fine as long as the selected provider's key
 # is there.
@@ -41,17 +45,23 @@ SECRET_ARGS=()
 [ -n "${CODEX_AUTH:-}" ] && SECRET_ARGS+=(--from-literal=codex-auth="$CODEX_AUTH")
 [ -n "${CLAUDE_CREDENTIALS:-}" ] && SECRET_ARGS+=(--from-literal=claude-credentials="$CLAUDE_CREDENTIALS")
 
+# The CLI owns the cluster, the namespace, and credential discovery, so a
+# contributor and a released-CLI user go through one implementation. With no
+# exported credentials it falls back to this machine's codex/claude sign-in and
+# fails with its own message when the selected provider has neither.
+CLI_ARGS=(--cluster "$CLUSTER" --namespace bosun --provider "$PROVIDER")
 if [ "${#SECRET_ARGS[@]}" -eq 0 ]; then
-  echo "No provider credentials found in the environment." >&2
-  echo "Expected one of OPENAI_API_KEY, CODEX_AUTH, CLAUDE_CODE_OAUTH_TOKEN," >&2
-  echo "CLAUDE_CREDENTIALS, ANTHROPIC_API_KEY or GEMINI_API_KEY" >&2
-  echo "Export credentials before running this script; see docs/local-development.md." >&2
-  exit 2
+  CLI_ARGS+=(--local-credentials)
+fi
+bosun_cli up "${CLI_ARGS[@]}" >/dev/null
+
+if [ "${#SECRET_ARGS[@]}" -gt 0 ]; then
+  kubectl --context "$CONTEXT" -n bosun create secret generic bosun-ai "${SECRET_ARGS[@]}" \
+    --dry-run=client -o yaml | kubectl --context "$CONTEXT" apply -f -
 fi
 
-kubectl --context "$CONTEXT" -n bosun create secret generic bosun-ai "${SECRET_ARGS[@]}" \
-  --dry-run=client -o yaml | kubectl --context "$CONTEXT" apply -f -
-
+# Exported credentials are validated here; discovered ones by the CLI above.
+if [ "${#SECRET_ARGS[@]}" -gt 0 ]; then
 case "$PROVIDER" in
   codex|codex-bosun)
     [ -n "${OPENAI_API_KEY:-}${CODEX_AUTH:-}" ] || {
@@ -64,6 +74,14 @@ case "$PROVIDER" in
   gemini)
     [ -n "${GEMINI_API_KEY:-}" ] || { echo "provider gemini needs GEMINI_API_KEY" >&2; exit 2; } ;;
 esac
+fi
+
+# BOSUN_SKIP_BUILD=1 reuses an image already loaded into the cluster. This runs
+# after the cluster exists, because `kind load` needs a node to load into.
+if [ "${BOSUN_SKIP_BUILD:-}" != "1" ]; then
+  docker build --build-arg BRIDGECTL_VERSION="${BRIDGECTL_VERSION:-v1.4.1}" -t "$IMAGE" .
+  kind load docker-image "$IMAGE" --name "$CLUSTER"
+fi
 
 helm --kube-context "$CONTEXT" upgrade --install bosun ./charts/bosun -n bosun \
   --set image.repository="$IMAGE_REPOSITORY" \
