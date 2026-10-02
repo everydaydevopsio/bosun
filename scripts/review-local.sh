@@ -5,9 +5,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ -n "${BOSUN_BIN:-}" ]; then
   exec "$BOSUN_BIN" review "$@"
 fi
-if command -v bosun >/dev/null 2>&1; then
-  exec bosun review "$@"
-fi
+# Built from this checkout rather than taken from PATH: an installed bosun can
+# predate the flags this script is asked to forward, and "unknown flag" would
+# point at the caller instead of at the version skew.
 # Preserve the caller's working directory when building from the source tree.
 BIN="$(mktemp /tmp/bosun-cli.XXXXXXXX)"
 trap 'rm -f "$BIN"' EXIT
