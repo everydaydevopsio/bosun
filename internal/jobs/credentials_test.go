@@ -43,6 +43,10 @@ func TestJobReceivesOnlyTheSelectedProvidersCredentials(t *testing.T) {
 		// An unrecognised provider is fail-closed: it gets no model credentials
 		// rather than all of them.
 		{"something-custom", nil},
+		// opencode is in that set despite being a real provider the base image
+		// ships: nothing maps it to a credential, so it receives none. The docs
+		// and scripts no longer claim otherwise; supporting it is #18.
+		{"opencode", nil},
 	}
 
 	for _, tc := range tests {

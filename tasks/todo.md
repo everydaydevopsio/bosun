@@ -279,3 +279,30 @@
   recovery; the regression that would affect published installs is now guarded.
 - Evidence: `helm lint`, the guard run locally in both directions, and the
   published-chart comparison recorded above.
+
+# Task: Stop claiming opencode is supported
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-06
+- Mode: Autonomous
+- Issue: https://github.com/everydaydevopsio/bosun/issues/18
+
+## Scope
+- In scope: removing the claim, in docs and in `scripts/kind-up.sh`, that
+  `opencode` is a usable provider.
+- Out of scope: making it work. That needs a decision about which credentials it
+  should receive, which stays on #18.
+
+## Acceptance Criteria
+- AC1: No document or script tells a user opencode is configured or validated. ✅
+- AC2: The reason is stated where someone would look for the provider list. ✅
+  `docs/bridgectl.md` says it is unsupported and why.
+- AC3: A regression test fails if opencode silently gains credentials without
+  the docs changing. ✅ added to the provider-scoping table test.
+
+## Outcome
+- Result: `kind-up.sh` no longer validates a credential the Job never receives,
+  so the setup path stops promising something the review cannot deliver.
+- Evidence: `go test ./internal/jobs/ -count=1`, `shellcheck -S warning scripts/*.sh`,
+  case-insensitive sweep of docs, README, scripts and charts.
