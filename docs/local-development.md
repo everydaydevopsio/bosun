@@ -162,6 +162,35 @@ kubectl -n bosun logs -f job/<job-name>
 
 Run `./scripts/kind-up.sh` again. It rebuilds and reloads `bosun:dev` and upgrades the Helm release.
 
+## A cluster from before the Go migration
+
+`./scripts/kind-up.sh` can fail on a long-lived Kind cluster with:
+
+```
+Error: UPGRADE FAILED: cannot patch "bosun-bosun" with kind Deployment:
+Deployment.apps "bosun-bosun" is invalid: spec.selector: ... field is immutable
+```
+
+This means the cluster still holds a release installed before the Go migration,
+when the chart's Deployment selector did not carry
+`app.kubernetes.io/instance`. `spec.selector` is immutable, so Helm cannot patch
+it. Published charts are unaffected — every tagged chart has the current
+selector — so this only reaches a development cluster that has been alive since
+before that change.
+
+The failure is quiet: the old pod keeps running, and only `helm history bosun -n
+bosun` shows the release in `failed`.
+
+Delete the Deployment and run the script again. Helm recreates it, and nothing
+else in the release is immutable:
+
+```bash
+kubectl -n bosun delete deployment bosun-bosun
+./scripts/kind-up.sh
+```
+
+`bosun down && bosun up` works too, and costs a cluster rebuild.
+
 ## Remove everything
 
 ```bash

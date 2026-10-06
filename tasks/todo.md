@@ -237,3 +237,45 @@
   [#19](https://github.com/everydaydevopsio/bosun/issues/19): the chart's
   Deployment `spec.selector` gained a label between 0.1.0 and 0.1.1, and that
   field is immutable, so every 0.1.0 install fails to upgrade.
+
+# Task: Guard the chart against immutable-field drift
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-06
+- Mode: Autonomous
+- Issue: https://github.com/everydaydevopsio/bosun/issues/19
+
+## Scope
+- In scope: a CI guard on the Deployment fields an upgrade cannot change, and a
+  troubleshooting note for the clusters that can hit the failure.
+- Out of scope: renaming the Deployment. The investigation below shows no
+  published chart is affected, so a rename would force a migration on the only
+  real install base to fix a problem it does not have.
+
+## Investigation
+- `app.kubernetes.io/instance` entered the selector in `bc305c0`, inside the Go
+  migration (#7), before either release tag was cut. `v0.1.0` and `v0.1.1`
+  therefore render identical selectors.
+- Chart 0.1.0 was never published: `helm pull oci://ghcr.io/everydaydevopsio/charts/bosun --version 0.1.0`
+  returns `not found`. The only published chart is 0.1.1, whose rendered
+  Deployment matches `main`.
+- The observed failure came from a development cluster installed on 2026-09-23
+  from the pre-migration working tree, which Helm recorded as chart 0.1.0
+  because `Chart.yaml` carried that version at the time.
+- Issue #19's original claim, that every 0.1.0 install is stuck, was wrong and is
+  corrected on the issue.
+
+## Acceptance Criteria
+- AC1: CI fails if the Deployment's name or selector changes. ✅ verified by
+  running the guard against a deliberately altered selector.
+- AC2: An operator who hits the failure finds the recovery. ✅ documented in
+  `docs/local-development.md`.
+- AC3: No change to the chart's rendered output. ✅ the guard passes against the
+  chart unmodified.
+
+## Outcome
+- Result: the real exposure is a stale development cluster, with a one-line
+  recovery; the regression that would affect published installs is now guarded.
+- Evidence: `helm lint`, the guard run locally in both directions, and the
+  published-chart comparison recorded above.

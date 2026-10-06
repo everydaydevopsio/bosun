@@ -110,6 +110,22 @@ jobs:
         run: |
           grep -q 'name: bosun-bosun' /tmp/bosun-dev.yaml
           ! grep -q 'GITHUB_WEBHOOK_SECRET' /tmp/bosun-dev.yaml
+      # Deployment.spec.selector is immutable, so changing it makes `helm upgrade`
+      # fail for every existing install -- the release sits in `failed` while the
+      # old pod keeps serving, which looks like nothing happened (#19). Neither
+      # `helm lint` nor a fresh `helm install` can see that: both only ever
+      # render or create, never patch. Pin the fields an upgrade cannot change.
+      # Changing either one means renaming the Deployment and documenting the
+      # migration, which is the only way out of an immutable-field change.
+      - name: Deployment identity is pinned
+        run: |
+          set -euo pipefail
+          helm template bosun charts/bosun --show-only templates/deployment.yaml > /tmp/bosun-deploy.yaml
+          grep -qx '  name: bosun-bosun' /tmp/bosun-deploy.yaml
+          selector="$(sed -n '/^  selector:/,/^  template:/p' /tmp/bosun-deploy.yaml)"
+          grep -qx '      app.kubernetes.io/name: bosun' <<<"$selector"
+          grep -qx '      app.kubernetes.io/instance: bosun' <<<"$selector"
+
       # The published chart must reference the image published alongside it. A
       # literal tag here silently drifts from the release; `latest` is never
       # pushed at all.
