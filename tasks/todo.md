@@ -157,3 +157,83 @@
 - Evidence: `go test ./...`, `gofmt -l .`, `go vet ./...`, `hadolint Dockerfile`,
   `make cli && ./bin/bosun version`, and a live run against the stale cluster.
 - PRD updates: none.
+
+# Task: CLI-owned cluster lifecycle and local credential injection
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-01
+- Mode: Autonomous
+- PRD Section: n/a (local review UX)
+- Plan: `plans/plan-cli-cluster-lifecycle.md`
+
+## Scope
+- In scope: `bosun up`, `bosun down`, `--local-credentials`, implicit bootstrap from
+  `bosun review`, discovery of codex/claude sign-in on macOS and Linux.
+- Out of scope: Windows (tracked on #5, which this branch updates with the new
+  surface), installing the Helm chart from the CLI, the GitHub webhook path.
+
+## Acceptance Criteria
+- AC1: A machine with `kind` and `docker` and an authenticated provider CLI can
+  run a review with no scripts and nothing exported. ✅ verified end to end.
+- AC2: Credentials are discovered from the Keychain on macOS and from
+  `~/.claude/.credentials.json` elsewhere, and from `codex`'s `auth.json`. ✅
+- AC3: Only the selected provider's credentials reach the Job. ✅ the submitted
+  Job referenced `openai-api-key` and `codex-auth` only, with a Claude credential
+  present in the same Secret.
+- AC4: `bosun down` removes the cluster; a named cluster leaves others alone. ✅
+
+## Constraints
+- No `helm` or `kubectl` dependency for the CLI path; `kind` and `docker` only.
+- Credential values are never printed, only their source.
+
+## Risks and Tradeoffs
+- Risk: real account credentials now land in a Kind Secret, which is base64 at
+  rest, and the reviewer runs untrusted repository content. Mitigated by
+  per-provider scoping; documented as local-only.
+- Tradeoff: `bosun up` does not install the chart, so the controller is still a
+  `kind-up.sh` concern. Keeps the dependency surface small.
+
+## Execution Checklist
+- [x] `internal/credentials` discovery with tests
+- [x] `internal/cluster` Kind lifecycle, namespace and Secret ensure, with tests
+- [x] `up`/`down` commands, `--local-credentials`, `--no-bootstrap`, `--keep-snapshots`
+- [x] One provider→Secret-key mapping, shared by the Job builder and the CLI
+- [x] Scripts delegate to the CLI; `kind-up.sh` reordered so `kind load` follows creation
+- [x] README and `docs/local-development.md`
+- [x] Comment on #5 with the Windows plan for the new surface
+
+## Test Strategy
+- Unit: discovery order, Keychain fallback, `CODEX_HOME`, malformed credential
+  files, provider satisfaction; Kind argv construction, embedded-config drift,
+  namespace/Secret merge semantics; flag parsing for every new command.
+- Integration: created a throwaway `bosun-test` cluster from nothing, loaded
+  credentials into it, confirmed the `/repos` mount, then deleted it.
+- E2E: `bosun review --detach --local-credentials` on the default cluster,
+  inspected the resulting Job, deleted it.
+- Failure-path tests: provider with no credential, unreadable Keychain, invalid
+  JSON, missing `kind`/`docker`, dev image absent from a fresh cluster.
+
+## Rollback Strategy
+- Trigger: bootstrap creates or deletes a cluster a user did not expect.
+- Rollback steps: `--no-bootstrap` restores the previous behaviour for review;
+  `kind-up.sh`/`kind-down.sh` still work.
+- Validation after rollback: `bosun review --no-bootstrap` fails as before when
+  the cluster is absent.
+
+## Outcome
+- Result: a released CLI reaches a working review with one command.
+- Evidence: `go test ./...`, `gofmt -l .`, `go vet ./...`, `shellcheck -S warning
+  scripts/*.sh`, plus the live round trip recorded above.
+- Discovered, promoted to GitHub as
+  [#18](https://github.com/everydaydevopsio/bosun/issues/18): the `opencode`
+  provider is documented as using `OPENAI_API_KEY` but `credentials.ForProvider`
+  matches only `codex*`, `claude*` and `gemini*` prefixes, so an opencode Job
+  receives no credentials at all.
+- Windows follow-up recorded on
+  [#5](https://github.com/everydaydevopsio/bosun/issues/5#issuecomment-5942148215).
+- Discovered while running `scripts/kind-up.sh` against a cluster holding the
+  0.1.0 release, promoted to
+  [#19](https://github.com/everydaydevopsio/bosun/issues/19): the chart's
+  Deployment `spec.selector` gained a label between 0.1.0 and 0.1.1, and that
+  field is immutable, so every 0.1.0 install fails to upgrade.

@@ -34,6 +34,12 @@ esac
 			t.Fatal(err)
 		}
 	}
+	// kind-up.sh delegates the cluster, namespace and Secret to the CLI, so the
+	// CLI is mocked here like every other tool the script drives.
+	bosunBin := filepath.Join(bin, "bosun-cli")
+	if err := os.WriteFile(bosunBin, []byte("#!/usr/bin/env bash\nset -eu\nprintf 'bosun %s\\n' \"$*\" >> \"$TEST_CALLS\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	repo := filepath.Join(root, "repo")
 	if err := os.Mkdir(repo, 0700); err != nil {
 		t.Fatal(err)
@@ -49,7 +55,7 @@ esac
 			t.Fatal(err)
 		}
 		cmd := exec.Command("bash", path, repo)
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "TEST_CALLS="+calls, "BOSUN_KIND_CLUSTER=selected", "BOSUN_SKIP_BUILD=1", "BOSUN_REVIEW_PROVIDER=codex-bosun", "OPENAI_API_KEY=test-only", "KUBECONFIG=/nonexistent-production-context")
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "TEST_CALLS="+calls, "BOSUN_BIN="+bosunBin, "BOSUN_KIND_CLUSTER=selected", "BOSUN_SKIP_BUILD=1", "BOSUN_REVIEW_PROVIDER=codex-bosun", "OPENAI_API_KEY=test-only", "KUBECONFIG=/nonexistent-production-context")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s: %v: %s", script, err, out)
 		}
@@ -58,8 +64,15 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "helm") || strings.Count(string(data), "kubectl") < 5 {
+	// Four kubectl invocations remain: the Secret's create/apply pipeline and the
+	// rollout restart and status. Namespace creation moved into the CLI below.
+	if !strings.Contains(string(data), "helm") || strings.Count(string(data), "kubectl") < 4 {
 		t.Fatalf("commands not exercised: %s", data)
+	}
+	// The cluster name reaches the CLI, or the script would prepare a different
+	// cluster than the one it then loads the image into.
+	if !strings.Contains(string(data), "bosun up --cluster selected") {
+		t.Fatalf("kind-up.sh did not delegate to the CLI with the selected cluster: %s", data)
 	}
 }
 

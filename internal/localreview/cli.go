@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/config"
+	"github.com/everydaydevopsio/bosun/internal/credentials"
 	"github.com/everydaydevopsio/bosun/internal/jobs"
 	"github.com/everydaydevopsio/bosun/internal/progress"
 	"github.com/everydaydevopsio/bosun/internal/review"
@@ -28,9 +30,12 @@ import (
 
 type options struct {
 	branch, base, provider, context, namespace string
+	cluster                                    string
 	timeout                                    time.Duration
 	json, detach, follow                       bool
 	owner                                      bool
+	localCredentials, noBootstrap              bool
+	keepSnapshots                              bool
 }
 type record struct {
 	Job, Context, Namespace, Snapshot, Repo, Provider, Image string
@@ -121,16 +126,28 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 	f := pflag.NewFlagSet(command, pflag.ContinueOnError)
 	f.SetOutput(errout)
 
+	defaultCluster := env("BOSUN_KIND_CLUSTER", "bosun")
 	f.BoolVar(&o.json, "json", false, "Emit versioned JSON events")
-	if command == "review" {
-		f.StringVar(&o.context, "context", "kind-"+env("BOSUN_KIND_CLUSTER", "bosun"), "Kubernetes context for the local Kind cluster")
+	switch command {
+	case "review":
+		f.StringVar(&o.context, "context", "kind-"+defaultCluster, "Kubernetes context for the local Kind cluster")
 		f.StringVar(&o.namespace, "namespace", cfg.Namespace, "Kubernetes namespace")
 		f.StringVar(&o.branch, "branch", "", "Committed branch/ref to review (default: current checkout including dirty files)")
 		f.StringVar(&o.base, "base", "", "Comparison base (default: repository default branch)")
 		f.StringVar(&o.provider, "provider", cfg.ReviewProvider, "Headless bridgectl provider")
 		f.DurationVar(&o.timeout, "timeout", time.Duration(cfg.ReviewTimeoutSeconds)*time.Second, "Review execution timeout")
 		f.BoolVar(&o.detach, "detach", false, "Submit without waiting; retain snapshot")
-	} else {
+		f.BoolVar(&o.localCredentials, "local-credentials", false, "Load this machine's provider sign-in into the cluster before reviewing")
+		f.BoolVar(&o.noBootstrap, "no-bootstrap", false, "Fail instead of creating the Kind cluster when it is missing")
+	case "up":
+		f.StringVar(&o.cluster, "cluster", defaultCluster, "Kind cluster name")
+		f.StringVar(&o.namespace, "namespace", cfg.Namespace, "Kubernetes namespace")
+		f.StringVar(&o.provider, "provider", cfg.ReviewProvider, "Provider whose credentials must be present")
+		f.BoolVar(&o.localCredentials, "local-credentials", false, "Load this machine's provider sign-in into the cluster")
+	case "down":
+		f.StringVar(&o.cluster, "cluster", defaultCluster, "Kind cluster name")
+		f.BoolVar(&o.keepSnapshots, "keep-snapshots", false, "Keep the snapshot directory on the host")
+	default:
 		f.BoolVar(&o.follow, "follow", false, "Follow until completion")
 	}
 	e := f.Parse(args)
@@ -139,6 +156,9 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 	}
 	if f.NArg() > 1 {
 		return o, nil, fmt.Errorf("expected at most one path or job name")
+	}
+	if (command == "up" || command == "down") && f.NArg() > 0 {
+		return o, nil, fmt.Errorf("%s takes no positional arguments", command)
 	}
 	if command == "review" && o.timeout < time.Second {
 		return o, nil, fmt.Errorf("--timeout must be at least 1s")
@@ -168,6 +188,12 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	if e != nil {
 		fmt.Fprintln(errout, e)
 		return 2
+	}
+	switch command {
+	case "up":
+		return runUp(ctx, o, out, errout)
+	case "down":
+		return runDown(ctx, o, out, errout)
 	}
 	if command == "review-status" {
 		if len(pos) != 1 {
@@ -208,27 +234,35 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 			fmt.Fprintln(errout, message)
 		}
 	}
-	c, e := client(o.context)
-	if e != nil {
-		fmt.Fprintln(errout, e)
-		return 2
-	}
 	// The snapshot is a host mount: verify this context refers to the expected Kind node.
 	if !strings.HasPrefix(o.context, "kind-") {
 		fmt.Fprintln(errout, "local snapshots require a configured Kind context; remote clusters are unsupported")
 		return 2
 	}
-	cluster := strings.TrimPrefix(o.context, "kind-")
+	clusterName := strings.TrimPrefix(o.context, "kind-")
+	// Bootstrap before the client is built: with no cluster there is no context
+	// for client-go to resolve, so this must run first or it never runs.
+	if !o.noBootstrap {
+		if e := ensureCluster(ctx, clusterName, notice); e != nil {
+			fmt.Fprintln(errout, e)
+			return 1
+		}
+	}
+	c, e := client(o.context)
+	if e != nil {
+		fmt.Fprintln(errout, e)
+		return 2
+	}
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	nodes, e := c.CoreV1().Nodes().List(checkCtx, metav1.ListOptions{})
 	cancel()
 	if e != nil {
-		fmt.Fprintln(errout, "Cannot reach Kind cluster; run make kind-up:", e)
+		fmt.Fprintln(errout, "Cannot reach Kind cluster; run bosun up:", e)
 		return 1
 	}
 	found := false
 	for _, n := range nodes.Items {
-		if n.Name == cluster+"-control-plane" {
+		if n.Name == clusterName+"-control-plane" {
 			found = true
 		}
 	}
@@ -237,16 +271,35 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		return 2
 	}
 	// Inspect only mount metadata, never container credentials.
-	b, e := exec.CommandContext(ctx, "docker", "inspect", "--format", `{{range .Mounts}}{{if eq .Destination "/repos"}}{{.Source}}{{end}}{{end}}`, cluster+"-control-plane").Output()
-	if e != nil || strings.TrimSpace(string(b)) != "/tmp/bosun-repos" {
-		fmt.Fprintln(errout, "Kind /repos mount is missing or inaccessible; run make kind-up on this host")
+	b, e := exec.CommandContext(ctx, "docker", "inspect", "--format", `{{range .Mounts}}{{if eq .Destination "`+cluster.ContainerRepos+`"}}{{.Source}}{{end}}{{end}}`, clusterName+"-control-plane").Output()
+	if e != nil || strings.TrimSpace(string(b)) != cluster.HostRepos {
+		fmt.Fprintf(errout, "Kind %s mount is missing or inaccessible; recreate the cluster with bosun down && bosun up\n", cluster.ContainerRepos)
 		return 2
+	}
+	// The namespace holds the admission lease, the Job, and the AI Secret.
+	if !o.noBootstrap {
+		nsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		e = cluster.EnsureNamespace(nsCtx, c, o.namespace)
+		cancel()
+		if e != nil {
+			fmt.Fprintln(errout, "create namespace:", e)
+			return 1
+		}
+	}
+	if o.localCredentials {
+		credCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		e = loadCredentials(credCtx, c, o.namespace, config.Load().AISecret, o.provider, credentials.Discover(credCtx), notice)
+		cancel()
+		if e != nil {
+			fmt.Fprintln(errout, e)
+			return 2
+		}
 	}
 	// Verify the reviewer image before snapshotting: a wrong image fails inside
 	// the kubelet with an opaque exec error, long after the snapshot is taken.
 	image, explicit := reviewImage(version.Version)
 	imageCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	warning, e := checkImage(imageCtx, image, version.Version, kindInspector(cluster))
+	warning, e := checkImage(imageCtx, image, version.Version, kindInspector(clusterName))
 	cancel()
 	// An image the user named themselves is their call to make; only an image
 	// this CLI chose on their behalf is worth refusing to run.

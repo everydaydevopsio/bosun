@@ -13,11 +13,43 @@ Setup does not fetch credentials or write `.env`.
 make setup
 ```
 
-Configure credentials manually by exporting the variables for your provider
-before `make kind-up`, using the examples below. `make kind-up` copies the
-exported credentials into the local cluster's `bosun-ai` Secret; reviews use
-that Secret without fetching credentials from an external service. After
-changing credentials, run `make kind-up` again to update the cluster.
+## Credentials
+
+The reviewer Job reads its provider credentials from the `bosun-ai` Secret in the
+cluster. There are two ways to get them there.
+
+### Let the CLI find them
+
+If `codex` or `claude` is already signed in on this machine, `--local-credentials`
+copies that sign-in into the cluster:
+
+```bash
+bosun up --local-credentials          # prepare a cluster, or refresh credentials
+bosun review "$PWD" --local-credentials
+```
+
+Discovery order, first match wins per credential:
+
+1. An exported environment variable, which is always an explicit choice.
+2. `codex`'s `auth.json`, under `$CODEX_HOME` when set, otherwise `~/.codex`.
+3. `claude`'s credentials: the `Claude Code-credentials` Keychain item on macOS,
+   or `~/.claude/.credentials.json` on Linux.
+
+The CLI reports which source each credential came from and never prints a value.
+Credentials are copied, not linked: these are OAuth tokens that your local CLIs
+refresh in place, so re-run `bosun up --local-credentials` after re-authenticating.
+
+Bosun refuses to continue when the selected provider has no usable credential,
+naming the ones that provider accepts. Only that provider's keys are mounted into
+the Job even when the Secret holds more — a review cannot read another provider's
+token.
+
+### Export them yourself
+
+Export the variables for your provider before `make kind-up`, using the examples
+below. `make kind-up` copies the exported credentials into the `bosun-ai` Secret;
+when nothing is exported it falls back to the discovery path above. After changing
+credentials, run `make kind-up` again, or `bosun up --local-credentials`.
 
 Recognised credentials:
 
@@ -49,6 +81,21 @@ export BOSUN_REVIEW_PROVIDER=claude-bosun
 
 ## Start the environment
 
+With a released CLI there is nothing to start: `bosun review` creates what it
+needs. `bosun up` does the same work ahead of time.
+
+| Command | Creates | Needs |
+| --- | --- | --- |
+| `bosun up` | Kind cluster with `/tmp/bosun-repos` mounted at `/repos`, the `bosun` namespace, and with `--local-credentials` the `bosun-ai` Secret | `kind`, `docker` |
+| `bosun down` | removes the cluster and the snapshot directory (`--keep-snapshots` to leave it) | `kind`, `docker` |
+| `./scripts/kind-up.sh` | everything `bosun up` does, plus the locally built `bosun:dev` image and the Helm chart | also `kubectl`, `helm`, a source checkout |
+
+The CLI does not install the Helm chart. A local review submits its Job through
+your kubeconfig and holds its own admission lease, so the chart's Deployment,
+Service, and RBAC — which exist for the GitHub webhook path — are not involved.
+Run `./scripts/kind-up.sh` when you want the controller too, or when you are
+working from source and need `bosun:dev` built and loaded.
+
 From the Bosun repository:
 
 ```bash
@@ -57,12 +104,12 @@ From the Bosun repository:
 
 The script:
 
-1. creates a `bosun` Kind cluster;
-2. mounts `/tmp/bosun-repos` from the host into the Kind node;
+1. collects any exported provider credentials;
+2. runs `bosun up` to create the cluster, the namespace, and the Secret, falling
+   back to credential discovery when nothing was exported;
 3. builds `bosun:dev` against the pinned bridgectl version (override with `BRIDGECTL_VERSION`);
 4. loads the image directly into Kind, so no registry is required;
-5. creates only the AI-provider Kubernetes Secret;
-6. installs the Bosun Helm chart in development mode.
+5. installs the Bosun Helm chart in development mode.
 
 No GitHub credential or webhook secret is required.
 
@@ -118,10 +165,14 @@ Run `./scripts/kind-up.sh` again. It rebuilds and reloads `bosun:dev` and upgrad
 ## Remove everything
 
 ```bash
-./scripts/kind-down.sh
+bosun down                  # or ./scripts/kind-down.sh, which calls it
+bosun down --keep-snapshots # keep /tmp/bosun-repos
 ```
 
-This deletes the Kind cluster and the temporary repository snapshots under `/tmp/bosun-repos`.
+This deletes the Kind cluster and, unless you keep them, the temporary repository
+snapshots under `/tmp/bosun-repos`. The snapshot directory is shared by every
+Bosun cluster on the host, so `--keep-snapshots` matters when you run more than
+one.
 
 ## Native review command
 
