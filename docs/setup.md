@@ -30,7 +30,7 @@ For this first implementation, create a fine-grained GitHub token scoped only to
 
 The token is used only by Bosun's own worker process. It is passed to `git` through `GIT_ASKPASS`, so it is never written into the reviewed workspace's `.git/config`, and it is stripped from the environment handed to the AI provider.
 
-For Codex/OpenCode:
+For Codex:
 
 ```bash
 kubectl create namespace bosun

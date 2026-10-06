@@ -62,12 +62,12 @@ fi
 
 # Exported credentials are validated here; discovered ones by the CLI above.
 if [ "${#SECRET_ARGS[@]}" -gt 0 ]; then
+# opencode is deliberately absent: the Job builder gives it no credentials, so
+# validating one here would promise support that does not exist (#18).
 case "$PROVIDER" in
   codex|codex-bosun)
     [ -n "${OPENAI_API_KEY:-}${CODEX_AUTH:-}" ] || {
       echo "provider $PROVIDER needs OPENAI_API_KEY or CODEX_AUTH" >&2; exit 2; } ;;
-  opencode)
-    [ -n "${OPENAI_API_KEY:-}" ] || { echo "provider opencode needs OPENAI_API_KEY" >&2; exit 2; } ;;
   claude|claude-bosun)
     [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}${CLAUDE_CREDENTIALS:-}" ] || {
       echo "provider $PROVIDER needs CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY or CLAUDE_CREDENTIALS" >&2; exit 2; } ;;

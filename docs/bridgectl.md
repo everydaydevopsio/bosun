@@ -34,9 +34,14 @@ gRPC instead.
 ## Choosing a provider
 
 `codex-bosun` is the default for the Go controller, Helm chart, and local scripts.
-The packaged `codex` provider is an interactive terminal UI and is unsuitable
-for unattended reviews. `opencode` is another stream-JSON provider, but its
-session must still produce a successful exit before Bosun considers it complete.
+`claude-bosun` is the other supported choice. The packaged `codex` provider is an
+interactive terminal UI and is unsuitable for unattended reviews.
+
+`opencode` is not supported. It is a stream-JSON provider and the base image
+ships it, but `credentials.ForProvider` recognises only the `codex`, `claude` and
+`gemini` prefixes, so a Job created with `BOSUN_REVIEW_PROVIDER=opencode` receives
+no model credentials at all and the review fails inside the provider. Supporting
+it means deciding which credentials it should be given; that is tracked in #18.
 
 Bosun's headless provider runs the packaged executable at
 `/app/node_modules/@openai/codex/bin/codex.js` with `exec`, `--color never`, and

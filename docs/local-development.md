@@ -55,7 +55,7 @@ Recognised credentials:
 
 | Variable | Used by | Delivered as |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | codex-bosun, opencode | environment variable |
+| `OPENAI_API_KEY` | codex-bosun | environment variable |
 | `CODEX_AUTH` | codex-bosun | written to `~/.codex/auth.json` |
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | claude-bosun | environment variable |
 | `CLAUDE_CREDENTIALS` | claude-bosun | written to `~/.claude/.credentials.json` |
@@ -65,7 +65,7 @@ Pick a provider that produces structured output — see
 [bridgectl.md](bridgectl.md#choosing-a-provider). Use `codex-bosun` or `claude-bosun`;
 `codex` renders a terminal UI and its output is rejected.
 
-Codex/OpenCode:
+Codex:
 
 ```bash
 export OPENAI_API_KEY=...
