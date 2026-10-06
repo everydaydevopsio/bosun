@@ -306,3 +306,48 @@
   so the setup path stops promising something the review cannot deliver.
 - Evidence: `go test ./internal/jobs/ -count=1`, `shellcheck -S warning scripts/*.sh`,
   case-insensitive sweep of docs, README, scripts and charts.
+
+# Task: Improve the review prompt from observed output
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-06
+- Mode: Autonomous
+- Evidence: a real review of orchael/bridgectl PR #284 (`b619a722` vs merge base
+  `9d31196e`), whose two findings were verified against the diff before judging
+  the prompt.
+
+## Scope
+- In scope: `prompts/code-review.md`, changed from defects observed in that output.
+- Out of scope: the execution boundary itself (#22). This states the boundary in
+  the prompt; whether the reviewer should ever execute code stays there.
+
+## Observed defects
+1. Findings linked `/repos/review.940875040/internal/localserver/pki.go:587` --
+   the container snapshot path. Unusable to a reader, worse than no link in a PR
+   comment. The prompt asked for "file and line/range" without saying which path.
+2. The diff touched eight files; every finding was in one. Nothing distinguished
+   "reviewed and clean" from "not read".
+3. A finding that can leave the server unable to start (certificate paired with
+   the wrong key) was rated the same Medium as a detection gap. Four severity
+   levels were named and none defined.
+4. The verification section reported attempting tests that the environment
+   cannot run -- invited by "Run relevant tests or static checks when practical".
+5. "Skipped mutating setup steps; no files or GitHub state changed" -- the agent
+   reporting its compliance rather than reviewing code.
+6. The summary described the findings, not what the change does.
+
+## Acceptance Criteria
+- AC1: Findings carry repository-relative paths. Pending re-run.
+- AC2: Output distinguishes clean files from unreviewed ones. Pending re-run.
+- AC3: No reported command attempts. Pending re-run.
+- AC4: Severity matches the stated rubric. Pending re-run.
+
+## Test Strategy
+- The prompt is prose; `go test ./...` only proves nothing was coupled to its
+  wording. The real check is a re-run of the same bridgectl PR against the new
+  prompt, diffed against the recorded output above.
+
+## Outcome
+- Result: prompt rewritten; awaiting the before/after comparison on the same PR.
+- Evidence: `go test ./internal/review/ ./internal/server/ -count=1`.
