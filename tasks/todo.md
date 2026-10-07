@@ -367,9 +367,17 @@ now states the reading method affirmatively and first, scopes the restriction to
 builds, tests, linters and installs, and says the session is unattended so the
 agent never asks for material.
 
+## Second defect found by the re-run
+The clean run fixed all six targeted defects, but dropped something the original
+output had: it never named the commit it reviewed. The first review opened with
+"Reviewed `b619a722` against merge base `9d31196e`"; folding that instruction
+into the reading paragraph stopped it appearing in the output. The branch moved
+248 lines between the two runs, which is exactly when a reviewed-revision line
+matters. Restored as the first required output element.
+
 ## Outcome
-- Result: prompt rewritten, one regression found and fixed by re-running the
-  same PR. Awaiting a clean before/after comparison.
+- Result: prompt rewritten; two regressions found and fixed by re-running against
+  a real PR, which is the only verification a prose change has.
 - Evidence: `go test ./internal/review/ ./internal/server/ -count=1`, plus the
   failed run above.
 - Discovered, not fixed here: a review that reviewed nothing exits 0 and is

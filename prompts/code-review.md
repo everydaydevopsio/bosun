@@ -21,6 +21,7 @@ Severity:
 - low: maintainability, clarity, or a latent risk with no current path to it
 
 Return concise GitHub-flavored Markdown:
+- The commit you reviewed and the merge base you compared it against. A branch moves, so a review that does not name its revision cannot be trusted or compared later.
 - One sentence on what the change does.
 - Findings in severity order. Each gives a repository-relative path and line range, the concrete failure it causes, and a remediation specific enough to implement -- name the function, the ordering, or the check. Never write an absolute path or the path of the directory you are reviewing in; a reader sees a repository, not your filesystem.
 - For each finding, state your confidence and what you could not confirm by reading.
