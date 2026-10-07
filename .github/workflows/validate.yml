@@ -79,11 +79,12 @@ jobs:
           grep -q "image: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
           grep -q "value: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
           ! grep -q ':latest' /tmp/bosun-default.yaml
+      # shellcheck ships in the runner image, so installing it put an Ubuntu
+      # mirror in the release path for no gain. See ci.yml for the detail.
       - name: Lint shell scripts
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+          shellcheck --version
           shellcheck -S warning scripts/*.sh
 
       - name: Build the image

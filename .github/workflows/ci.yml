@@ -145,6 +145,11 @@ jobs:
   scripts:
     name: Shell scripts
     runs-on: ubuntu-latest
+    # Static analysis of five scripts needs seconds. A limit here is about
+    # hangs, not slowness: this job once sat for 41 minutes inside `apt-get
+    # update` against an unresponsive Ubuntu mirror, and shellcheck itself has
+    # an open report of hanging on 24.04 runners (actions/runner#3667).
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Scripts are executable
@@ -152,7 +157,11 @@ jobs:
           for f in scripts/*.sh; do
             [ -x "$f" ] || { echo "$f is not executable"; exit 1; }
           done
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # shellcheck ships in the runner image (0.9.0-1 on ubuntu-24.04), so
+      # installing it added an Ubuntu mirror to this job's dependencies for no
+      # gain. Printing the version records what actually ran, since the image
+      # can bump it without notice.
+      - run: shellcheck --version
       - run: shellcheck -S warning scripts/*.sh
       - run: bash -n scripts/*.sh
 

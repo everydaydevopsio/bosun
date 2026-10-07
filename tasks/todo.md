@@ -399,3 +399,35 @@ The same review also caught `yarn-error.log`, swept into commit 5d93201 by
   failed run above.
 - Discovered, not fixed here: a review that reviewed nothing exits 0 and is
   recorded `completed`. A refusal is indistinguishable from a clean review.
+
+# Task: Stop installing a preinstalled shellcheck in CI
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-07
+- Mode: Autonomous
+
+## Scope
+- In scope: the `apt-get` install of shellcheck in `ci.yml` and `validate.yml`,
+  and a timeout on the job that hung.
+- Out of scope: actions/runner#3667, an open upstream report of shellcheck
+  itself hanging on 24.04 runners. The timeout bounds it; nothing here fixes it.
+
+## Evidence
+- `shellcheck 0.9.0-1` is listed in the ubuntu-24.04 runner image's installed
+  apt packages, so the install step reinstalled what was already present.
+- The Shell scripts job on PR #24 sat 12m42s inside `apt-get update` before
+  cancellation, with every `azure.archive.ubuntu.com` index returning `Ign:`.
+  shellcheck never ran. An in-run retry hung the same way; a fresh run passed.
+
+## Acceptance Criteria
+- AC1: The job no longer contacts an Ubuntu mirror. ✅
+- AC2: `validate.yml`, which gates releases, no longer has a mirror in its path. ✅
+- AC3: A hang fails in minutes rather than tens of minutes. ✅ `timeout-minutes: 5`.
+- AC4: The shellcheck version actually used is recorded in the log. ✅
+
+## Outcome
+- Result: one network dependency removed from a pure static-analysis job, and
+  from the release validation path.
+- Evidence: both workflows parse; `shellcheck -S warning scripts/*.sh` and
+  `bash -n scripts/*.sh` clean locally.
