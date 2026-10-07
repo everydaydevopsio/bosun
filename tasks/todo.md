@@ -348,6 +348,29 @@
   wording. The real check is a re-run of the same bridgectl PR against the new
   prompt, diffed against the recorded output above.
 
+## Defect found by the first re-run
+The rewrite opened with "You cannot execute anything", and the qualifying list
+after it did not survive: the agent concluded it could not run `git` either,
+and since `internal/review/runner.go:152` supplies only identifiers, it had
+nothing to review. It asked the operator to paste the diff in and exited:
+
+```
+Commit identifiers alone do not establish what the change does or support code findings.
+Please provide the complete merge-base-to-HEAD diff, applicable repository-local rule files, and surrounding source for changed functions.
+Review status: incomplete. No source files reviewed; no conclusions about material findings.
+```
+
+Both providers permit read-only git -- `claude-bosun` allowlists `git diff`,
+`git show`, `git log`, `git merge-base`; `codex-bosun` runs read-only rather
+than no-exec -- so the restriction was wrong, not just badly worded. The prompt
+now states the reading method affirmatively and first, scopes the restriction to
+builds, tests, linters and installs, and says the session is unattended so the
+agent never asks for material.
+
 ## Outcome
-- Result: prompt rewritten; awaiting the before/after comparison on the same PR.
-- Evidence: `go test ./internal/review/ ./internal/server/ -count=1`.
+- Result: prompt rewritten, one regression found and fixed by re-running the
+  same PR. Awaiting a clean before/after comparison.
+- Evidence: `go test ./internal/review/ ./internal/server/ -count=1`, plus the
+  failed run above.
+- Discovered, not fixed here: a review that reviewed nothing exits 0 and is
+  recorded `completed`. A refusal is indistinguishable from a clean review.
