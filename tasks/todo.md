@@ -375,9 +375,26 @@ into the reading paragraph stopped it appearing in the output. The branch moved
 248 lines between the two runs, which is exactly when a reviewed-revision line
 matters. Restored as the first required output element.
 
+## Third defect, found by reviewing this branch with Bosun itself
+Running `bosun review` against this branch caught a regression the bridgectl
+re-runs could not: those pass `--base`, so `BOSUN_BASE_SHA` is set and
+`internal/review/runner.go:153` appends the base commit to the prompt. Hosted
+reviews get no such variable -- `internal/jobs/jobs.go` sets `BOSUN_BASE_SHA`
+only in `SubmitLocal` -- so the old line "Compare the checked-out commit with
+the repository default branch" was the hosted path's only baseline. The rewrite
+deleted it and said "merge-base-to-HEAD", which names no second revision. A
+hosted review would have had to guess its comparison range.
+
+The prompt now resolves the default branch when no base is supplied, and says
+why reviewing HEAD alone is not an option.
+
+The same review also caught `yarn-error.log`, swept into commit 5d93201 by
+`git add -A`. Removed and ignored.
+
 ## Outcome
-- Result: prompt rewritten; two regressions found and fixed by re-running against
-  a real PR, which is the only verification a prose change has.
+- Result: prompt rewritten; three regressions found and fixed, two by re-running
+  against bridgectl and one by running Bosun against this branch. A prose change
+  has no unit test, so running it is the only verification there is.
 - Evidence: `go test ./internal/review/ ./internal/server/ -count=1`, plus the
   failed run above.
 - Discovered, not fixed here: a review that reviewed nothing exits 0 and is
