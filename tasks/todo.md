@@ -306,3 +306,96 @@
   so the setup path stops promising something the review cannot deliver.
 - Evidence: `go test ./internal/jobs/ -count=1`, `shellcheck -S warning scripts/*.sh`,
   case-insensitive sweep of docs, README, scripts and charts.
+
+# Task: Improve the review prompt from observed output
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-06
+- Mode: Autonomous
+- Evidence: a real review of orchael/bridgectl PR #284 (`b619a722` vs merge base
+  `9d31196e`), whose two findings were verified against the diff before judging
+  the prompt.
+
+## Scope
+- In scope: `prompts/code-review.md`, changed from defects observed in that output.
+- Out of scope: the execution boundary itself (#22). This states the boundary in
+  the prompt; whether the reviewer should ever execute code stays there.
+
+## Observed defects
+1. Findings linked `/repos/review.940875040/internal/localserver/pki.go:587` --
+   the container snapshot path. Unusable to a reader, worse than no link in a PR
+   comment. The prompt asked for "file and line/range" without saying which path.
+2. The diff touched eight files; every finding was in one. Nothing distinguished
+   "reviewed and clean" from "not read".
+3. A finding that can leave the server unable to start (certificate paired with
+   the wrong key) was rated the same Medium as a detection gap. Four severity
+   levels were named and none defined.
+4. The verification section reported attempting tests that the environment
+   cannot run -- invited by "Run relevant tests or static checks when practical".
+5. "Skipped mutating setup steps; no files or GitHub state changed" -- the agent
+   reporting its compliance rather than reviewing code.
+6. The summary described the findings, not what the change does.
+
+## Acceptance Criteria
+- AC1: Findings carry repository-relative paths. Pending re-run.
+- AC2: Output distinguishes clean files from unreviewed ones. Pending re-run.
+- AC3: No reported command attempts. Pending re-run.
+- AC4: Severity matches the stated rubric. Pending re-run.
+
+## Test Strategy
+- The prompt is prose; `go test ./...` only proves nothing was coupled to its
+  wording. The real check is a re-run of the same bridgectl PR against the new
+  prompt, diffed against the recorded output above.
+
+## Defect found by the first re-run
+The rewrite opened with "You cannot execute anything", and the qualifying list
+after it did not survive: the agent concluded it could not run `git` either,
+and since `internal/review/runner.go:152` supplies only identifiers, it had
+nothing to review. It asked the operator to paste the diff in and exited:
+
+```
+Commit identifiers alone do not establish what the change does or support code findings.
+Please provide the complete merge-base-to-HEAD diff, applicable repository-local rule files, and surrounding source for changed functions.
+Review status: incomplete. No source files reviewed; no conclusions about material findings.
+```
+
+Both providers permit read-only git -- `claude-bosun` allowlists `git diff`,
+`git show`, `git log`, `git merge-base`; `codex-bosun` runs read-only rather
+than no-exec -- so the restriction was wrong, not just badly worded. The prompt
+now states the reading method affirmatively and first, scopes the restriction to
+builds, tests, linters and installs, and says the session is unattended so the
+agent never asks for material.
+
+## Second defect found by the re-run
+The clean run fixed all six targeted defects, but dropped something the original
+output had: it never named the commit it reviewed. The first review opened with
+"Reviewed `b619a722` against merge base `9d31196e`"; folding that instruction
+into the reading paragraph stopped it appearing in the output. The branch moved
+248 lines between the two runs, which is exactly when a reviewed-revision line
+matters. Restored as the first required output element.
+
+## Third defect, found by reviewing this branch with Bosun itself
+Running `bosun review` against this branch caught a regression the bridgectl
+re-runs could not: those pass `--base`, so `BOSUN_BASE_SHA` is set and
+`internal/review/runner.go:153` appends the base commit to the prompt. Hosted
+reviews get no such variable -- `internal/jobs/jobs.go` sets `BOSUN_BASE_SHA`
+only in `SubmitLocal` -- so the old line "Compare the checked-out commit with
+the repository default branch" was the hosted path's only baseline. The rewrite
+deleted it and said "merge-base-to-HEAD", which names no second revision. A
+hosted review would have had to guess its comparison range.
+
+The prompt now resolves the default branch when no base is supplied, and says
+why reviewing HEAD alone is not an option.
+
+The same review also caught `yarn-error.log`, swept into commit 5d93201 by
+`git add -A`. Removed and ignored.
+
+## Outcome
+- Result: prompt rewritten; three regressions found and fixed, two by re-running
+  against bridgectl and one by running Bosun against this branch. A prose change
+  has no unit test, so running it is the only verification there is.
+- Evidence: `go test ./internal/review/ ./internal/server/ -count=1`, plus the
+  failed run above.
+- Discovered, not fixed here: a review that reviewed nothing exits 0 and is
+  recorded `completed`. A refusal is indistinguishable from a clean review.
