@@ -509,3 +509,42 @@ four different responses and only one of them is the user's to act on.
 ## Outcome
 - Result: a failed review says whose failure it was.
 - Evidence: `go test ./... -count=1`, plus the live exit-10 run above.
+
+# Task: Document self-hosting, and what it costs
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-07
+- Mode: Autonomous
+- Related: #4 (stale self-hosted deployment PR), #28, #29
+
+## Scope
+- In scope: an end-to-end GitHub App path on a cheap DigitalOcean cluster with
+  real monthly costs, the same path through a tunnel to a local Kind cluster,
+  and the chart change those guides need.
+- Out of scope: the credential isolation in #4, which is a security change that
+  deserves its own PR and verification rather than riding along with docs.
+
+## Acceptance Criteria
+- AC1: A reader can go from nothing to reviews on their own pull requests. ✅
+- AC2: Monthly cost is stated with sources, including what is *not* included. ✅
+  the model bill is called out as the one that scales.
+- AC3: A free stable webhook URL is documented, not just paid ones. ✅
+  Cloudflare Tunnel; tunnelto at $4 and ngrok at $10 are compared honestly.
+- AC4: The guides state what is missing rather than implying completeness. ✅
+  four known limits, two of them newly filed as issues.
+
+## Notes on #4
+Opened 2026-09-30 to bring the Go implementation to `main`; that landed instead
+through #7, and sixteen PRs have merged since. Of its 75 files, four are not on
+`main`: `internal/jobs/authenticated.go` (per-Job repository-scoped installation
+tokens), `deploy/values-self-hosted.yaml`, `docs/self-hosted-github-app.md`, and
+a readiness review dated 2026-09-29. This branch supersedes the deployment
+values and the deployment guide with versions written against current `main`.
+What remains worth salvaging is the credential isolation.
+
+## Outcome
+- Result: two guides, a values file, `ingress.annotations` in the chart, and two
+  issues filed for limits the guides would otherwise have glossed over.
+- Evidence: `helm lint`, `helm template` with the new values, relative-link
+  check across both guides, `go test ./... -count=1`.

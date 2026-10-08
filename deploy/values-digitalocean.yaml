@@ -1,0 +1,69 @@
+# Bosun on a single-node DigitalOcean Kubernetes cluster.
+#
+# Companion to docs/self-hosted-digitalocean.md. Copy this, change the two
+# marked values, and pass it with `helm upgrade --install -f`.
+#
+# This is a single-node, non-HA deployment for reviewing your own repositories.
+# It is not a multi-tenant service: a reviewer Job runs an untrusted agent over
+# repository content with model credentials in its environment, so install the
+# GitHub App only on repositories whose contributors you trust.
+
+image:
+  # Pin a release rather than tracking the chart's appVersion if you want
+  # upgrades to be a deliberate act.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+review:
+  provider: codex-bosun
+  # One at a time. The reviewer Job has no resource limits of its own yet, and
+  # on a single node a second concurrent review competes with the controller
+  # for the same memory. Raise this only after moving to a larger node.
+  maxConcurrent: 1
+  timeoutSeconds: 1800
+  ttlSecondsAfterFinished: 3600
+  # Who may spend model credits with "@bridgectl review".
+  allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
+
+logging:
+  format: json
+  level: info
+
+ingress:
+  enabled: true
+  className: nginx
+  # CHANGE ME: the hostname whose DNS record points at this cluster.
+  host: bosun.example.com
+  tlsSecretName: bosun-tls
+  annotations:
+    # CHANGE ME if your ClusterIssuer has a different name.
+    cert-manager.io/cluster-issuer: letsencrypt
+    # The webhook body is small; this keeps a large request from reaching the
+    # controller at all.
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+
+# Restricts reviewer Jobs to DNS and outbound HTTPS, so an agent that reads a
+# malicious instruction out of a pull request cannot reach the Kubernetes API
+# or anything else inside the cluster. Leave this on.
+networkPolicy:
+  enabled: true
+
+# The controller is a small Go process; the reviewer Jobs are what consume the
+# node. These limits keep the controller alive when a review is running.
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+securityContext:
+  runAsUser: 1001
+
+secrets:
+  githubSecretName: bosun-github
+  aiSecretName: bosun-ai
+  webhookSecretName: bosun-webhook
