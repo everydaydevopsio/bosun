@@ -45,7 +45,10 @@ type record struct {
 	TypicalLow, TypicalHigh                                  time.Duration
 	Changes                                                  int
 	Result, Outcome                                          string
-	LastSeq                                                  uint64
+	// Failure carries why a run ended badly, so a later reconnect explains
+	// itself instead of reporting a stored result that does not exist.
+	Failure string
+	LastSeq uint64
 }
 
 func stateDir() (string, error) {

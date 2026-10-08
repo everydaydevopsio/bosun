@@ -39,7 +39,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		if path := os.Getenv("BOSUN_EVENT_FILE"); path != "" {
 			file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
 			if err != nil {
-				return fmt.Errorf("open durable event log: %w", err)
+				return failf(StageSetup, "open durable event log: %w", err)
 			}
 			defer file.Close()
 			events = io.MultiWriter(events, file)
@@ -61,23 +61,23 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 			if errors.Is(result, context.Canceled) {
 				kind = "cancelled"
 			}
-			reporter.Emit(kind, sanitize(result.Error()))
+			reporter.Emit(kind, sanitize(Describe(result)))
 		}
 	}()
 	max := time.Duration(cfg.ReviewTimeoutSeconds) * time.Second
 	if max <= 0 {
-		return fmt.Errorf("review timeout must be positive")
+		return failf(StageSetup, "review timeout must be positive")
 	}
 	ctx, cancel := context.WithTimeout(ctx, max)
 	defer cancel()
 	req := Request{Repo: os.Getenv("BOSUN_REPO"), Ref: os.Getenv("BOSUN_REF"), SHA: os.Getenv("BOSUN_SHA"), Trigger: os.Getenv("BOSUN_TRIGGER")}
 	if req.Repo == "" || req.Ref == "" {
-		return fmt.Errorf("BOSUN_REPO and BOSUN_REF are required")
+		return failf(StageSetup, "BOSUN_REPO and BOSUN_REF are required")
 	}
 	if number := os.Getenv("BOSUN_PR_NUMBER"); number != "" {
 		n, err := strconv.Atoi(number)
 		if err != nil || n < 0 {
-			return fmt.Errorf("invalid BOSUN_PR_NUMBER")
+			return failf(StageSetup, "invalid BOSUN_PR_NUMBER")
 		}
 		req.PRNumber = n
 	}
@@ -116,38 +116,38 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	}()
 	if !local {
 		if !validRepository(req.Repo) {
-			return fmt.Errorf("invalid repository name")
+			return failf(StageSetup, "invalid repository name")
 		}
 		var err error
 		token, err = github.token(ctx, req.Repo)
 		if err != nil {
-			return err
+			return fail(StageSetup, err)
 		}
 		if req.PRNumber > 0 && (req.SHA == "" || req.Trigger == "comment") {
 			req.Ref, req.SHA, err = github.resolvePR(ctx, req.Repo, req.PRNumber, token)
 			if err != nil {
-				return err
+				return fail(StageClone, err)
 			}
 		}
 		workspace, err = os.MkdirTemp("", "bosun-review-")
 		if err != nil {
-			return err
+			return fail(StageSetup, err)
 		}
 		defer os.RemoveAll(workspace)
 		req.SHA, err = cloneRepository(ctx, w.CloneBaseURL, workspace, req, token)
 		if err != nil {
-			return err
+			return fail(StageClone, err)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
-		return fmt.Errorf("review path is not a git repository: %w", err)
+		return failf(StageSetup, "review path is not a git repository: %w", err)
 	}
 	if err := materialiseCredentials(); err != nil {
-		return err
+		return fail(StageSetup, err)
 	}
 	instructions, err := os.ReadFile(w.PromptPath)
 	if err != nil {
-		return fmt.Errorf("read review prompt: %w", err)
+		return failf(StageSetup, "read review prompt: %w", err)
 	}
 	prompt := fmt.Sprintf("%s\nRepository: %s\nBranch: %s\nCommit: %s\n", instructions, req.Repo, req.Ref, req.SHA)
 	if base := os.Getenv("BOSUN_BASE_SHA"); base != "" {
@@ -159,7 +159,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	reporter.Emit("stage", "starting provider")
 	output, err := w.Agent(ctx, workspace, cfg.ReviewProvider, prompt, max)
 	if err != nil {
-		return err
+		return fail(StageProvider, err)
 	}
 	// sanitize as well as redact: redact knows the GitHub token, but provider
 	// credentials only exist in the environment. A prompt-injected agent that
@@ -168,13 +168,13 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	// Before publishing or reporting success: a refusal must fail the Job, not
 	// reach a pull request and not be recorded as a completed review.
 	if err := checkReviewed(output); err != nil {
-		return err
+		return fail(StageReview, err)
 	}
 	output = withoutMarker(output)
 	if !local && req.PRNumber > 0 {
 		reporter.Emit("stage", "publishing")
 		if err := github.postReview(ctx, req.Repo, req.PRNumber, token, output); err != nil {
-			return fmt.Errorf("publish review: %w", err)
+			return failf(StagePublish, "publish review: %w", err)
 		}
 	}
 	if reporter != nil {

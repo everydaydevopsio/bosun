@@ -466,3 +466,46 @@ the run was eligible to count toward duration estimates.
 ## Outcome
 - Result: a refusal now fails the run instead of being recorded as a review.
 - Evidence: `go test ./... -count=1`.
+
+# Task: Let Bosun fail distinguishably from the review failing
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-07
+- Mode: Autonomous
+
+## Scope
+- In scope: classifying reviewer-Job failures by stage, carrying the
+  classification to the user through events, exit codes, and stored run records.
+- Out of scope: telling a pull request that its review failed. On the hosted
+  path a failed review posts nothing, so the person who asked sees silence.
+  Noted as a follow-up.
+
+## Problem
+Every failure rendered as one line of error text. A missing credential, a clone
+that could not authenticate, a dead provider session, and a reviewer that read
+the change and declined all looked identical, and all exited 1. Those call for
+four different responses and only one of them is the user's to act on.
+
+## Acceptance Criteria
+- AC1: A failure names which part failed and why. ✅ `Bosun could not prepare the
+  review: BOSUN_REPO and BOSUN_REF are required`, exit 10.
+- AC2: The stage survives without events or logs. ✅ exit codes 10-14 land in the
+  pod's terminated exitCode.
+- AC3: Wrapping does not hide a timeout or cancellation. ✅ `Failure.Unwrap`,
+  with a test, so a timed-out review is still reported as timed out.
+- AC4: A reconnect to a finished failed run says why. ✅ the reason is stored on
+  the record instead of "Stored review result".
+- AC5: An unclassified error reaches the user unchanged. ✅
+
+## Test Strategy
+- Unit: stage-to-message and stage-to-exit-code mapping, sentinel preservation
+  through `errors.Is`, stage recovery through `errors.As`, unclassified
+  passthrough, stored-failure rendering, and that a successful run's wording is
+  unchanged.
+- E2E: ran `bosun reviewer` with no repository configured and confirmed the
+  message and exit 10.
+
+## Outcome
+- Result: a failed review says whose failure it was.
+- Evidence: `go test ./... -count=1`, plus the live exit-10 run above.
