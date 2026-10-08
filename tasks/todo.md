@@ -431,3 +431,38 @@ The same review also caught `yarn-error.log`, swept into commit 5d93201 by
   from the release validation path.
 - Evidence: both workflows parse; `shellcheck -S warning scripts/*.sh` and
   `bash -n scripts/*.sh` clean locally.
+
+# Task: A review that reviewed nothing must not succeed
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-07
+- Mode: Autonomous
+
+## Scope
+- In scope: detecting a reviewer that did not review, and failing the run.
+- Out of scope: why it could not review. The observed instance was a prompt bug,
+  fixed in #24; this is about the outcome being indistinguishable from success.
+
+## Evidence
+A run against bridgectl ended with the reviewer asking for the diff to be pasted
+in and stating "Review status: incomplete. No source files reviewed". The Job
+exited 0, the pod reported `Succeeded`, the CLI printed "Review completed", and
+the run was eligible to count toward duration estimates.
+
+## Acceptance Criteria
+- AC1: A reviewer that reports incompleteness fails the Job. ✅
+- AC2: A refusal is never published to a pull request. ✅ the check runs before
+  `postReview`.
+- AC3: Prose about incompleteness in a real review does not fail it. ✅
+- AC4: Output from an image predating the marker still succeeds. ✅
+- AC5: The status trailer never appears in a published review. ✅
+
+## Test Strategy
+- Unit: the verbatim refusal that motivated this, empty and whitespace output, a
+  clean review with no findings, prose containing "incomplete", a marker inside a
+  sentence, mixed case and spacing, and output with no marker at all.
+
+## Outcome
+- Result: a refusal now fails the run instead of being recorded as a review.
+- Evidence: `go test ./... -count=1`.

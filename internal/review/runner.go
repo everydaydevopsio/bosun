@@ -165,6 +165,12 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	// credentials only exist in the environment. A prompt-injected agent that
 	// echoes one would otherwise have it published to the pull request.
 	output = sanitize(redact(output, token))
+	// Before publishing or reporting success: a refusal must fail the Job, not
+	// reach a pull request and not be recorded as a completed review.
+	if err := checkReviewed(output); err != nil {
+		return err
+	}
+	output = withoutMarker(output)
 	if !local && req.PRNumber > 0 {
 		reporter.Emit("stage", "publishing")
 		if err := github.postReview(ctx, req.Repo, req.PRNumber, token, output); err != nil {

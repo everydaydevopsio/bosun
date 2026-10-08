@@ -7,4 +7,5 @@ Active and in-flight implementation plans. Each plan graduates to an ADR under `
 | [plan-build-pipeline.md](plan-build-pipeline.md) | In progress |
 | [pr-review-surface.md](pr-review-surface.md) | In progress |
 | [review-progress.md](review-progress.md) | In progress |
-| [plan-cli-cluster-lifecycle.md](plan-cli-cluster-lifecycle.md) | In progress |
+
+Graduated plans live in [`adr/`](../adr/README.md).

@@ -28,4 +28,6 @@ Return concise GitHub-flavored Markdown:
 - Close with the files you reviewed and found nothing material in, so a reader can tell an absent finding from an unread file.
 - If no material findings exist, say so explicitly.
 
+End with a status line of its own: `BOSUN-REVIEW: complete` when you reviewed the change, or `BOSUN-REVIEW: incomplete` when you could not -- the diff was unavailable, the checkout unusable, or the changed files unreadable -- with the reason stated above it. Incomplete means you did not review; a review that found nothing is complete, not incomplete.
+
 Report on the code. Do not describe your own constraints, permissions, or process.
