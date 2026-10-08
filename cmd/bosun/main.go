@@ -132,8 +132,11 @@ func main() {
 	cfg := config.Load()
 	if len(os.Args) > 1 && os.Args[1] == "reviewer" {
 		if err := review.Run(ctx, cfg); err != nil {
-			slog.Error("review failed", "error", err)
-			os.Exit(1)
+			// The exit code carries the stage out of the process, so a pod's
+			// terminated exitCode still says what failed once events and logs
+			// are gone.
+			slog.Error("review failed", "error", review.Describe(err))
+			os.Exit(review.ExitCode(err))
 		}
 		return
 	}

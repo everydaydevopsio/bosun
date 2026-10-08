@@ -291,7 +291,25 @@ limit is always displayed separately.
 
 Exit codes: 0 for a successful review (including one with findings), 1 for an
 execution failure, 2 for invalid input/configuration, 124 for timeout, and 130
-for interruption. `make review REPO=... ARGS='--provider claude-bosun'` and
+for interruption.
+
+A failed review names which part failed, because the responses differ: a setup
+or clone failure is usually yours to fix, a provider failure is usually worth
+retrying, and a reviewer that declined to review is neither. The reviewer Job
+exits with a code for the stage, so a pod's terminated `exitCode` still carries
+the classification after events and logs have expired:
+
+| Exit | Stage | Message | Typically |
+| --- | --- | --- | --- |
+| 10 | setup | Bosun could not prepare the review | configuration, credentials, or workspace — check the message |
+| 11 | clone | Bosun could not obtain the repository | token scope, repository name, or network |
+| 12 | provider | The review provider failed | the AI session died; usually worth one retry |
+| 13 | review | The reviewer did not review the change | the agent declined; the reason it gave is in the message |
+| 14 | publish | The review completed but could not be published | the review succeeded; posting to GitHub did not |
+
+`bosun review` itself still exits 1 for any of these; the stage is in the
+message it prints and in `bosun review-status`, which reports the reason rather
+than a stored result that does not exist. `make review REPO=... ARGS='--provider claude-bosun'` and
 `scripts/review-local.sh` delegate to the native CLI.
 
 Set `BOSUN_QUIET_WARNING_AFTER=2m` to change when silent-provider updates are

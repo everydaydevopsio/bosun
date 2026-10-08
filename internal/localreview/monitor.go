@@ -75,7 +75,11 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 		if r.Result != "" {
 			render(progress.Event{Version: 1, Run: r.Job + "/stored", Seq: 1, Time: r.Finished, Type: "result", Message: r.Result}, o.json, out, errout)
 		}
-		render(progress.Event{Version: 1, Run: r.Job + "/stored", Seq: 2, Time: r.Finished, Type: r.Outcome, Message: "Stored review result", Elapsed: r.Finished.Sub(r.Started).Seconds()}, o.json, out, errout)
+		terminal := "Stored review result"
+		if r.Failure != "" {
+			terminal = r.Failure
+		}
+		render(progress.Event{Version: 1, Run: r.Job + "/stored", Seq: 2, Time: r.Finished, Type: r.Outcome, Message: terminal, Elapsed: r.Finished.Sub(r.Started).Seconds()}, o.json, out, errout)
 		return outcomeCode(r.Outcome)
 	}
 	ticker := time.NewTicker(3 * time.Second)
@@ -110,6 +114,11 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 		if event.Type == "completed" || event.Type == "failed" || event.Type == "timed_out" || event.Type == "cancelled" {
 			r.Outcome = event.Type
 			r.WorkerFinished = event.Time
+			// The worker classifies its own failures; keep that text so a
+			// reconnect after the fact still says what went wrong.
+			if event.Type != "completed" && event.Message != "" {
+				r.Failure = event.Message
+			}
 		}
 		r.LastSeq = seq
 	}
