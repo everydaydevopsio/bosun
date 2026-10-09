@@ -117,6 +117,14 @@ helm install bosun oci://ghcr.io/everydaydevopsio/charts/bosun --version <versio
 The chart's `image.tag` defaults to its `appVersion`, so it always pulls the image
 it was released with. No `latest` tag is published — pin a version or a digest.
 
+For an end-to-end path from nothing to reviews on your pull requests, including
+what it costs each month:
+
+- [docs/self-hosted-digitalocean.md](docs/self-hosted-digitalocean.md) — a
+  single-node DigitalOcean cluster, $24–36/month plus model usage.
+- [docs/self-hosted-local-tunnel.md](docs/self-hosted-local-tunnel.md) — Kind on
+  your own machine behind a tunnel, free with Cloudflare Tunnel.
+
 ## Quick start
 
 1. Build and publish this image, pinning the bridgectl version you run (see [docs/bridgectl.md](docs/bridgectl.md)).

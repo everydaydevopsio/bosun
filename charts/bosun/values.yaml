@@ -44,6 +44,11 @@ ingress:
   className: nginx
   host: bosun.example.com
   tlsSecretName: bosun-tls
+  # Controller-specific settings go here. cert-manager issues the TLS
+  # certificate from an annotation, so without this there is no way to request
+  # one through the chart:
+  #   cert-manager.io/cluster-issuer: letsencrypt
+  annotations: {}
 
 resources:
   requests:
