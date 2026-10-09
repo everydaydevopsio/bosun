@@ -33,13 +33,35 @@ around a missing or old binary.
 - **Working tree** (default): `bosun review "$PWD"` — includes staged, unstaged
   and untracked changes. This is what the user usually means by "review my
   changes".
-- **A branch or pull request**: `bosun review "$PWD" --branch <head> --base <base>`
-  — committed content only. Use this when the user names a PR; get the head and
-  base with `gh pr view <n> --json headRefName,baseRefName`.
+- **A branch**: `bosun review "$PWD" --branch <branch> --base <base>` — committed
+  content only.
 
-Pass `--local-credentials` so Bosun loads this machine's `codex` or `claude`
-sign-in into the cluster. It also creates the cluster on first use, which takes
-a few minutes.
+**Fetch a pull request before reviewing it.** Bosun resolves refs in the local
+checkout with `git rev-parse` and never fetches, so a branch name taken from
+`gh pr view` may not exist locally, may be an unrelated local branch with the
+same name, or may be stale — and a fork's branch will not be there at all. Each
+of those reviews the wrong code and looks like it worked:
+
+```bash
+gh pr checkout <number>                                           # fetches the head, forks included
+base="$(gh pr view <number> --json baseRefName --jq .baseRefName)"
+git fetch origin "$base"
+bosun review "$PWD" --branch "$(git branch --show-current)" --base "origin/$base"
+```
+
+## Choose the provider
+
+`--local-credentials` loads whatever sign-in this machine has, but the default
+provider is `codex-bosun`, so a machine with only Claude authenticated fails
+with "no usable credentials found for provider". Choose to match:
+
+- `BOSUN_REVIEW_PROVIDER` is set — honour it and pass no `--provider`.
+- `~/.codex/auth.json` exists — `--provider codex-bosun`.
+- otherwise, if Claude is signed in — `--provider claude-bosun`.
+
+Pass the same `--provider` on the review command itself; it is not remembered
+between commands. Bosun also creates the cluster on first use, which takes a
+few minutes.
 
 ## Run it detached, then poll
 
@@ -48,7 +70,7 @@ before that, so **never run `bosun review` in the foreground and never use
 `review-status --follow`**. Start it detached and poll instead:
 
 ```bash
-JOB="$(bosun review "$PWD" --detach --local-credentials)"
+JOB="$(bosun review "$PWD" --detach --local-credentials --provider codex-bosun)"
 echo "$JOB"
 ```
 
@@ -61,8 +83,14 @@ bosun review-status "$JOB" --json | tail -5
 
 Look for an event whose `"type"` is `completed`, `failed`, `timed_out` or
 `cancelled`. Until one appears the review is still running — wait about 30
-seconds and poll again. Tell the user it is running rather than going silent;
-first runs are slower because the cluster and image are being prepared.
+seconds and poll again.
+
+**Keep polling in this turn until a terminal event appears.** Do not end your
+turn with the review running, and do not hand it to a background mechanism that
+will wake you later: in a one-shot session nothing will, and the user gets "it
+is running" instead of a review. Tell the user it is still going rather than
+going silent; first runs are slower because the cluster and image are being
+prepared.
 
 When it completes, read the review:
 
@@ -98,6 +126,8 @@ worth one retry, and `review` means the reviewer declined and said why.
 ## Do not
 
 - Do not run the review in the foreground or with `--follow`.
+- Do not pass a branch name you have not fetched and verified.
+- Do not end your turn while the review is still running.
 - Do not re-run a review to "get a better answer"; each run spends model credits.
 - Do not treat an absent finding as proof that an area is correct. The review
   lists the files it read and found nothing material in; anything outside that

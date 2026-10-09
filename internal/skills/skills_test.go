@@ -149,6 +149,11 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 		"--local-credentials",
 		"bosun review-status",
 		"--json",
+		// Found by reviewing this skill with Bosun: a branch name from
+		// `gh pr view` is not necessarily a local ref, and the default
+		// provider is codex-bosun whatever credentials the machine has.
+		"gh pr checkout",
+		"--provider claude-bosun",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("skill does not use %q", want)
@@ -157,5 +162,9 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 	// Blocking is the failure mode this skill exists to avoid.
 	if !strings.Contains(body, "never run `bosun review` in the foreground and never use") {
 		t.Error("skill does not warn against blocking on a review")
+	}
+	// A one-shot agent session that defers polling to "later" never reports.
+	if !strings.Contains(body, "Keep polling in this turn") {
+		t.Error("skill does not require polling to finish within the turn")
 	}
 }
