@@ -58,7 +58,7 @@ func TestMetaCommand(t *testing.T) {
 // The help text is the only place the CLI advertises its commands. Every command
 // main dispatches must appear there or users cannot discover it.
 func TestUsageListsEveryCommand(t *testing.T) {
-	for _, command := range []string{"review", "review-status", "up", "down", "serve", "reviewer", "version"} {
+	for _, command := range []string{"review", "review-status", "init", "up", "down", "serve", "reviewer", "version"} {
 		if !strings.Contains(usage, command) {
 			t.Errorf("usage text does not mention %q", command)
 		}

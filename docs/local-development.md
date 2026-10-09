@@ -203,6 +203,31 @@ snapshots under `/tmp/bosun-repos`. The snapshot directory is shared by every
 Bosun cluster on the host, so `--keep-snapshots` matters when you run more than
 one.
 
+## Reviewing from inside Claude Code or Codex
+
+`bosun init` installs a review skill for the coding agents configured on this
+machine, so you can ask the agent you are already working in to run a review
+instead of switching to a terminal:
+
+```bash
+bosun init                      # installs for ~/.claude and ~/.codex
+bosun init --target claude      # one agent
+bosun init --print              # inspect the skill without installing it
+```
+
+The skill is embedded in the binary, so a Homebrew install can place it with no
+repository checked out, and the instructions always match the CLI that shipped
+them. Agents pick it up on their next session.
+
+A skill that differs from the one the binary ships is left alone — it may be a
+local edit — and `--force` replaces it.
+
+The skill exists mostly to encode three things an agent gets wrong unaided: a
+review can run for 30 minutes and must be started with `--detach` and polled
+rather than waited on, the review arrives on stdout while progress goes to
+stderr, and the reviewer reads code without executing it, so its findings are
+claims to judge rather than test results to apply.
+
 ## Native review command
 
 Build the CLI with `make cli` (creates `bin/bosun`), or install it on your Go
