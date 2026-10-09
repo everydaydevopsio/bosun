@@ -149,11 +149,13 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 		"--local-credentials",
 		"bosun review-status",
 		"--json",
-		// Found by reviewing this skill with Bosun: a branch name from
-		// `gh pr view` is not necessarily a local ref, and the default
-		// provider is codex-bosun whatever credentials the machine has.
-		"gh pr checkout",
+		// Found by reviewing this skill with Bosun: the default provider is
+		// codex-bosun whatever credentials the machine has.
 		"--provider claude-bosun",
+		// The default review is committed branch work, which requires a clean
+		// tree and a branch that is not the default branch.
+		"git status --porcelain",
+		"git rev-parse --abbrev-ref origin/HEAD",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("skill does not use %q", want)
@@ -166,5 +168,13 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 	// A one-shot agent session that defers polling to "later" never reports.
 	if !strings.Contains(body, "Keep polling in this turn") {
 		t.Error("skill does not require polling to finish within the turn")
+	}
+	// Checking out a pull request moves the user's working branch. An agent
+	// must not do that on its own initiative.
+	if !strings.Contains(body, "ask before doing it, and wait for an answer") {
+		t.Error("skill does not require consent before moving the user's branch")
+	}
+	if !strings.Contains(body, "Do not move the user's branch") {
+		t.Error("skill does not forbid moving the branch unasked")
 	}
 }

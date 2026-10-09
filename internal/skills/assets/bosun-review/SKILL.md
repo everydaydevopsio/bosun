@@ -28,26 +28,90 @@ bosun help | grep -q -- --local-credentials || echo "This bosun is too old; upgr
 If either check fails, tell the user how to fix it and stop. Do not try to work
 around a missing or old binary.
 
-## Choose what to review
+## Decide what to review
 
-- **Working tree** (default): `bosun review "$PWD"` — includes staged, unstaged
-  and untracked changes. This is what the user usually means by "review my
-  changes".
-- **A branch**: `bosun review "$PWD" --branch <branch> --base <base>` — committed
-  content only.
+The default is the committed work on this branch, compared with the branch it
+was created from — the same change a reviewer sees in a pull request. Confirm
+three things first, in order, and stop at the first one that fails.
 
-**Fetch a pull request before reviewing it.** Bosun resolves refs in the local
-checkout with `git rev-parse` and never fetches, so a branch name taken from
-`gh pr view` may not exist locally, may be an unrelated local branch with the
-same name, or may be stale — and a fork's branch will not be there at all. Each
-of those reviews the wrong code and looks like it worked:
+**1. The tree is clean.**
 
 ```bash
-gh pr checkout <number>                                           # fetches the head, forks included
-base="$(gh pr view <number> --json baseRefName --jq .baseRefName)"
-git fetch origin "$base"
-bosun review "$PWD" --branch "$(git branch --show-current)" --base "origin/$base"
+git status --porcelain
 ```
+
+Any output means uncommitted work. Stop and tell the user which files, then let
+them choose rather than choosing for them:
+
+- commit them and review the branch, which is what the rest of this assumes; or
+- review the working tree as it stands, with `bosun review "$PWD"` and no
+  `--branch` — useful before committing, but it is not what a reviewer will see.
+
+**2. There is a branch to compare.**
+
+```bash
+git branch --show-current
+git rev-parse --abbrev-ref origin/HEAD    # e.g. origin/main
+```
+
+If the current branch *is* the default branch, there is no branch-to-base
+comparison to make. Say so and offer the working-tree review, or suggest
+creating a branch for the work first.
+
+**3. The branch has commits of its own.**
+
+```bash
+git rev-list --count origin/HEAD..HEAD
+```
+
+Zero means nothing to review yet.
+
+Then run it. Omit `--base` and Bosun resolves the default branch itself, which
+is the fork point for a branch cut from it:
+
+```bash
+bosun review "$PWD" --branch "$(git branch --show-current)" --detach --local-credentials --provider codex-bosun
+```
+
+If this branch already has a pull request, use that PR's base instead, because
+that is what its reviewers will see:
+
+```bash
+base="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
+[ -n "$base" ] && git fetch origin "$base" && extra="--base origin/$base"
+```
+
+Tell the user which base was used. A review against the wrong base is worse than
+no review, because the diff looks plausible.
+
+## Reviewing a named pull request
+
+If the user names a PR, check whether its head branch is already checked out:
+
+```bash
+gh pr view <number> --json headRefName --jq .headRefName
+git branch --show-current
+```
+
+**If it is, review it as above. If it is not, checking it out moves the user's
+working branch — ask before doing it, and wait for an answer.** Say plainly what
+will happen:
+
+> Reviewing PR #123 means checking out `fix-the-thing`; you are currently on
+> `my-work`. Shall I switch, or would you rather I review something else?
+
+Only after they accept:
+
+```bash
+git status --porcelain     # must be empty; never switch over uncommitted work
+gh pr checkout <number>    # fetches the head, forks included
+```
+
+Offer to return them to their original branch when the review is done, and name
+the branch you will return them to.
+
+Never check out, switch, stash, reset, or fetch over a dirty tree without being
+asked to. The review is not worth losing someone's work in progress.
 
 ## Choose the provider
 
@@ -126,8 +190,10 @@ worth one retry, and `review` means the reviewer declined and said why.
 ## Do not
 
 - Do not run the review in the foreground or with `--follow`.
-- Do not pass a branch name you have not fetched and verified.
 - Do not end your turn while the review is still running.
+- Do not move the user's branch, stash, or discard anything without being asked.
+- Do not review a dirty tree as though it were the branch; they are different
+  changes and the user chooses which one they want.
 - Do not re-run a review to "get a better answer"; each run spends model credits.
 - Do not treat an absent finding as proof that an area is correct. The review
   lists the files it read and found nothing material in; anything outside that
