@@ -142,7 +142,8 @@ func (g githubClient) installationToken(ctx context.Context, repo, id, key strin
 		return "", fmt.Errorf("GitHub returned an invalid installation ID")
 	}
 	var response struct {
-		Token string `json:"token"`
+		Token     string    `json:"token"`
+		ExpiresAt time.Time `json:"expires_at"`
 	}
 	body := map[string]any{"repositories": []string{strings.Split(repo, "/")[1]}, "permissions": map[string]string{"contents": "read", "pull_requests": "write"}}
 	if err = g.request(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", installation.ID), bearer, body, &response); err != nil {
@@ -151,8 +152,60 @@ func (g githubClient) installationToken(ctx context.Context, repo, id, key strin
 	if response.Token == "" {
 		return "", fmt.Errorf("GitHub returned an empty installation token")
 	}
-	slog.Info("minted installation token", "repo", repo, "installation", installation.ID)
+	slog.Info("minted installation token", "repo", repo, "installation", installation.ID, "expires_at", response.ExpiresAt)
 	return response.Token, nil
+}
+
+// RepositoryToken is an installation token scoped to one repository, with the
+// moment it stops working.
+type RepositoryToken struct {
+	Value     string
+	ExpiresAt time.Time
+}
+
+// IssueRepositoryToken mints a token for a single repository.
+//
+// It exists so the controller can do this instead of the reviewer. A reviewer
+// Job runs an AI agent over the contents of a pull request -- attacker-supplied
+// input, read by design -- so the App private key must not be in it. The key
+// can mint a token for every repository the App is installed on; this token can
+// read one repository and comment on its pull requests, and it expires.
+func IssueRepositoryToken(ctx context.Context, apiBaseURL string, client *http.Client, repo, appID, key string) (RepositoryToken, error) {
+	if !validRepository(repo) {
+		return RepositoryToken{}, fmt.Errorf("invalid repository name")
+	}
+	if apiBaseURL == "" {
+		apiBaseURL = "https://api.github.com"
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	g := githubClient{base: apiBaseURL, http: client}
+	bearer, err := appJWT(appID, key, time.Now())
+	if err != nil {
+		return RepositoryToken{}, err
+	}
+	var installation struct {
+		ID int64 `json:"id"`
+	}
+	if err = g.request(ctx, "GET", "/repos/"+repo+"/installation", bearer, nil, &installation); err != nil {
+		return RepositoryToken{}, err
+	}
+	if installation.ID <= 0 {
+		return RepositoryToken{}, fmt.Errorf("GitHub returned an invalid installation ID")
+	}
+	var response struct {
+		Token     string    `json:"token"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	body := map[string]any{"repositories": []string{strings.Split(repo, "/")[1]}, "permissions": map[string]string{"contents": "read", "pull_requests": "write"}}
+	if err = g.request(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", installation.ID), bearer, body, &response); err != nil {
+		return RepositoryToken{}, err
+	}
+	if response.Token == "" {
+		return RepositoryToken{}, fmt.Errorf("GitHub returned an empty installation token")
+	}
+	return RepositoryToken{Value: response.Token, ExpiresAt: response.ExpiresAt}, nil
 }
 func (g githubClient) resolvePR(ctx context.Context, repo string, number int, token string) (string, string, error) {
 	var pr struct {

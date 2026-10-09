@@ -61,8 +61,26 @@ type submitter struct {
 	cfg    config.Config
 }
 
+// Submit routes a delivery to the narrowest credential available.
+//
+// With a GitHub App configured, the controller mints a token for the single
+// repository under review and hands the Job only that. The App's private key
+// stays here and never enters a Job -- it can mint tokens for every repository
+// the App is installed on, and a reviewer Job reads attacker-supplied pull
+// request content by design.
+//
+// Without an App, the shared secret path is unchanged, because a personal
+// access token cannot be narrowed at submission time. Narrowing it is the
+// user's job, through the token's own scopes.
 func (s submitter) Submit(ctx context.Context, r review.Request, d string) (string, error) {
-	return jobs.Submit(ctx, s.client, s.cfg, r, d)
+	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
+	if appID == "" || key == "" {
+		return jobs.Submit(ctx, s.client, s.cfg, r, d)
+	}
+	issue := func(ctx context.Context, repo string) (review.RepositoryToken, error) {
+		return review.IssueRepositoryToken(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, repo, appID, key)
+	}
+	return jobs.SubmitAuthenticated(ctx, s.client, s.cfg, r, d, issue)
 }
 func kubeClient() (kubernetes.Interface, error) {
 	cfg, err := rest.InClusterConfig()

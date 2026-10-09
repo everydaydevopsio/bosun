@@ -217,6 +217,19 @@ kubectl -n bosun get jobs,pods -w
   check for a leftover load balancer in the DigitalOcean control panel — a
   Service of type `LoadBalancer` can outlive its cluster and keep charging.
 
+## What a review can reach
+
+With a GitHub App configured, the controller mints a token scoped to the single
+repository under review and gives the reviewer Job only that, in a Secret the
+Job owns so Kubernetes deletes it with the Job. The App's private key stays in
+the controller. A review therefore holds a credential that can read one
+repository and comment on its pull requests, and that expires — not one that
+can reach every repository the App is installed on.
+
+With a personal access token instead, every Job receives that same token.
+Narrowing it is the token's own scopes, which is why an App is the better
+choice for anything beyond a personal experiment.
+
 ## Known limits
 
 - **Reviewer Jobs have no CPU or memory limits.** On a single node a runaway
@@ -226,9 +239,5 @@ kubectl -n bosun get jobs,pods -w
 - **A failed review tells the pull request nothing** — the failure lands in the
   Job, not on GitHub. Tracked in
   [#28](https://github.com/everydaydevopsio/bosun/issues/28).
-- **Every reviewer Job receives the same GitHub token.** Per-repository,
-  per-Job installation tokens are not implemented yet, so the token mounted into
-  a review is as broad as the App's installation. A design for this exists in
-  [#4](https://github.com/everydaydevopsio/bosun/pull/4).
 - **No durable queue.** At capacity, deliveries are rejected with 503 rather
   than queued, and GitHub's retries are the only recovery.

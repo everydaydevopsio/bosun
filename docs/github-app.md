@@ -86,6 +86,22 @@ Restart to pick up the new secret:
 kubectl -n bosun rollout restart deployment/bosun-bosun
 ```
 
+## What the reviewer receives
+
+The App's private key stays in the controller. For each review the controller
+mints an installation token scoped to the one repository being reviewed, with
+`contents: read` and `pull_requests: write`, and stores it in a Secret owned by
+that reviewer Job — so Kubernetes garbage-collects the credential along with the
+Job.
+
+That matters because a reviewer Job runs an AI agent over the contents of a pull
+request, which is attacker-supplied input the agent reads by design. The private
+key could mint tokens for every repository the App is installed on; the token
+the Job actually holds cannot, and it expires.
+
+Bosun refuses to start a review whose deadline outlives its token, rather than
+spending the model budget and then failing to publish.
+
 ## 5. Verify
 
 Comment `@bridgectl review` on a test pull request and watch the reviewer Job:

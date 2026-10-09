@@ -8,7 +8,17 @@ rules:
     verbs: ["create", "get", "update"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch"]
+    # update releases a Job that was created suspended, once its credential
+    # Secret exists; delete removes one whose credential could not be stored,
+    # so a failed submission does not hold a concurrency slot forever.
+    verbs: ["create", "get", "list", "watch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    # The controller creates one short-lived, repository-scoped token Secret per
+    # reviewer Job, owned by that Job. It never reads Secrets: get and list are
+    # deliberately absent so a compromised controller cannot enumerate the
+    # cluster's credentials.
+    verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
