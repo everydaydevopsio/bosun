@@ -66,19 +66,22 @@ git rev-list --count origin/HEAD..HEAD
 
 Zero means nothing to review yet.
 
-Then run it. Omit `--base` and Bosun resolves the default branch itself, which
-is the fork point for a branch cut from it:
+## Resolve the arguments before launching
+
+Work these out first and keep them in variables. Launching before they are
+settled is how a review ends up against the wrong base while looking fine.
 
 ```bash
-bosun review "$PWD" --branch "$(git branch --show-current)" --detach --local-credentials --provider codex-bosun
-```
+BRANCH="$(git branch --show-current)"
 
-If this branch already has a pull request, use that PR's base instead, because
-that is what its reviewers will see:
+# The PR's base when this branch has one, because that is what its reviewers
+# will see. Empty otherwise, and Bosun resolves the default branch itself --
+# the fork point for a branch cut from it.
+BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
+[ -n "$BASE" ] && git fetch origin "$BASE" --quiet
 
-```bash
-base="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
-[ -n "$base" ] && git fetch origin "$base" && extra="--base origin/$base"
+# Match the credentials on this machine; see the provider section below.
+PROVIDER=codex-bosun
 ```
 
 Tell the user which base was used. A review against the wrong base is worse than
@@ -86,16 +89,21 @@ no review, because the diff looks plausible.
 
 ## Reviewing a named pull request
 
-If the user names a PR, check whether its head branch is already checked out:
+If the user names a PR, check whether the PR's revision is already checked out.
+Compare commits, not branch names: a local branch with the same name may be
+stale, or belong to a different fork, and reviewing it looks like it satisfied
+the request.
 
 ```bash
-gh pr view <number> --json headRefName --jq .headRefName
-git branch --show-current
+gh pr view <number> --json headRefOid --jq .headRefOid
+git rev-parse HEAD
 ```
 
-**If it is, review it as above. If it is not, checking it out moves the user's
-working branch — ask before doing it, and wait for an answer.** Say plainly what
-will happen:
+**If those commits match, review it as above. If they do not, getting the PR's
+revision moves the user's working branch — ask before doing it, and wait for an
+answer.** That includes the case where the branch name matches but the commit
+does not, which means the local copy is behind or is someone else's branch. Say
+plainly what will happen:
 
 > Reviewing PR #123 means checking out `fix-the-thing`; you are currently on
 > `my-work`. Shall I switch, or would you rather I review something else?
@@ -133,17 +141,35 @@ A review can run for up to 30 minutes. Your shell tool will time out long
 before that, so **never run `bosun review` in the foreground and never use
 `review-status --follow`**. Start it detached and poll instead:
 
+This is the only launch command in this skill. Run it once, with the variables
+resolved above:
+
 ```bash
-JOB="$(bosun review "$PWD" --detach --local-credentials --provider codex-bosun)"
-echo "$JOB"
+JOB="$(bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "origin/$BASE"} --detach --local-credentials --provider "$PROVIDER")" || JOB=""
+echo "JOB=$JOB"
+```
+
+**Check it actually submitted before polling.** An empty `JOB` means submission
+failed -- the message is on stderr and names which part failed. Report that and
+stop; do not poll, because there is nothing to poll for and no terminal event
+will ever arrive:
+
+```bash
+[ -n "$JOB" ] || { echo "submission failed; not polling"; }
 ```
 
 The job name goes to stdout; progress goes to stderr. Then poll, waiting
 between checks. Each poll returns immediately:
 
 ```bash
-bosun review-status "$JOB" --json | tail -5
+bosun review-status "$JOB" --json
 ```
+
+Do not pipe that through `tail` or `head` when you need to know whether it
+worked: a pipeline reports the exit status of its last command, so `| tail`
+turns a failed poll into a successful one. `review-status` exits non-zero and
+prints no terminal event when it cannot load the job, which is indistinguishable
+from "still running" if you only read stdout.
 
 Look for an event whose `"type"` is `completed`, `failed`, `timed_out` or
 `cancelled`. Until one appears the review is still running — wait about 30
@@ -151,8 +177,12 @@ seconds and poll again.
 
 **Keep polling in this turn until a terminal event appears.** Do not end your
 turn with the review running, and do not hand it to a background mechanism that
-will wake you later: in a one-shot session nothing will, and the user gets "it
-is running" instead of a review. Tell the user it is still going rather than
+will wake you later unless your harness reliably wakes you: in a one-shot
+session nothing will, and the user gets "it is running" instead of a review.
+
+Bound it. Stop polling and report if the poll command fails twice in a row, or
+once the Job deadline reported in the status output has passed -- the review
+cannot outlive it. Polling forever is the failure this bound exists to prevent. Tell the user it is still going rather than
 going silent; first runs are slower because the cluster and image are being
 prepared.
 

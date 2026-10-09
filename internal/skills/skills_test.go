@@ -135,6 +135,47 @@ func TestPrint(t *testing.T) {
 	}
 }
 
+// Bosun's review of this skill found two launch commands that disagreed, and a
+// $base computed into a variable nothing used. Checking that flag names appear
+// somewhere in the document could not see either. Assert the assembled command.
+func TestSkillHasOneCompleteLaunchCommand(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	var launches []string
+	for _, line := range strings.Split(out.String(), "\n") {
+		// The working-tree alternative is prose, not a launch; a real launch
+		// captures the job name.
+		if strings.Contains(line, "$(bosun review ") {
+			launches = append(launches, line)
+		}
+	}
+	if len(launches) != 1 {
+		t.Fatalf("found %d launch commands, want exactly 1:\n%s", len(launches), strings.Join(launches, "\n"))
+	}
+	for _, want := range []string{
+		`--branch "$BRANCH"`,             // or the branch is not reviewed at all
+		`${BASE:+--base "origin/$BASE"}`, // or a resolved PR base is discarded
+		"--detach",                       // or it blocks past the agent's timeout
+		"--local-credentials",
+		`--provider "$PROVIDER"`, // or a Claude-only machine cannot run it
+	} {
+		if !strings.Contains(launches[0], want) {
+			t.Errorf("launch command is missing %s:\n%s", want, launches[0])
+		}
+	}
+
+	// Every variable the launch depends on must be assigned before it.
+	launchAt := strings.Index(out.String(), launches[0])
+	for _, v := range []string{"BRANCH=", "BASE=", "PROVIDER="} {
+		at := strings.Index(out.String(), v)
+		if at < 0 || at > launchAt {
+			t.Errorf("%s is not assigned before the launch command", v)
+		}
+	}
+}
+
 // The skill drives the CLI, so its instructions have to match the CLI that
 // ships with it. These are the contracts that would break silently.
 func TestSkillMatchesTheCLIContract(t *testing.T) {
@@ -142,7 +183,9 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 	if err := Print(&out); err != nil {
 		t.Fatal(err)
 	}
-	body := out.String()
+	// The document wraps, so collapse whitespace before looking for sentences:
+	// a contract that breaks when a line rewraps is testing the formatting.
+	body := strings.Join(strings.Fields(out.String()), " ")
 	for _, want := range []string{
 		"bosun review",
 		"--detach",
@@ -176,5 +219,17 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 	}
 	if !strings.Contains(body, "Do not move the user's branch") {
 		t.Error("skill does not forbid moving the branch unasked")
+	}
+	// A named PR is identified by its commit; a branch name can be stale or
+	// belong to another fork.
+	if !strings.Contains(body, "headRefOid") {
+		t.Error("skill identifies a named PR by branch name rather than commit")
+	}
+	// review-status exits non-zero with no terminal event when it cannot load a
+	// job, and a pipeline hides that, so polling would never end.
+	for _, want := range []string{"Check it actually submitted before polling", "Bound it."} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill does not guard polling: missing %q", want)
+		}
 	}
 }
