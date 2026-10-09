@@ -548,3 +548,53 @@ What remains worth salvaging is the credential isolation.
   issues filed for limits the guides would otherwise have glossed over.
 - Evidence: `helm lint`, `helm template` with the new values, relative-link
   check across both guides, `go test ./... -count=1`.
+
+# Task: Give each reviewer Job only its own repository's credential
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-08
+- Mode: Autonomous
+- Issue: https://github.com/everydaydevopsio/bosun/issues/31
+
+## Problem
+Every reviewer Job received `GITHUB_TOKEN`, `BOSUN_GITHUB_APP_ID` and
+`BOSUN_GITHUB_PRIVATE_KEY` from one shared Secret. The private key mints tokens
+for every repository the App is installed on, and the Job it sat in runs an AI
+agent over pull request content -- attacker-supplied input the agent reads by
+design. Model credentials were scoped per provider in #17; the GitHub
+credential, which can write to repositories, was not.
+
+## Acceptance Criteria
+- AC1: The App private key never enters a reviewer Job. ✅ stripped by
+  `useJobToken`, asserted by test.
+- AC2: A Job receives a token for the single repository under review. ✅ the
+  existing `installationToken` already scoped it; the change is minting it in
+  the controller.
+- AC3: The token Secret is owned by its Job. ✅ controller owner reference, so
+  Kubernetes deletes the credential with the Job.
+- AC4: A Job never starts before its credential exists. ✅ created suspended,
+  released only after the Secret is created.
+- AC5: Token expiry is handled deliberately. ✅ submission is refused when the
+  token expires before the Job deadline, naming `review.timeoutSeconds`.
+- AC6: Personal access token installs still work. ✅ the shared path is taken
+  when no App is configured, with a test pinning it.
+
+## Risks and Tradeoffs
+- Risk: a Job left suspended would hold a concurrency slot forever. Mitigated by
+  deleting it when the Secret cannot be created, with a test.
+- Tradeoff: the controller gains `secrets: create, delete`. Deliberately not
+  `get` or `list`, so it cannot read the namespace's credentials, and CI fails
+  if that widens.
+
+## Test Strategy
+- Unit: App credentials absent from the Job, `GITHUB_TOKEN` pointing at the
+  Job's own Secret, controller owner reference, unsuspension, refusal on a short
+  token, cleanup on a failed mint, and the unchanged shared-secret path.
+- Not covered: a real App-to-Kubernetes-to-pull-request run. The fake clientset
+  does not prove GitHub accepts the minted token.
+
+## Outcome
+- Result: a review holds a credential for one repository that expires, instead
+  of a key to every repository the App can see.
+- Evidence: `go test ./... -count=1`, `helm lint`, the rendered RBAC guard.

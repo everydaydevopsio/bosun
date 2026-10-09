@@ -122,8 +122,15 @@ func env(cfg config.Config, req review.Request) []corev1.EnvVar {
 	}
 	return base
 }
+
+// startupAllowanceSeconds is the slack between a review's own timeout and the
+// Job deadline: pulling the image and starting the provider happen before the
+// review clock is meaningful. SubmitAuthenticated reads it too, because a
+// credential has to outlive the whole window, not just the review.
+const startupAllowanceSeconds = 120
+
 func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
-	deadline := cfg.ReviewTimeoutSeconds + 120
+	deadline := cfg.ReviewTimeoutSeconds + startupAllowanceSeconds
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"app.kubernetes.io/managed-by": "bosun"}, Annotations: map[string]string{"bosun/repository": req.Repo}},
 		Spec: batchv1.JobSpec{

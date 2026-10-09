@@ -51,6 +51,23 @@ spec:
               value: {{ .Values.logging.level | quote }}
             - name: BOSUN_GITHUB_TOKEN_SECRET
               value: {{ .Values.secrets.githubSecretName | quote }}
+            # The App credentials live here and only here. With both present the
+            # controller mints a token per repository under review and gives a
+            # reviewer Job only that; without them it falls back to the shared
+            # token in the same Secret. Optional, so an install using a personal
+            # access token is unaffected.
+            - name: BOSUN_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubSecretName }}
+                  key: app-id
+                  optional: true
+            - name: BOSUN_GITHUB_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubSecretName }}
+                  key: private-key
+                  optional: true
             - name: BOSUN_AI_SECRET
               value: {{ .Values.secrets.aiSecretName | quote }}
 {{- if not .Values.development.enabled }}
