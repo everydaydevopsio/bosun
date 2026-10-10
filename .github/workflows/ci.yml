@@ -177,6 +177,24 @@ jobs:
       - run: shellcheck -S warning scripts/*.sh
       - run: bash -n scripts/*.sh
 
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # A release version written into prose is correct for exactly one release
+      # and silently wrong afterwards: the reader installs the previous version
+      # and nothing says so. docs/self-hosted-digitalocean.md pinned 0.1.1 until
+      # 0.1.2 shipped. Resolve the version at run time instead.
+      - name: Documentation does not hardcode a release version
+        run: |
+          set -euo pipefail
+          if grep -rnE 'everydaydevopsio/bosun:[0-9]+\.[0-9]+\.[0-9]+|charts/bosun --version [0-9]+\.[0-9]+\.[0-9]+' docs README.md deploy; then
+            echo "::error::documentation pins a Bosun release version; resolve it at run time instead"
+            exit 1
+          fi
+
   image:
     name: Image
     runs-on: ubuntu-latest

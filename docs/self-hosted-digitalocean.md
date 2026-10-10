@@ -169,14 +169,25 @@ Copy [`deploy/values-digitalocean.yaml`](../deploy/values-digitalocean.yaml) and
 change the two marked values — your hostname and, if you named it differently,
 your ClusterIssuer:
 
+Pin a version rather than tracking whatever is newest, and resolve it rather
+than copying a number out of this page — a hardcoded version here is stale the
+next time Bosun is released:
+
 ```bash
+VERSION="$(gh release view --repo everydaydevopsio/bosun --json tagName --jq .tagName | tr -d v)"
+echo "installing $VERSION"
+
 helm upgrade --install bosun \
-  oci://ghcr.io/everydaydevopsio/charts/bosun --version 0.1.1 \
+  oci://ghcr.io/everydaydevopsio/charts/bosun --version "$VERSION" \
   -n bosun -f deploy/values-digitalocean.yaml
 
 kubectl -n bosun rollout status deployment/bosun-bosun
 kubectl -n bosun get ingress,certificate
 ```
+
+Substitute a specific version for `$VERSION` when you are deliberately installing
+an older one. The chart's `image.tag` defaults to its own `appVersion`, so the
+chart and the image it runs always match.
 
 The certificate takes a minute or two. `kubectl -n bosun describe certificate
 bosun-tls` explains itself if it does not arrive.

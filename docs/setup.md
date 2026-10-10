@@ -8,14 +8,16 @@ The bridgectl base image publishes no `latest` tag, so pin the version you run.
 See [bridgectl.md](bridgectl.md) for details.
 
 ```bash
+VERSION=1.0.0   # the version you are publishing as
+
 docker build --build-arg BRIDGECTL_VERSION="$(bridgectl --version | awk '{print $NF}')" \
-  -t ghcr.io/YOUR_ORG/bosun:0.1.0 .
-docker push ghcr.io/YOUR_ORG/bosun:0.1.0
+  -t ghcr.io/YOUR_ORG/bosun:"$VERSION" .
+docker push ghcr.io/YOUR_ORG/bosun:"$VERSION"
 ```
 
 Set both `image.repository/tag` and `review.image` to that image.
 
-Tagging a release (`v0.1.0`) runs `.github/workflows/publish.yml`, which builds
+Tagging a release (`vX.Y.Z`) runs `.github/workflows/publish.yml`, which builds
 and pushes the image and the packaged chart for you.
 
 ## 2. Create credentials
@@ -54,9 +56,9 @@ Create a values override:
 ```yaml
 image:
   repository: ghcr.io/YOUR_ORG/bosun
-  tag: 0.1.0
+  tag: YOUR_VERSION
 review:
-  image: ghcr.io/YOUR_ORG/bosun:0.1.0
+  image: ghcr.io/YOUR_ORG/bosun:YOUR_VERSION
   provider: codex-bosun
 ingress:
   enabled: true
