@@ -631,3 +631,29 @@ credential, which can write to repositories, was not.
 ## Outcome
 - Result: `bosun init` installs for both agents; the skill encodes detach-and-poll,
   the stdout/stderr split, and that findings are claims rather than test results.
+
+# Task: Stop documentation pinning a release version
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-09
+- Mode: Autonomous
+
+## Problem
+`docs/self-hosted-digitalocean.md` pinned `--version 0.1.1`. The moment 0.1.2
+shipped it was wrong, and silently: a reader following it installs the previous
+release and nothing says so. `docs/setup.md` used `0.1.0` for the reader's own
+image, which reads like a Bosun release number and ages the same way.
+
+## Acceptance Criteria
+- AC1: The install command resolves the version rather than carrying one. ✅ and
+  the documented command was run: it resolves 0.1.2 and pulls a chart whose
+  version and appVersion both match.
+- AC2: Pinning is still the advice; only the hardcoding is gone. ✅
+- AC3: Reintroducing a pin fails CI. ✅ a new docs job, verified in both
+  directions locally.
+
+## Outcome
+- Result: the guides stay correct across releases instead of for one.
+- Evidence: `helm show chart` against the resolved version; guard checked
+  against the current tree and against a deliberately reintroduced pin.
