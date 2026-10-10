@@ -9,6 +9,15 @@
 - Validation added: a failing `gh` mock must stop; explicit offline mode remains testable.
 - Next trigger to detect sooner: any new fallback after a remote metadata lookup.
 
+## 2026-10-10 — Failure tests need controlled transports
+
+- Incident/bug: the failed-fetch test sent traffic to a nonexistent GitHub repository.
+- Root cause pattern: the success URL was rewritten to a local fixture, but the failure URL was not.
+- Early signal missed: fast failure on this machine concealed the network dependency.
+- Preventative rule: route every URL in network failure tests to a local fixture and bound subprocess duration.
+- Validation added: a local nonexistent-repository rewrite, disabled Git prompts, and a five-second context deadline.
+- Next trigger to detect sooner: adding a new URL or subprocess to an integration test.
+
 ## 2026-09-24 — Build prerequisites must be explicit
 
 `make test` invoked protobuf generation before it ensured the Python virtualenv

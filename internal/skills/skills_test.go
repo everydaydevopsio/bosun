@@ -2,12 +2,14 @@ package skills
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A skill is only useful where the agent looks for it, and the two agents look
@@ -272,6 +274,7 @@ func TestSkillResolvesForkBaseAndFailsClosed(t *testing.T) {
 		t.Fatal("test setup did not diverge the bases")
 	}
 	bin := t.TempDir()
+	missingRepo := filepath.Join(t.TempDir(), "missing")
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nif [ \"$MOCK_GH_FAIL\" = true ]; then exit 1; fi\nprintf '%s\\n' \"$MOCK_PR_DATA\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -286,16 +289,21 @@ func TestSkillResolvesForkBaseAndFailsClosed(t *testing.T) {
 		{name: "explicit offline review", mockFail: true, offline: true, wantSuccess: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command("bash", "-c", baseScript+"\nprintf 'BASE=%s\\n' \"$BASE\"\n")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "bash", "-c", baseScript+"\nprintf 'BASE=%s\\n' \"$BASE\"\n")
 			cmd.Dir = fork
 			cmd.Env = append(os.Environ(),
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"GIT_TERMINAL_PROMPT=0",
 				"MOCK_PR_DATA="+tc.url+"\tmain\t"+tc.sha,
 				fmt.Sprintf("MOCK_GH_FAIL=%t", tc.mockFail),
 				fmt.Sprintf("BOSUN_REVIEW_OFFLINE=%t", tc.offline),
-				"GIT_CONFIG_COUNT=1",
+				"GIT_CONFIG_COUNT=2",
 				"GIT_CONFIG_KEY_0=url."+upstream+".insteadOf",
 				"GIT_CONFIG_VALUE_0=https://github.com/upstream/repo.git",
+				"GIT_CONFIG_KEY_1=url."+missingRepo+".insteadOf",
+				"GIT_CONFIG_VALUE_1=https://github.com/missing/repo.git",
 			)
 			result, err := cmd.CombinedOutput()
 			if tc.wantSuccess {

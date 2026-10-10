@@ -47,3 +47,4 @@ None for this fix. Full PR-aware input belongs to #36.
 | 2026-10-10 | Initial plan and PRD requirement. |
 | 2026-10-10 | Verified the exact upstream SHA and added fail-closed fork tests; recorded the pre-existing coverage gap. |
 | 2026-10-10 | First Bosun review found PR lookup error fallback; required explicit offline mode and added a failing-lookup regression test. |
+| 2026-10-10 | Second Bosun review found an uncontrolled network request in a test; replaced it with a local failure fixture and bounded execution. |
