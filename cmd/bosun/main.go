@@ -26,11 +26,16 @@ import (
 
 const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]
        bosun review-status JOB [--follow]
+       bosun init [--target claude,codex] [--force] [--print]
        bosun up [--local-credentials] [--cluster NAME]
        bosun down [--keep-snapshots] [--cluster NAME]
        bosun serve
        bosun reviewer
        bosun version
+
+bosun init installs the review skill for the coding agents on this machine, so
+you can ask Claude Code or Codex to review your changes instead of running the
+command yourself.
 
 bosun review creates the local Kind cluster when it is missing, so bosun up is
 only needed to prepare one ahead of time or to refresh credentials. Pass
@@ -135,6 +140,8 @@ func main() {
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "init":
+			os.Exit(runInit(os.Args[2:], os.Stdout, os.Stderr))
 		case "review", "review-status", "up", "down":
 			os.Exit(localreview.Run(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr))
 		case "serve", "reviewer":

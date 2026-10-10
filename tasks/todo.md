@@ -598,3 +598,36 @@ credential, which can write to repositories, was not.
 - Result: a review holds a credential for one repository that expires, instead
   of a key to every repository the App can see.
 - Evidence: `go test ./... -count=1`, `helm lint`, the rendered RBAC guard.
+
+# Task: bosun init — install the review skill for Claude Code and Codex
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-08
+- Mode: Autonomous
+- Issue: https://github.com/everydaydevopsio/bosun/issues/23
+
+## Scope
+- In scope: `bosun init`, the embedded skill, target detection, idempotence.
+- Out of scope: `--project` installs into a repository's `.claude/skills/`.
+  That directory is Ballast-managed here via `.rulesrc.json` and a hand-added
+  skill may be pruned on a config refresh; user-level is where the skill is
+  wanted anyway, since its audience is every repository you review.
+
+## Acceptance Criteria
+- AC1: A released binary installs a working skill with no checkout. ✅ embedded.
+- AC2: Re-running is idempotent and never discards a local edit. ✅
+- AC3: The skill drives a real review end to end without hitting the agent's
+  tool timeout. Verified by running it from both agents against this PR.
+- AC4: The skill fails loudly against an older `bosun`. ✅ it checks `bosun help`
+  for the flags it needs before running anything.
+
+## Test Strategy
+- Unit: detection with each combination of agent directories, install, re-install,
+  edited-file refusal, `--force`, directory creation, `--print`, and a contract
+  test pinning the CLI flags the skill tells an agent to use.
+- End to end: review this PR from Claude Code and from Codex using the skill.
+
+## Outcome
+- Result: `bosun init` installs for both agents; the skill encodes detach-and-poll,
+  the stdout/stderr split, and that findings are claims rather than test results.
