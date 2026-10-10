@@ -74,11 +74,22 @@ settled is how a review ends up against the wrong base while looking fine.
 ```bash
 BRANCH="$(git branch --show-current)"
 
-# When this branch has a PR, use the target repository and exact base commit
-# from GitHub. A contributor fork's origin/main is not the PR's base.
-# With no PR, leave BASE empty and let Bosun resolve the checkout's default.
+# Use the target repository and exact base commit from GitHub. A contributor
+# fork's origin/main is not the PR's base. Offline checkout review requires
+# an explicit choice: BOSUN_REVIEW_OFFLINE=true.
 BASE=""
-PR_DATA="$(gh pr view --json url,baseRefName,baseRefOid --jq '[.url,.baseRefName,.baseRefOid] | @tsv' 2>/dev/null)" || PR_DATA=""
+if [ "${BOSUN_REVIEW_OFFLINE:-}" = "true" ]; then
+  PR_DATA=""
+else
+  PR_DATA="$(gh pr view --json url,baseRefName,baseRefOid --jq '[.url,.baseRefName,.baseRefOid] | @tsv')" || {
+    echo "Cannot resolve this branch's PR. For a checkout review without a PR, set BOSUN_REVIEW_OFFLINE=true; otherwise stop." >&2
+    exit 1
+  }
+  if [ -z "$PR_DATA" ]; then
+    echo "PR lookup returned no base; stop or choose BOSUN_REVIEW_OFFLINE=true for an offline checkout review." >&2
+    exit 1
+  fi
+fi
 if [ -n "$PR_DATA" ]; then
   read -r PR_URL BASE_BRANCH BASE_SHA <<< "$PR_DATA"
   if [[ ! "$PR_URL" =~ ^https://github.com/[^/]+/[^/]+/pull/[0-9]+$ ]] || [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
@@ -115,9 +126,10 @@ no review, because the diff looks plausible.
 
 In a fork checkout `origin` is your fork, not the repository the pull request
 targets. The SHA check prevents a moved or incorrectly fetched upstream branch
-from becoming a plausible but wrong review. If GitHub lookup or fetch fails for
-a PR you intend to review, stop; never substitute a local base by name. Bosun
-prints the resolved base and merge base when it submits the review.
+from becoming a plausible but wrong review. If GitHub lookup or fetch fails,
+stop; never substitute a local base by name. For a branch without a PR, explicitly
+choose `BOSUN_REVIEW_OFFLINE=true` before resolving the arguments. Bosun prints
+the resolved base and merge base when it submits the review.
 
 ## Reviewing a named pull request
 

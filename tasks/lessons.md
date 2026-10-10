@@ -1,5 +1,14 @@
 # Lessons
 
+## 2026-10-10 — A failed PR lookup must stop review
+
+- Incident/bug: a failed `gh pr view` became empty metadata and allowed a fork review to use its local default base.
+- Root cause pattern: collapsing an API error into the same value as an optional input silently weakens a fail-closed workflow.
+- Early signal missed: the first test covered failed fetches but not failed PR lookup.
+- Preventative rule: require an explicit offline mode when PR metadata is unavailable.
+- Validation added: a failing `gh` mock must stop; explicit offline mode remains testable.
+- Next trigger to detect sooner: any new fallback after a remote metadata lookup.
+
 ## 2026-09-24 — Build prerequisites must be explicit
 
 `make test` invoked protobuf generation before it ensured the Python virtualenv

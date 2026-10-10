@@ -255,6 +255,9 @@ pull request from a fork, use the installed Bosun review skill: it fetches the
 target repository's base branch, verifies it against GitHub's exact base commit,
 and stops if the fetch fails or the branch has moved. Passing the fork's local
 `main` as `--base` can silently review the wrong diff.
+For a branch with no PR, the skill requires an explicit offline choice:
+`BOSUN_REVIEW_OFFLINE=true`. In that mode, Bosun resolves the checkout's default
+branch and reports the comparison it chose.
 
 Flags work before or after the path. `--provider` overrides
 `BOSUN_REVIEW_PROVIDER`; it does not change cluster credentials. Export the

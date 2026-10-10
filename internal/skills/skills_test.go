@@ -2,6 +2,7 @@ package skills
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -271,16 +272,18 @@ func TestSkillResolvesForkBaseAndFailsClosed(t *testing.T) {
 		t.Fatal("test setup did not diverge the bases")
 	}
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nprintf '%s\\n' \"$MOCK_PR_DATA\"\n"), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nif [ \"$MOCK_GH_FAIL\" = true ]; then exit 1; fi\nprintf '%s\\n' \"$MOCK_PR_DATA\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name, sha, url string
-		wantSuccess    bool
+		name, sha, url                 string
+		mockFail, offline, wantSuccess bool
 	}{
 		{name: "upstream base", sha: baseSHA, url: "https://github.com/upstream/repo/pull/1", wantSuccess: true},
 		{name: "moved base", sha: forkSHA, url: "https://github.com/upstream/repo/pull/1"},
 		{name: "failed fetch", sha: baseSHA, url: "https://github.com/missing/repo/pull/1"},
+		{name: "failed PR lookup", mockFail: true},
+		{name: "explicit offline review", mockFail: true, offline: true, wantSuccess: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command("bash", "-c", baseScript+"\nprintf 'BASE=%s\\n' \"$BASE\"\n")
@@ -288,13 +291,19 @@ func TestSkillResolvesForkBaseAndFailsClosed(t *testing.T) {
 			cmd.Env = append(os.Environ(),
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 				"MOCK_PR_DATA="+tc.url+"\tmain\t"+tc.sha,
+				fmt.Sprintf("MOCK_GH_FAIL=%t", tc.mockFail),
+				fmt.Sprintf("BOSUN_REVIEW_OFFLINE=%t", tc.offline),
 				"GIT_CONFIG_COUNT=1",
 				"GIT_CONFIG_KEY_0=url."+upstream+".insteadOf",
 				"GIT_CONFIG_VALUE_0=https://github.com/upstream/repo.git",
 			)
 			result, err := cmd.CombinedOutput()
 			if tc.wantSuccess {
-				if err != nil || !strings.Contains(string(result), "BASE="+baseSHA) {
+				wantBase := baseSHA
+				if tc.offline {
+					wantBase = ""
+				}
+				if err != nil || !strings.Contains(string(result), "BASE="+wantBase) {
 					t.Fatalf("base resolution failed: %v: %s", err, result)
 				}
 			} else if err == nil {
