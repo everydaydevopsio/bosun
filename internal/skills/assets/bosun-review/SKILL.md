@@ -78,7 +78,7 @@ BRANCH="$(git branch --show-current)"
 # will see. Empty otherwise, and Bosun resolves the default branch itself --
 # the fork point for a branch cut from it.
 BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
-[ -n "$BASE" ] && git fetch origin "$BASE" --quiet
+[ -n "$BASE" ] && { git fetch origin "$BASE" --quiet || echo "cannot fetch base $BASE; stop and tell the user"; }
 
 # An explicit choice wins; otherwise match the credentials on this machine.
 PROVIDER="${BOSUN_REVIEW_PROVIDER:-}"
@@ -93,6 +93,11 @@ fi
 
 Tell the user which base was used. A review against the wrong base is worse than
 no review, because the diff looks plausible.
+
+In a fork checkout `origin` is your fork, not the repository the pull request
+targets, so `origin/$BASE` may be a diverged branch or absent. Stop and say so
+if the fetch fails rather than reviewing against whatever `--base` resolves to.
+Tracked in [#34](https://github.com/everydaydevopsio/bosun/issues/34).
 
 ## Reviewing a named pull request
 
