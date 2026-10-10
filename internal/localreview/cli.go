@@ -368,11 +368,7 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	}
 	submitted = true
 
-	scope := "including working-tree changes"
-	if s.Committed {
-		scope = "committed content only"
-	}
-	notice(fmt.Sprintf("Review %s | %s at %.12s | %s | provider %s | timeout %s + 2m startup allowance", job, s.Branch, s.Head, scope, o.provider, o.timeout))
+	notice(reviewHeader(job, s, o.provider, o.timeout))
 	notice(estimate(&r))
 	if e = save(&r); e != nil {
 		notice("Could not persist estimate: " + e.Error())
@@ -389,6 +385,14 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	o.owner = true
 	return monitor(ctx, c, &r, o, out, errout)
 }
+func reviewHeader(job string, s Snapshot, provider string, timeout time.Duration) string {
+	scope := "including working-tree changes"
+	if s.Committed {
+		scope = "committed content only"
+	}
+	return fmt.Sprintf("Review %s | %s at %.12s | base %.12s | merge base %.12s | %s | provider %s | timeout %s + 2m startup allowance", job, s.Branch, s.Head, s.Base, s.MergeBase, scope, provider, timeout)
+}
+
 func estimate(current *record) string {
 	d, e := stateDir()
 	if e != nil {

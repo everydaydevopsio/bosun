@@ -2,10 +2,14 @@ package skills
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A skill is only useful where the agent looks for it, and the two agents look
@@ -200,9 +204,9 @@ func TestSkillHasOneCompleteLaunchCommand(t *testing.T) {
 		t.Fatalf("found %d launch commands, want exactly 1:\n%s", len(launches), strings.Join(launches, "\n"))
 	}
 	for _, want := range []string{
-		`--branch "$BRANCH"`,             // or the branch is not reviewed at all
-		`${BASE:+--base "origin/$BASE"}`, // or a resolved PR base is discarded
-		"--detach",                       // or it blocks past the agent's timeout
+		`--branch "$BRANCH"`,      // or the branch is not reviewed at all
+		`${BASE:+--base "$BASE"}`, // or a verified PR base is discarded
+		"--detach",                // or it blocks past the agent's timeout
 		"--local-credentials",
 		`--provider "$PROVIDER"`, // or a Claude-only machine cannot run it
 	} {
@@ -219,6 +223,112 @@ func TestSkillHasOneCompleteLaunchCommand(t *testing.T) {
 			t.Errorf("%s is not assigned before the launch command", v)
 		}
 	}
+}
+
+func TestSkillVerifiesUpstreamPRBase(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"baseRefOid", "baseRefName", "FETCH_HEAD", `"$FETCHED_SHA" != "$BASE_SHA"`, `BASE="$BASE_SHA"`, "GIT_TERMINAL_PROMPT=0 git fetch"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("skill does not verify upstream PR base: missing %q", want)
+		}
+	}
+	if strings.Contains(out.String(), `git fetch origin "$BASE"`) {
+		t.Error("skill still fetches the comparison base from origin")
+	}
+}
+
+func TestSkillResolvesForkBaseAndFailsClosed(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(out.String(), "BRANCH=\"$(git branch --show-current)\"")
+	if start < 0 {
+		t.Fatal("cannot locate base resolution in installed skill")
+	}
+	end := strings.Index(out.String()[start:], "# An explicit choice wins")
+	if end < 0 {
+		t.Fatal("cannot locate base resolution in installed skill")
+	}
+	baseScript := out.String()[start : start+end]
+	upstream := t.TempDir()
+	gitForSkillTest(t, upstream, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(upstream, "common"), []byte("common"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitForSkillTest(t, upstream, "add", ".")
+	gitForSkillTest(t, upstream, "commit", "-m", "common")
+	fork := filepath.Join(t.TempDir(), "fork")
+	gitForSkillTest(t, upstream, "clone", upstream, fork)
+	gitForSkillTest(t, fork, "checkout", "-b", "feature")
+	gitForSkillTest(t, fork, "commit", "--allow-empty", "-m", "feature")
+	gitForSkillTest(t, fork, "checkout", "main")
+	gitForSkillTest(t, fork, "commit", "--allow-empty", "-m", "fork main")
+	gitForSkillTest(t, upstream, "commit", "--allow-empty", "-m", "upstream main")
+	baseSHA := gitForSkillTest(t, upstream, "rev-parse", "HEAD")
+	forkSHA := gitForSkillTest(t, fork, "rev-parse", "main")
+	if baseSHA == forkSHA {
+		t.Fatal("test setup did not diverge the bases")
+	}
+	bin := t.TempDir()
+	missingRepo := filepath.Join(t.TempDir(), "missing")
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nif [ \"$MOCK_GH_FAIL\" = true ]; then exit 1; fi\nprintf '%s\\n' \"$MOCK_PR_DATA\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, sha, url                 string
+		mockFail, offline, wantSuccess bool
+	}{
+		{name: "upstream base", sha: baseSHA, url: "https://github.com/upstream/repo/pull/1", wantSuccess: true},
+		{name: "moved base", sha: forkSHA, url: "https://github.com/upstream/repo/pull/1"},
+		{name: "failed fetch", sha: baseSHA, url: "https://github.com/missing/repo/pull/1"},
+		{name: "failed PR lookup", mockFail: true},
+		{name: "explicit offline review", mockFail: true, offline: true, wantSuccess: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "bash", "-c", baseScript+"\nprintf 'BASE=%s\\n' \"$BASE\"\n")
+			cmd.Dir = fork
+			cmd.Env = append(os.Environ(),
+				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"MOCK_PR_DATA="+tc.url+"\tmain\t"+tc.sha,
+				fmt.Sprintf("MOCK_GH_FAIL=%t", tc.mockFail),
+				fmt.Sprintf("BOSUN_REVIEW_OFFLINE=%t", tc.offline),
+				"GIT_CONFIG_COUNT=2",
+				"GIT_CONFIG_KEY_0=url."+upstream+".insteadOf",
+				"GIT_CONFIG_VALUE_0=https://github.com/upstream/repo.git",
+				"GIT_CONFIG_KEY_1=url."+missingRepo+".insteadOf",
+				"GIT_CONFIG_VALUE_1=https://github.com/missing/repo.git",
+			)
+			result, err := cmd.CombinedOutput()
+			if tc.wantSuccess {
+				wantBase := baseSHA
+				if tc.offline {
+					wantBase = ""
+				}
+				if err != nil || !strings.Contains(string(result), "BASE="+wantBase) {
+					t.Fatalf("base resolution failed: %v: %s", err, result)
+				}
+			} else if err == nil {
+				t.Fatalf("base resolution accepted invalid upstream: %s", result)
+			}
+		})
+	}
+}
+
+func gitForSkillTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+	b, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, b)
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // The skill drives the CLI, so its instructions have to match the CLI that

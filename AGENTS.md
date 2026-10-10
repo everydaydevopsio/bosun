@@ -23,6 +23,13 @@ Suggested facts to record:
 
 Update this section when those facts change. If live runtime state is required, discover it separately instead of treating it as a durable repo fact.
 
+## Code review with Bosun
+
+- Run a Bosun code review for each pull request before merge. Review the committed PR head against its verified target base, and record the reviewed commit SHA. Use detached submission and poll the Job to a terminal result.
+- Choose a Bosun provider backed by an AI agent different from the agent invoking Bosun: Codex callers use `claude-bosun`; Claude callers use `codex-bosun`. Other callers must choose a provider that is not themselves. Pass the choice explicitly with `--provider`; do not rely on Bosun's default.
+- If the distinct provider or its credentials are unavailable, report the review as blocked instead of silently using the calling agent's provider.
+- Judge findings against the code, fix valid issues, and review the updated head when needed. Stop after at most three Bosun review passes for one PR; report unresolved findings and the exact reviewed SHA.
+
 ## Installed agent rules
 
 Created by Ballast. Do not edit this section.

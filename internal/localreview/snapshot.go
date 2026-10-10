@@ -24,9 +24,9 @@ func resolve(ctx context.Context, repo, ref string) (string, error) {
 }
 
 type Snapshot struct {
-	Path, Repo, Branch, Head, Base string
-	Changes                        int
-	Committed                      bool
+	Path, Repo, Branch, Head, Base, MergeBase string
+	Changes                                   int
+	Committed                                 bool
 }
 
 func snapshot(ctx context.Context, path, branch, base string) (s Snapshot, err error) {
@@ -204,6 +204,7 @@ func snapshot(ctx context.Context, path, branch, base string) (s Snapshot, err e
 	if e != nil {
 		return s, e
 	}
+	s.MergeBase = merge
 	changed, e := git(ctx, s.Path, "diff", "--name-only", merge)
 	if e != nil {
 		return s, e

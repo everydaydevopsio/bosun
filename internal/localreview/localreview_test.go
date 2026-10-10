@@ -108,6 +108,53 @@ func TestSnapshotLinkedWorktree(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestSnapshotUsesVerifiedUpstreamBaseInForkLayout(t *testing.T) {
+	upstream := t.TempDir()
+	gitTest(t, upstream, "init", "-b", "main")
+	write(t, filepath.Join(upstream, "file"), "common")
+	gitTest(t, upstream, "add", ".")
+	gitTest(t, upstream, "commit", "-m", "common")
+	fork := t.TempDir()
+	gitTest(t, upstream, "clone", upstream, fork)
+	gitTest(t, fork, "checkout", "-b", "feature")
+	write(t, filepath.Join(fork, "feature"), "feature")
+	gitTest(t, fork, "add", ".")
+	gitTest(t, fork, "commit", "-m", "feature")
+	gitTest(t, fork, "checkout", "main")
+	write(t, filepath.Join(fork, "fork-only"), "fork")
+	gitTest(t, fork, "add", ".")
+	gitTest(t, fork, "commit", "-m", "fork main diverged")
+	write(t, filepath.Join(upstream, "upstream-only"), "upstream")
+	gitTest(t, upstream, "add", ".")
+	gitTest(t, upstream, "commit", "-m", "upstream main advanced")
+	upstreamBase := gitTest(t, upstream, "rev-parse", "HEAD")
+	gitTest(t, fork, "fetch", upstream, "main")
+	if got := gitTest(t, fork, "rev-parse", "FETCH_HEAD"); got != upstreamBase {
+		t.Fatalf("fetched base = %s, want %s", got, upstreamBase)
+	}
+	s, err := snapshot(context.Background(), fork, "feature", upstreamBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(s.Path) })
+	if s.Base != upstreamBase {
+		t.Fatalf("snapshot base = %s, want %s", s.Base, upstreamBase)
+	}
+	if s.MergeBase != gitTest(t, upstream, "rev-parse", "HEAD~") {
+		t.Fatalf("merge base = %s, want shared commit", s.MergeBase)
+	}
+}
+
+func TestReviewHeaderReportsComparisonCommits(t *testing.T) {
+	s := Snapshot{Branch: "feature", Head: "aaaaaaaaaaaa", Base: "bbbbbbbbbbbb", MergeBase: "cccccccccccc", Committed: true}
+	got := reviewHeader("review-job", s, "codex-bosun", time.Minute)
+	for _, want := range []string{"base bbbbbbbbbbbb", "merge base cccccccccccc", "feature at aaaaaaaaaaaa"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("review header %q is missing %q", got, want)
+		}
+	}
+}
 func TestFlagsAfterPath(t *testing.T) {
 	o, args, e := parse("review", []string{"/repo with spaces", "--branch", "feature", "--provider", "claude-bosun", "--timeout", "2m"}, io.Discard)
 	if e != nil || len(args) != 1 || o.branch != "feature" || o.provider != "claude-bosun" || o.timeout != 2*time.Minute {

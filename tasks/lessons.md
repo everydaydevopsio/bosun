@@ -1,5 +1,32 @@
 # Lessons
 
+## 2026-10-10 — A failed PR lookup must stop review
+
+- Incident/bug: a failed `gh pr view` became empty metadata and allowed a fork review to use its local default base.
+- Root cause pattern: collapsing an API error into the same value as an optional input silently weakens a fail-closed workflow.
+- Early signal missed: the first test covered failed fetches but not failed PR lookup.
+- Preventative rule: require an explicit offline mode when PR metadata is unavailable.
+- Validation added: a failing `gh` mock must stop; explicit offline mode remains testable.
+- Next trigger to detect sooner: any new fallback after a remote metadata lookup.
+
+## 2026-10-10 — Failure tests need controlled transports
+
+- Incident/bug: the failed-fetch test sent traffic to a nonexistent GitHub repository.
+- Root cause pattern: the success URL was rewritten to a local fixture, but the failure URL was not.
+- Early signal missed: fast failure on this machine concealed the network dependency.
+- Preventative rule: route every URL in network failure tests to a local fixture and bound subprocess duration.
+- Validation added: a local nonexistent-repository rewrite, disabled Git prompts, and a five-second context deadline.
+- Next trigger to detect sooner: adding a new URL or subprocess to an integration test.
+
+## 2026-10-10 — Credentialed fetches must not prompt in agent workflows
+
+- Incident/bug: the PR base fetch could request Git credentials interactively and hold a detached review before submission.
+- Root cause pattern: a noninteractive test environment did not prove the shipped fetch could not prompt.
+- Early signal missed: the test harness disabled Git prompts, while the shipped skill did not.
+- Preventative rule: set `GIT_TERMINAL_PROMPT=0` on agent-driven Git fetches that must fail closed.
+- Validation added: the installed skill contract asserts the noninteractive fetch setting.
+- Next trigger to detect sooner: constructing a new Git URL inside an agent workflow.
+
 ## 2026-09-24 — Build prerequisites must be explicit
 
 `make test` invoked protobuf generation before it ensured the Python virtualenv

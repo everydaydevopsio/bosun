@@ -74,11 +74,41 @@ settled is how a review ends up against the wrong base while looking fine.
 ```bash
 BRANCH="$(git branch --show-current)"
 
-# The PR's base when this branch has one, because that is what its reviewers
-# will see. Empty otherwise, and Bosun resolves the default branch itself --
-# the fork point for a branch cut from it.
-BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
-[ -n "$BASE" ] && { git fetch origin "$BASE" --quiet || echo "cannot fetch base $BASE; stop and tell the user"; }
+# Use the target repository and exact base commit from GitHub. A contributor
+# fork's origin/main is not the PR's base. Offline checkout review requires
+# an explicit choice: BOSUN_REVIEW_OFFLINE=true.
+BASE=""
+if [ "${BOSUN_REVIEW_OFFLINE:-}" = "true" ]; then
+  PR_DATA=""
+else
+  PR_DATA="$(gh pr view --json url,baseRefName,baseRefOid --jq '[.url,.baseRefName,.baseRefOid] | @tsv')" || {
+    echo "Cannot resolve this branch's PR. For a checkout review without a PR, set BOSUN_REVIEW_OFFLINE=true; otherwise stop." >&2
+    exit 1
+  }
+  if [ -z "$PR_DATA" ]; then
+    echo "PR lookup returned no base; stop or choose BOSUN_REVIEW_OFFLINE=true for an offline checkout review." >&2
+    exit 1
+  fi
+fi
+if [ -n "$PR_DATA" ]; then
+  read -r PR_URL BASE_BRANCH BASE_SHA <<< "$PR_DATA"
+  if [[ ! "$PR_URL" =~ ^https://github.com/[^/]+/[^/]+/pull/[0-9]+$ ]] || [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Cannot verify the PR's upstream repository and base SHA; stop." >&2
+    exit 1
+  fi
+  UPSTREAM="${PR_URL#https://github.com/}"
+  UPSTREAM="${UPSTREAM%/pull/*}"
+  GIT_TERMINAL_PROMPT=0 git fetch --no-tags --quiet "https://github.com/$UPSTREAM.git" "$BASE_BRANCH" || {
+    echo "Cannot fetch $UPSTREAM branch $BASE_BRANCH; stop." >&2
+    exit 1
+  }
+  FETCHED_SHA="$(git rev-parse 'FETCH_HEAD^{commit}')" || exit 1
+  if [ "$FETCHED_SHA" != "$BASE_SHA" ]; then
+    echo "The PR base moved during fetch ($BASE_SHA to $FETCHED_SHA); refresh and retry." >&2
+    exit 1
+  fi
+  BASE="$BASE_SHA"
+fi
 
 # An explicit choice wins; otherwise match the credentials on this machine.
 PROVIDER="${BOSUN_REVIEW_PROVIDER:-}"
@@ -95,9 +125,11 @@ Tell the user which base was used. A review against the wrong base is worse than
 no review, because the diff looks plausible.
 
 In a fork checkout `origin` is your fork, not the repository the pull request
-targets, so `origin/$BASE` may be a diverged branch or absent. Stop and say so
-if the fetch fails rather than reviewing against whatever `--base` resolves to.
-Tracked in [#34](https://github.com/everydaydevopsio/bosun/issues/34).
+targets. The SHA check prevents a moved or incorrectly fetched upstream branch
+from becoming a plausible but wrong review. If GitHub lookup or fetch fails,
+stop; never substitute a local base by name. For a branch without a PR, explicitly
+choose `BOSUN_REVIEW_OFFLINE=true` before resolving the arguments. Bosun prints
+the resolved base and merge base when it submits the review.
 
 ## Reviewing a named pull request
 
@@ -160,7 +192,7 @@ This is the only launch command in this skill. Run it once, with the variables
 resolved above:
 
 ```bash
-JOB="$(bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "origin/$BASE"} --detach --local-credentials --provider "$PROVIDER")" || JOB=""
+JOB="$(bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "$BASE"} --detach --local-credentials --provider "$PROVIDER")" || JOB=""
 echo "JOB=$JOB"
 ```
 
