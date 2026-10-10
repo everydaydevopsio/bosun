@@ -81,9 +81,9 @@ func selectTargets(home string, names []string) ([]skills.Target, error) {
 	if len(names) == 0 {
 		return skills.Detect(home), nil
 	}
-	known := map[string]skills.Target{
-		"claude": {Name: "claude", Dir: ".claude"},
-		"codex":  {Name: "codex", Dir: ".codex"},
+	known := map[string]skills.Target{}
+	for _, t := range skills.Targets(home) {
+		known[t.Name] = t
 	}
 	var chosen []skills.Target
 	for _, raw := range names {

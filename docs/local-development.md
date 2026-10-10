@@ -217,7 +217,8 @@ bosun init --print              # inspect the skill without installing it
 
 The skill is embedded in the binary, so a Homebrew install can place it with no
 repository checked out, and the instructions always match the CLI that shipped
-them. Agents pick it up on their next session.
+them. Agents pick it up on their next session. `CODEX_HOME` is honoured, so a
+relocated Codex configuration gets the skill where that Codex actually reads it.
 
 A skill that differs from the one the binary ships is left alone — it may be a
 local edit — and `--force` replaces it.

@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 //go:embed assets
@@ -25,10 +26,27 @@ const (
 	assetPath = "assets/" + skillName + "/SKILL.md"
 )
 
-// Target is a coding agent that reads skills from a directory in $HOME.
+// Target is a coding agent that reads skills from a configuration directory.
 type Target struct {
 	Name string // claude, codex
-	Dir  string // the agent's configuration directory
+	Dir  string // absolute path to the agent's configuration directory
+}
+
+// Targets reports every agent Bosun can install for, resolved to real paths.
+//
+// Codex reads CODEX_HOME, and internal/credentials already honours it when
+// looking for a sign-in. Hardcoding ~/.codex here would make the same binary
+// disagree with itself: it would find your credentials under a relocated
+// CODEX_HOME and then install the skill somewhere that Codex never reads.
+func Targets(home string) []Target {
+	codex := filepath.Join(home, ".codex")
+	if relocated := strings.TrimSpace(os.Getenv("CODEX_HOME")); relocated != "" {
+		codex = relocated
+	}
+	return []Target{
+		{Name: "claude", Dir: filepath.Join(home, ".claude")},
+		{Name: "codex", Dir: codex},
+	}
 }
 
 // Action records what Install did to one file.
@@ -51,8 +69,8 @@ type Result struct {
 // Detect reports the agents configured for this user, in a stable order.
 func Detect(home string) []Target {
 	var found []Target
-	for _, t := range []Target{{Name: "claude", Dir: ".claude"}, {Name: "codex", Dir: ".codex"}} {
-		if info, err := os.Stat(filepath.Join(home, t.Dir)); err == nil && info.IsDir() {
+	for _, t := range Targets(home) {
+		if info, err := os.Stat(t.Dir); err == nil && info.IsDir() {
 			found = append(found, t)
 		}
 	}
@@ -72,7 +90,7 @@ func Install(home string, targets []Target, force bool) ([]Result, error) {
 	}
 	results := make([]Result, 0, len(targets))
 	for _, t := range targets {
-		dir := filepath.Join(home, t.Dir, "skills", skillName)
+		dir := filepath.Join(t.Dir, "skills", skillName)
 		path := filepath.Join(dir, "SKILL.md")
 		action := Installed
 		switch existing, err := os.ReadFile(path); {

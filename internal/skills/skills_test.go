@@ -40,6 +40,51 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+// internal/credentials honours CODEX_HOME when looking for a sign-in. If the
+// installer does not, the same binary finds your credentials in one place and
+// installs the skill somewhere Codex never reads.
+func TestCodexHomeIsHonoured(t *testing.T) {
+	home, relocated := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("unset uses the default location", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		found := Detect(home)
+		if len(found) != 1 || found[0].Dir != filepath.Join(home, ".codex") {
+			t.Fatalf("detected %+v, want ~/.codex", found)
+		}
+	})
+
+	t.Run("set relocates detection and install", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", relocated)
+		found := Detect(home)
+		if len(found) != 1 || found[0].Dir != relocated {
+			t.Fatalf("detected %+v, want %s", found, relocated)
+		}
+		if _, err := Install(home, found, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(relocated, "skills", "bosun-review", "SKILL.md")); err != nil {
+			t.Fatalf("skill not installed under CODEX_HOME: %v", err)
+		}
+		// And not in the place Codex is no longer reading.
+		if _, err := os.Stat(filepath.Join(home, ".codex", "skills", "bosun-review", "SKILL.md")); err == nil {
+			t.Error("skill was also installed under ~/.codex, which Codex is not reading")
+		}
+	})
+
+	// A relocated directory that does not exist is not a target; detection
+	// reports what is there, it does not create it.
+	t.Run("set to a missing directory detects nothing", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", filepath.Join(relocated, "nope"))
+		if found := Detect(home); len(found) != 0 {
+			t.Errorf("detected %+v, want nothing", found)
+		}
+	})
+}
+
 func TestInstall(t *testing.T) {
 	home := t.TempDir()
 	if e := os.MkdirAll(filepath.Join(home, ".claude"), 0700); e != nil {
@@ -193,8 +238,10 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 		"bosun review-status",
 		"--json",
 		// Found by reviewing this skill with Bosun: the default provider is
-		// codex-bosun whatever credentials the machine has.
-		"--provider claude-bosun",
+		// codex-bosun whatever credentials the machine has, so the skill has to
+		// offer the Claude selection. The flag itself takes "$PROVIDER", so
+		// assert the value is reachable rather than a literal flag spelling.
+		"claude-bosun",
 		// The default review is committed branch work, which requires a clean
 		// tree and a branch that is not the default branch.
 		"git status --porcelain",
@@ -224,6 +271,11 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 	// belong to another fork.
 	if !strings.Contains(body, "headRefOid") {
 		t.Error("skill identifies a named PR by branch name rather than commit")
+	}
+	// Hardcoding the provider silently overrode an operator's explicit choice
+	// and re-broke Claude-only machines, which an earlier review had fixed.
+	if !strings.Contains(body, `PROVIDER="${BOSUN_REVIEW_PROVIDER:-}"`) {
+		t.Error("skill does not resolve the provider from BOSUN_REVIEW_PROVIDER")
 	}
 	// review-status exits non-zero with no terminal event when it cannot load a
 	// job, and a pipeline hides that, so polling would never end.

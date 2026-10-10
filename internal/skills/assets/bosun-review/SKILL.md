@@ -80,8 +80,15 @@ BRANCH="$(git branch --show-current)"
 BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
 [ -n "$BASE" ] && git fetch origin "$BASE" --quiet
 
-# Match the credentials on this machine; see the provider section below.
-PROVIDER=codex-bosun
+# An explicit choice wins; otherwise match the credentials on this machine.
+PROVIDER="${BOSUN_REVIEW_PROVIDER:-}"
+if [ -z "$PROVIDER" ]; then
+  if [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then
+    PROVIDER=codex-bosun
+  else
+    PROVIDER=claude-bosun
+  fi
+fi
 ```
 
 Tell the user which base was used. A review against the wrong base is worse than
@@ -125,14 +132,17 @@ asked to. The review is not worth losing someone's work in progress.
 
 `--local-credentials` loads whatever sign-in this machine has, but the default
 provider is `codex-bosun`, so a machine with only Claude authenticated fails
-with "no usable credentials found for provider". Choose to match:
+with "no usable credentials found for provider". That is why `PROVIDER` is
+resolved above rather than assumed:
 
-- `BOSUN_REVIEW_PROVIDER` is set — honour it and pass no `--provider`.
-- `~/.codex/auth.json` exists — `--provider codex-bosun`.
-- otherwise, if Claude is signed in — `--provider claude-bosun`.
+- `BOSUN_REVIEW_PROVIDER` is set — use it. An explicit choice wins, and passing
+  it as `--provider` is the same selection, not an override of it.
+- otherwise `$CODEX_HOME/auth.json` or `~/.codex/auth.json` exists —
+  `codex-bosun`.
+- otherwise Claude is signed in — `claude-bosun`.
 
-Pass the same `--provider` on the review command itself; it is not remembered
-between commands. Bosun also creates the cluster on first use, which takes a
+Pass it on the review command itself; the selection is not remembered between
+commands. Bosun also creates the cluster on first use, which takes a
 few minutes.
 
 ## Run it detached, then poll
