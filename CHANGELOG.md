@@ -13,6 +13,37 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.1.2] - 2026-10-10
+
+This release improves CLI setup, isolates reviewer credentials, and makes review failures easier to diagnose.
+
+### Highlights
+
+- **Review skills installed during setup:** `bosun init` now installs the review skill for Claude Code and Codex. (#33)
+- **Cluster lifecycle management:** The CLI now manages the cluster lifecycle and loads local provider credentials. (#17)
+- **Repository-scoped credentials:** Each reviewer receives only the credential for the repository it is reviewing. (#32)
+- **Clearer failure reporting:** Review errors now identify which part of Bosun failed. (#27)
+
+### Fixes
+
+- Reviews that perform no review work are now marked as failed rather than successful. (#26)
+- Reviewer images are verified before a Kubernetes Job is submitted. (#16)
+- Review prompts have been refined to address defects observed in real reviews. (#24)
+
+### Changes
+
+#### Documentation
+- Added self-hosting guides for DigitalOcean and local tunnel setups. (#30)
+- Corrected provider documentation to stop listing OpenCode as supported. (#21)
+- Graduated ADR-001 alongside the empty-review failure fix. (#26)
+
+#### CI and dependencies
+- Added chart CI checks for Deployment fields that cannot change during an upgrade. (#20)
+- CI now uses the runner-provided ShellCheck instead of installing it. (#25)
+- Updated the Go container image to `1.27-bookworm`, `golang.org/x/sys` to `0.48.0`, Protobuf and Kubernetes dependencies, and `docker/setup-qemu-action` to v4. (#8, #9, #10, #12, #13)
+
+**Full changelog:** [v0.1.1…v0.1.2](../../compare/v0.1.1...v0.1.2)
+
 ## [0.1.1] - 2026-10-01
 
 ### Highlights
