@@ -230,7 +230,7 @@ func TestSkillVerifiesUpstreamPRBase(t *testing.T) {
 	if err := Print(&out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"baseRefOid", "baseRefName", "FETCH_HEAD", `"$FETCHED_SHA" != "$BASE_SHA"`, `BASE="$BASE_SHA"`} {
+	for _, want := range []string{"baseRefOid", "baseRefName", "FETCH_HEAD", `"$FETCHED_SHA" != "$BASE_SHA"`, `BASE="$BASE_SHA"`, "GIT_TERMINAL_PROMPT=0 git fetch"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("skill does not verify upstream PR base: missing %q", want)
 		}
@@ -295,7 +295,6 @@ func TestSkillResolvesForkBaseAndFailsClosed(t *testing.T) {
 			cmd.Dir = fork
 			cmd.Env = append(os.Environ(),
 				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"GIT_TERMINAL_PROMPT=0",
 				"MOCK_PR_DATA="+tc.url+"\tmain\t"+tc.sha,
 				fmt.Sprintf("MOCK_GH_FAIL=%t", tc.mockFail),
 				fmt.Sprintf("BOSUN_REVIEW_OFFLINE=%t", tc.offline),

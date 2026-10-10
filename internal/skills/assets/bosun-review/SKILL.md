@@ -98,7 +98,7 @@ if [ -n "$PR_DATA" ]; then
   fi
   UPSTREAM="${PR_URL#https://github.com/}"
   UPSTREAM="${UPSTREAM%/pull/*}"
-  git fetch --no-tags --quiet "https://github.com/$UPSTREAM.git" "$BASE_BRANCH" || {
+  GIT_TERMINAL_PROMPT=0 git fetch --no-tags --quiet "https://github.com/$UPSTREAM.git" "$BASE_BRANCH" || {
     echo "Cannot fetch $UPSTREAM branch $BASE_BRANCH; stop." >&2
     exit 1
   }

@@ -18,6 +18,15 @@
 - Validation added: a local nonexistent-repository rewrite, disabled Git prompts, and a five-second context deadline.
 - Next trigger to detect sooner: adding a new URL or subprocess to an integration test.
 
+## 2026-10-10 — Credentialed fetches must not prompt in agent workflows
+
+- Incident/bug: the PR base fetch could request Git credentials interactively and hold a detached review before submission.
+- Root cause pattern: a noninteractive test environment did not prove the shipped fetch could not prompt.
+- Early signal missed: the test harness disabled Git prompts, while the shipped skill did not.
+- Preventative rule: set `GIT_TERMINAL_PROMPT=0` on agent-driven Git fetches that must fail closed.
+- Validation added: the installed skill contract asserts the noninteractive fetch setting.
+- Next trigger to detect sooner: constructing a new Git URL inside an agent workflow.
+
 ## 2026-09-24 — Build prerequisites must be explicit
 
 `make test` invoked protobuf generation before it ensured the Python virtualenv
