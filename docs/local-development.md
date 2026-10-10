@@ -250,6 +250,11 @@ unstaged, and untracked files. An explicit `--branch` selects committed content
 only, even if it names the current branch. It never switches your checkout.
 `--base` selects the comparison base; Bosun resolves the default branch when
 possible and requests an explicit base when ambiguous. No implicit fetch occurs.
+The submission message prints the resolved base commit and merge base. For a
+pull request from a fork, use the installed Bosun review skill: it fetches the
+target repository's base branch, verifies it against GitHub's exact base commit,
+and stops if the fetch fails or the branch has moved. Passing the fork's local
+`main` as `--base` can silently review the wrong diff.
 
 Flags work before or after the path. `--provider` overrides
 `BOSUN_REVIEW_PROVIDER`; it does not change cluster credentials. Export the
