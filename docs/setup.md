@@ -10,8 +10,7 @@ See [bridgectl.md](bridgectl.md) for details.
 ```bash
 VERSION=1.0.0   # the version you are publishing as
 
-docker build --build-arg BRIDGECTL_VERSION="$(bridgectl --version | awk '{print $NF}')" \
-  -t ghcr.io/YOUR_ORG/bosun:"$VERSION" .
+docker build -t ghcr.io/YOUR_ORG/bosun:"$VERSION" .
 docker push ghcr.io/YOUR_ORG/bosun:"$VERSION"
 ```
 

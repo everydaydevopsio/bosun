@@ -225,7 +225,7 @@ jobs:
               --platform "$platform" \
               --load \
               --build-arg VERSION="${{ steps.version.outputs.value }}" \
-              --build-arg BRIDGECTL_VERSION="${{ vars.BRIDGECTL_VERSION || 'v1.4.1' }}" \
+              --build-arg BRIDGECTL_VERSION="${{ vars.BRIDGECTL_VERSION || 'v1.4.4' }}" \
               --cache-from type=gha \
               --cache-to type=gha,mode=max \
               -t "bosun:scan-${platform##*/}" .
@@ -265,7 +265,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.version.outputs.value }}
-            BRIDGECTL_VERSION=${{ vars.BRIDGECTL_VERSION || 'v1.4.1' }}
+            BRIDGECTL_VERSION=${{ vars.BRIDGECTL_VERSION || 'v1.4.4' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

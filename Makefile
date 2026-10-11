@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-BRIDGECTL_VERSION ?= v1.4.1
+BRIDGECTL_VERSION ?= v1.4.4
 DEV_IMAGE ?= bosun:dev
 # Stamped into the binary and image. Releases override this with the tag; local
 # builds report the nearest tag plus commit, or "dev" outside a git checkout.

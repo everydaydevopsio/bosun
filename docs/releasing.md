@@ -73,7 +73,7 @@ publishes twice.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `BRIDGECTL_VERSION` | `v1.4.1` | bridgectl base image tag built into the release image |
+| `BRIDGECTL_VERSION` | `v1.4.4` | bridgectl base image tag built into the release image |
 | `OPENAI_MODEL` | castoff default | Model used for release notes |
 
 ### Repositories

@@ -79,7 +79,7 @@ fi
 # BOSUN_SKIP_BUILD=1 reuses an image already loaded into the cluster. This runs
 # after the cluster exists, because `kind load` needs a node to load into.
 if [ "${BOSUN_SKIP_BUILD:-}" != "1" ]; then
-  docker build --build-arg BRIDGECTL_VERSION="${BRIDGECTL_VERSION:-v1.4.1}" -t "$IMAGE" .
+  docker build --build-arg BRIDGECTL_VERSION="${BRIDGECTL_VERSION:-v1.4.4}" -t "$IMAGE" .
   kind load docker-image "$IMAGE" --name "$CLUSTER"
 fi
 
