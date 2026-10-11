@@ -40,11 +40,14 @@ Credentials are copied, not linked: these are OAuth tokens that your local CLIs
 refresh in place, so re-run `bosun up --local-credentials` after re-authenticating.
 An existing local sign-in file can still contain a rejected or revoked token.
 If `review-status` reports `AUTH_REVOKED` or `AUTH_REJECTED` for `claude-bosun`,
-run `claude auth login`, then
-`bosun up --local-credentials --provider claude-bosun` and start a new review.
+verify an actual request with `claude --print -- "Reply OK"`. If it returns
+HTTP 401, renew the Claude credential (for example, with `claude auth login`),
+then run `bosun up --local-credentials --provider claude-bosun` and start a new review.
 For `codex-bosun`, run `codex login`, then
 `bosun up --local-credentials --provider codex-bosun`. A CLI status that says
 "logged in" does not prove the provider will accept the stored token.
+Bosun also stops `--local-credentials` before Secret upload if Claude's saved
+access token has expired and the credential has no refresh token.
 
 Bosun refuses to continue when the selected provider has no discovered credential,
 naming the ones that provider accepts. Provider acceptance is checked when the

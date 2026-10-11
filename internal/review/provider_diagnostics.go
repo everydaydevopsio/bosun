@@ -26,7 +26,7 @@ func providerExitError(provider string, exitCode int32, eventError, output strin
 	if strings.Contains(diagnosis, "authentication failed") {
 		switch {
 		case strings.HasPrefix(provider, "claude") && local:
-			diagnosis += "; run 'claude auth login' on this machine, then 'bosun up --local-credentials --provider claude-bosun' to refresh the cluster credential before starting a new review"
+			diagnosis += "; Claude /status can show a saved account even when a headless request fails. Verify with 'claude --print -- \"Reply OK\"'; if it returns 401, renew the Claude sign-in (for example, 'claude auth login'). Then run 'bosun up --local-credentials --provider claude-bosun' to refresh the cluster credential before starting a new review"
 		case strings.HasPrefix(provider, "codex") && local:
 			diagnosis += "; run 'codex login' on this machine, then 'bosun up --local-credentials --provider codex-bosun' to refresh the cluster credential before starting a new review"
 		case local:
