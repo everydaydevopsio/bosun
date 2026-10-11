@@ -15,6 +15,16 @@ token, clone the requested revision without putting that token in Git metadata,
 run a local bridgectl gRPC session, redact credentials, and post the resulting
 review to the pull request when applicable. Local Kind reviews must include
 uncommitted changes and print the result without modifying the source checkout.
+For a local pull-request review, the comparison base must be the exact commit
+reported by the target upstream repository. If that commit cannot be fetched
+and verified, submission must stop. The CLI must report the resolved base and
+merge base so a reviewer can audit the comparison.
+When a provider fails, the review status must retain a safe diagnostic that
+classifies known authentication failures and gives the local user a concrete
+credential refresh step without exposing provider output or credentials.
+When `bosun up` checks a local review provider, it must inspect the selected
+credential in the Kind Secret. With `--local-credentials`, it must confirm a
+headless provider request succeeds before copying the local credential.
 
 ## GO-3: Replace the Python runtime
 

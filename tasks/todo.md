@@ -657,3 +657,48 @@ image, which reads like a Bosun release number and ages the same way.
 - Result: the guides stay correct across releases instead of for one.
 - Evidence: `helm show chart` against the resolved version; guard checked
   against the current tree and against a deliberately reintroduced pin.
+
+# Task: Verify the upstream base for local PR reviews
+
+## Context
+- Owner: Codex
+- Date: 2026-10-10
+- Mode: Autonomous
+- PRD Section: GO-2
+- Requirement IDs: issue #34
+
+## Scope
+- In scope: exact upstream PR base selection and visible comparison commits.
+- Out of scope: general PR-aware CLI input (#36).
+
+## Acceptance Criteria
+- AC1: A fork PR uses the upstream base, even when fork `main` diverges.
+- AC2: A failed or changed base fetch stops submission.
+- AC3: The CLI displays resolved base and merge base.
+
+## Constraints
+- Preserve offline checkout reviews and do not switch the user's branch.
+
+## Risks and Tradeoffs
+- Risk: a private upstream without working Git credentials fails closed.
+- Tradeoff: the skill fetches the upstream branch before review.
+
+## Execution Checklist
+- [x] Regression tests fail on the prior implementation and pass with the fix.
+- [x] Full tests, lint, and build pass; coverage is measured at 36.4%.
+
+## Test Strategy
+- Unit: skill contract and fork-layout snapshot test.
+- Integration: skill fetch against a fork-shaped local remote.
+- Failure-path tests: fetch failure and moved base SHA.
+- Requirement-to-test mapping: AC1 to fork test; AC2 to skill fetch test; AC3 to snapshot metadata test.
+
+## Rollback Strategy
+- Trigger: verified PR base resolution prevents legitimate review.
+- Rollback steps: revert this PR.
+- Validation after rollback: previous checkout review remains available.
+
+## Outcome
+- Result: implementation complete; review and merge gates pending. Coverage is below the 75% framework requirement.
+- Evidence links/commands: focused regression test red before implementation, then green; `make test`, `make lint`, `make build` pass; `make coverage` reports 36.4%.
+- PRD updates: GO-2 exact comparison requirement.

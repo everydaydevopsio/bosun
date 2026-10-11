@@ -192,7 +192,7 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 				continue
 			}
 			if state.Status == bridgev1.SessionStatus_SESSION_STATUS_FAILED || (state.ExitRecorded && (state.ExitCode != 0 || state.Error != "")) {
-				return "", fmt.Errorf("agent session failed: %s", state.Error)
+				return "", providerExitError(provider, state.ExitCode, state.Error, out.String())
 			}
 			reporter.Emit("session", fmt.Sprintf("Session %s; last sequence %d", state.Status, state.LastSeq))
 			continue
@@ -262,7 +262,7 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 			}
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT:
 			if event.ExitCode != 0 || event.Error != "" {
-				return "", fmt.Errorf("agent session failed (exit %d): %s", event.ExitCode, event.Error)
+				return "", providerExitError(provider, event.ExitCode, event.Error, out.String())
 			}
 			if strings.TrimSpace(out.String()) == "" {
 				return "", fmt.Errorf("agent session produced no output")
@@ -271,7 +271,7 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING:
 			reporter.Emit("activity", "Provider active")
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
-			return "", fmt.Errorf("agent session error: %s", event.Error)
+			return "", providerExitError(provider, event.ExitCode, event.Error, out.String())
 		}
 		select {
 		case <-ctx.Done():

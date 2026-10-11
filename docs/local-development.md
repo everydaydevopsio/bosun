@@ -28,6 +28,20 @@ bosun up --local-credentials          # prepare a cluster, or refresh credential
 bosun review "$PWD" --local-credentials
 ```
 
+`bosun up` checks that the selected provider has a credential in the Kind
+Secret. Without `--local-credentials`, this is an offline presence and expiry
+check; it cannot prove the provider will accept the token. With
+`--local-credentials`, Bosun checks saved credential metadata and makes one
+short headless request through the selected provider's local CLI. It copies
+credentials only if that request
+succeeds, and reports a fixed authentication diagnosis without printing
+provider output if it fails. This live check can consume a small amount of
+provider usage and is limited to one minute. Use `--provider` to choose the
+provider whose credential is checked.
+An exported `CLAUDE_CREDENTIALS` or `CODEX_AUTH` JSON value cannot be verified
+by a different saved CLI login; use the CLI's own sign-in file or a provider API
+key/OAuth environment variable for the live check.
+
 Discovery order, first match wins per credential:
 
 1. An exported environment variable, which is always an explicit choice.
@@ -38,9 +52,20 @@ Discovery order, first match wins per credential:
 The CLI reports which source each credential came from and never prints a value.
 Credentials are copied, not linked: these are OAuth tokens that your local CLIs
 refresh in place, so re-run `bosun up --local-credentials` after re-authenticating.
+An existing local sign-in file can still contain a rejected or revoked token.
+If `review-status` reports `AUTH_REVOKED` or `AUTH_REJECTED` for `claude-bosun`,
+verify an actual request with `claude --print -- "Reply OK"`. If it returns
+HTTP 401, renew the Claude credential (for example, with `claude auth login`),
+then run `bosun up --local-credentials --provider claude-bosun` and start a new review.
+For `codex-bosun`, run `codex login`, then
+`bosun up --local-credentials --provider codex-bosun`. A CLI status that says
+"logged in" does not prove the provider will accept the stored token.
+Bosun also stops `--local-credentials` before Secret upload if Claude's saved
+access token has expired and the credential has no refresh token.
 
-Bosun refuses to continue when the selected provider has no usable credential,
-naming the ones that provider accepts. Only that provider's keys are mounted into
+Bosun refuses to continue when the selected provider has no discovered credential,
+naming the ones that provider accepts. Provider acceptance is checked when the
+review session starts. Only that provider's keys are mounted into
 the Job even when the Secret holds more — a review cannot read another provider's
 token.
 
@@ -250,6 +275,14 @@ unstaged, and untracked files. An explicit `--branch` selects committed content
 only, even if it names the current branch. It never switches your checkout.
 `--base` selects the comparison base; Bosun resolves the default branch when
 possible and requests an explicit base when ambiguous. No implicit fetch occurs.
+The submission message prints the resolved base commit and merge base. For a
+pull request from a fork, use the installed Bosun review skill: it fetches the
+target repository's base branch, verifies it against GitHub's exact base commit,
+and stops if the fetch fails or the branch has moved. Passing the fork's local
+`main` as `--base` can silently review the wrong diff.
+For a branch with no PR, the skill requires an explicit offline choice:
+`BOSUN_REVIEW_OFFLINE=true`. In that mode, Bosun resolves the checkout's default
+branch and reports the comparison it chose.
 
 Flags work before or after the path. `--provider` overrides
 `BOSUN_REVIEW_PROVIDER`; it does not change cluster credentials. Export the
@@ -329,7 +362,7 @@ the classification after events and logs have expired:
 | --- | --- | --- | --- |
 | 10 | setup | Bosun could not prepare the review | configuration, credentials, or workspace — check the message |
 | 11 | clone | Bosun could not obtain the repository | token scope, repository name, or network |
-| 12 | provider | The review provider failed | the AI session died; usually worth one retry |
+| 12 | provider | The review provider failed | check the diagnostic code and follow its action |
 | 13 | review | The reviewer did not review the change | the agent declined; the reason it gave is in the message |
 | 14 | publish | The review completed but could not be published | the review succeeded; posting to GitHub did not |
 
@@ -337,6 +370,14 @@ the classification after events and logs have expired:
 message it prints and in `bosun review-status`, which reports the reason rather
 than a stored result that does not exist. `make review REPO=... ARGS='--provider claude-bosun'` and
 `scripts/review-local.sh` delegate to the native CLI.
+
+Provider exits include a stable diagnostic code: `AUTH_REVOKED`,
+`AUTH_REJECTED`, `RATE_LIMITED`, or `UNKNOWN_EXIT`. Bosun classifies provider
+output without copying raw provider text into the status, since errors can
+contain credential or request details. The failed Job is not resumed after
+credential repair; submit a new review. An `UNKNOWN_EXIT` means Bosun could not
+identify the cause from the provider response. Check the provider sign-in and
+retry once; if it repeats, inspect the provider runtime and bridgectl logs.
 
 Set `BOSUN_QUIET_WARNING_AFTER=2m` to change when silent-provider updates are
 flagged as unconfirmed progress. A quiet warning never kills the review by itself.

@@ -3,11 +3,32 @@ package credentials
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestMissingRejectsExpiredUnrefreshableClaudeCredential(t *testing.T) {
+	expired := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"fake-token","expiresAt":%d,"refreshToken":""}}`, time.Now().Add(-time.Hour).UnixMilli())
+	err := Missing("claude-bosun", []Credential{{Key: "claude-credentials", Value: expired}})
+	if err == nil || !strings.Contains(err.Error(), "expired") || !strings.Contains(err.Error(), "headless") {
+		t.Fatalf("missing preflight diagnosis: %v", err)
+	}
+	if strings.Contains(err.Error(), "fake-token") {
+		t.Fatalf("credential leaked: %v", err)
+	}
+	for _, body := range []string{
+		fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"fake-token","expiresAt":%d,"refreshToken":""}}`, time.Now().Add(time.Hour).UnixMilli()),
+		fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"fake-token","expiresAt":%d,"refreshToken":"fake-refresh"}}`, time.Now().Add(-time.Hour).UnixMilli()),
+	} {
+		if err := Missing("claude-bosun", []Credential{{Key: "claude-credentials", Value: body}}); err != nil {
+			t.Fatalf("usable or refreshable credential rejected: %v", err)
+		}
+	}
+}
 
 func writeFile(t *testing.T, path, value string) {
 	t.Helper()

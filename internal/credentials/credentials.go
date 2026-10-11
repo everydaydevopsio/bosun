@@ -154,17 +154,35 @@ func Missing(provider string, found []Credential) error {
 	if len(specs) == 0 {
 		return fmt.Errorf("provider %q has no credentials Bosun knows how to supply; use a codex, claude or gemini provider, or populate the AI Secret yourself", provider)
 	}
-	have := map[string]bool{}
+	have := map[string]Credential{}
 	for _, c := range found {
-		have[c.Key] = true
+		have[c.Key] = c
 	}
 	var keys, variables []string
 	for _, s := range specs {
-		if have[s.Key] {
+		if c, ok := have[s.Key]; ok {
+			if s.Key == "claude-credentials" && expiredUnrefreshableClaudeCredential(c.Value) {
+				return fmt.Errorf("saved Claude credential is expired and has no refresh token; Claude /status does not verify a headless provider request. Renew the credential, then run 'bosun up --local-credentials --provider claude-bosun' before starting a new review")
+			}
 			return nil
 		}
 		keys = append(keys, s.Key)
 		variables = append(variables, s.Variable)
 	}
 	return fmt.Errorf("no usable credentials found for provider %q: it needs one of %s, so sign in with its CLI or export %s", provider, strings.Join(keys, ", "), strings.Join(variables, " or "))
+}
+
+func expiredUnrefreshableClaudeCredential(value string) bool {
+	var doc struct {
+		ClaudeAiOauth struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+			ExpiresAt    int64  `json:"expiresAt"`
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal([]byte(value), &doc) != nil {
+		return false
+	}
+	auth := doc.ClaudeAiOauth
+	return auth.AccessToken != "" && auth.RefreshToken == "" && auth.ExpiresAt > 0 && time.Now().UnixMilli() >= auth.ExpiresAt
 }
