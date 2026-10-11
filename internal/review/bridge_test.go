@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,64 @@ type fakeBridge struct {
 	writes  int
 	stopped bool
 	silent  bool
+}
+
+func TestFailedProviderExitExplainsRevokedLocalClaudeCredentials(t *testing.T) {
+	t.Setenv("BOSUN_LOCAL_PATH", "/repo")
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte(`Failed to authenticate. API Error: 401 {"error":{"message":"OAuth access token has been revoked."},"request_id":"private-request"}`)},
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT, ExitCode: 1},
+	}}
+	_, err := runSession(context.Background(), f, "/repo", "claude-bosun", "review")
+	if err == nil {
+		t.Fatal("expected provider failure")
+	}
+	for _, want := range []string{"authentication", "revoked", "claude auth login", "bosun up --local-credentials", "review-status"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q from %q", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "private-request") || strings.Contains(err.Error(), `{"error"`) {
+		t.Fatalf("provider output leaked into failure: %q", err)
+	}
+}
+
+func TestUnknownProviderFailureDoesNotEchoOutput(t *testing.T) {
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("secret-value-123")},
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT, ExitCode: 1, Error: "private-secret-456"},
+	}}
+	_, err := runSession(context.Background(), f, "/repo", "claude-bosun", "review")
+	if err == nil || !strings.Contains(err.Error(), "exit 1") {
+		t.Fatalf("expected diagnosed exit, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "private-secret") {
+		t.Fatalf("provider output leaked into failure: %q", err)
+	}
+}
+
+func TestProviderFailureDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, errorText, want, absent string
+		local                                   bool
+	}{
+		{"expired local Claude OAuth", "claude-bosun", "invalid_grant", "claude auth login", "invalid_grant", true},
+		{"rejected local Codex credential", "codex-bosun", "API Error: 401", "codex login", "API Error: 401", true},
+		{"hosted authentication", "claude-bosun", "unauthorized", "cluster Secret", "claude auth login", false},
+		{"provider rate limit", "claude-bosun", "API Error: 429", "RATE_LIMITED", "API Error: 429", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.local {
+				t.Setenv("BOSUN_LOCAL_PATH", "/repo")
+			} else {
+				t.Setenv("BOSUN_LOCAL_PATH", "")
+			}
+			got := providerExitError(tc.provider, 1, tc.errorText, "").Error()
+			if !strings.Contains(got, tc.want) || strings.Contains(got, tc.absent) {
+				t.Errorf("incorrect diagnostic: %q", got)
+			}
+		})
+	}
 }
 
 func (f *fakeBridge) StartSession(_ context.Context, r *pb.StartSessionRequest, _ ...grpc.CallOption) (*pb.StartSessionResponse, error) {
