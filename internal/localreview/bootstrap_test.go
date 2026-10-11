@@ -2,14 +2,87 @@ package localreview
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/everydaydevopsio/bosun/internal/credentials"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+func TestLoadCredentialsChecksProviderBeforeWritingSecret(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	called := false
+	err := loadCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun",
+		[]credentials.Credential{{Key: "claude-credentials", Value: `{"claudeAiOauth":{"accessToken":"fake"}}`}},
+		func(string) {}, func(context.Context, string) error { called = true; return fmt.Errorf("AUTH_REJECTED") })
+	if err == nil || !strings.Contains(err.Error(), "AUTH_REJECTED") || !called {
+		t.Fatalf("expected failed live check, got %v called=%v", err, called)
+	}
+	if _, err := client.CoreV1().Secrets("bosun").Get(context.Background(), "bosun-ai", metav1.GetOptions{}); err == nil {
+		t.Fatal("credential uploaded despite failed provider check")
+	}
+}
+
+func TestLoadCredentialsDoesNotVerifyDifferentLocalLogin(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	err := loadCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun",
+		[]credentials.Credential{{Key: "claude-credentials", Value: `{"claudeAiOauth":{"accessToken":"fake"}}`, From: "CLAUDE_CREDENTIALS"}},
+		func(string) {}, func(context.Context, string) error { t.Fatal("probe must not use a different login"); return nil })
+	if err == nil || !strings.Contains(err.Error(), "cannot live-check CLAUDE_CREDENTIALS") {
+		t.Fatalf("unexpected status: %v", err)
+	}
+}
+
+func TestProviderProbeDoesNotEchoProviderOutput(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "claude")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' 'Failed to authenticate. API Error: 401 OAuth access token has been revoked. secret-value' >&2\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	err := probeLocalProvider(context.Background(), "claude-bosun")
+	if err == nil || !strings.Contains(err.Error(), "AUTH_REVOKED") || strings.Contains(err.Error(), "secret-value") {
+		t.Fatalf("unsafe or missing diagnosis: %v", err)
+	}
+}
+
+func TestProviderProbeAcceptsHeadlessSuccess(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\nprintf OK\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := probeLocalProvider(context.Background(), "claude-bosun"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviderProbeRejectsEmptySuccess(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := probeLocalProvider(context.Background(), "claude-bosun"); err == nil || !strings.Contains(err.Error(), "no response") {
+		t.Fatalf("empty provider response accepted: %v", err)
+	}
+}
+
+func TestClusterCredentialStatusChecksSelectedProvider(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "bosun-ai", Namespace: "bosun"}, Data: map[string][]byte{"codex-auth": []byte(`{}`)}})
+	if err := checkClusterCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun"); err == nil {
+		t.Fatal("missing selected provider credential reported ready")
+	}
+	if err := checkClusterCredentials(context.Background(), client, "bosun", "bosun-ai", "codex-bosun"); err != nil {
+		t.Fatalf("stored credential rejected: %v", err)
+	}
+}
 
 // --local-credentials is the flag that turns "I am signed in to codex on this
 // laptop" into a Secret the reviewer Job can read.
@@ -41,7 +114,7 @@ func TestLoadCredentials(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := fake.NewSimpleClientset()
 			var notices []string
-			e := loadCredentials(context.Background(), client, "bosun", "bosun-ai", tc.provider, tc.found, func(m string) { notices = append(notices, m) })
+			e := loadCredentials(context.Background(), client, "bosun", "bosun-ai", tc.provider, tc.found, func(m string) { notices = append(notices, m) }, func(context.Context, string) error { return nil })
 			if tc.wantErr != "" {
 				if e == nil || !strings.Contains(e.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want one mentioning %q", e, tc.wantErr)

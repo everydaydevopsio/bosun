@@ -22,6 +22,9 @@ merge base so a reviewer can audit the comparison.
 When a provider fails, the review status must retain a safe diagnostic that
 classifies known authentication failures and gives the local user a concrete
 credential refresh step without exposing provider output or credentials.
+When `bosun up` checks a local review provider, it must inspect the selected
+credential in the Kind Secret. With `--local-credentials`, it must confirm a
+headless provider request succeeds before copying the local credential.
 
 ## GO-3: Replace the Python runtime
 

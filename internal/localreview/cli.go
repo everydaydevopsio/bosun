@@ -290,8 +290,8 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		}
 	}
 	if o.localCredentials {
-		credCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		e = loadCredentials(credCtx, c, o.namespace, config.Load().AISecret, o.provider, credentials.Discover(credCtx), notice)
+		credCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		e = loadCredentials(credCtx, c, o.namespace, config.Load().AISecret, o.provider, credentials.Discover(credCtx), notice, probeLocalProvider)
 		cancel()
 		if e != nil {
 			fmt.Fprintln(errout, e)

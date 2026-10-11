@@ -10,6 +10,8 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/credentials"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -19,10 +21,17 @@ import (
 // Only the source of each credential is reported, never its value: the whole
 // point of the flag is to move secrets without a human handling them, and a
 // value echoed to a terminal ends up in scrollback and shell history.
-func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace, secret, provider string, found []credentials.Credential, notice func(string)) error {
+func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace, secret, provider string, found []credentials.Credential, notice func(string), probe func(context.Context, string) error) error {
 	if err := credentials.Missing(provider, found); err != nil {
 		return err
 	}
+	if err := probeSourceMismatch(provider, found); err != nil {
+		return err
+	}
+	if err := probe(ctx, provider); err != nil {
+		return err
+	}
+	notice("Verified " + provider + " with a headless provider request")
 	written, err := cluster.EnsureSecret(ctx, client, namespace, secret, found)
 	if err != nil {
 		return fmt.Errorf("write the %s secret: %w", secret, err)
@@ -33,6 +42,42 @@ func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace
 	}
 	notice(fmt.Sprintf("Loaded %d credential(s) into %s/%s: %s", len(written), namespace, secret, strings.Join(sources, ", ")))
 	return nil
+}
+
+// A JSON credential exported only for Bosun is not automatically used by the
+// host CLI. Refuse to call a different saved login a verification of it.
+func probeSourceMismatch(provider string, found []credentials.Credential) error {
+	have := map[string]bool{}
+	for _, c := range found {
+		have[c.Key] = true
+	}
+	for _, c := range found {
+		if strings.HasPrefix(provider, "claude") && c.Key == "claude-credentials" && c.From == "CLAUDE_CREDENTIALS" && !have["claude-code-oauth-token"] && !have["anthropic-api-key"] {
+			return fmt.Errorf("cannot live-check CLAUDE_CREDENTIALS with the host Claude CLI; use a CLI sign-in file or export CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY")
+		}
+		if strings.HasPrefix(provider, "codex") && c.Key == "codex-auth" && c.From == "CODEX_AUTH" && !have["openai-api-key"] {
+			return fmt.Errorf("cannot live-check CODEX_AUTH with the host Codex CLI; use a CLI sign-in file or export OPENAI_API_KEY")
+		}
+	}
+	return nil
+}
+
+// checkClusterCredentials reports the selected provider's stored credential
+// status without returning or printing any Secret data. This is an offline
+// check; --local-credentials also performs a live provider request.
+func checkClusterCredentials(ctx context.Context, client kubernetes.Interface, namespace, secret, provider string) error {
+	s, err := client.CoreV1().Secrets(namespace).Get(ctx, secret, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return fmt.Errorf("provider credential Secret %s/%s is missing; run bosun up --local-credentials --provider %s", namespace, secret, provider)
+	}
+	if err != nil {
+		return fmt.Errorf("check provider credential Secret %s/%s: %w", namespace, secret, err)
+	}
+	found := make([]credentials.Credential, 0, len(s.Data))
+	for key, value := range s.Data {
+		found = append(found, credentials.Credential{Key: key, Value: string(value)})
+	}
+	return credentials.Missing(provider, found)
 }
 
 // ensureCluster creates the Kind cluster when it is absent, so a user who has
@@ -72,21 +117,32 @@ func runUp(ctx context.Context, o options, out, errout io.Writer) int {
 	}
 	cfg := config.Load()
 	nsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	if e = cluster.EnsureNamespace(nsCtx, c, o.namespace); e != nil {
+		cancel()
 		fmt.Fprintln(errout, "create namespace:", e)
 		return 1
 	}
+	cancel()
 	if o.localCredentials {
-		if e = loadCredentials(nsCtx, c, o.namespace, cfg.AISecret, o.provider, credentials.Discover(nsCtx), notice); e != nil {
+		credCtx, credCancel := context.WithTimeout(ctx, 90*time.Second)
+		e = loadCredentials(credCtx, c, o.namespace, cfg.AISecret, o.provider, credentials.Discover(credCtx), notice, probeLocalProvider)
+		credCancel()
+		if e != nil {
 			fmt.Fprintln(errout, e)
 			return 2
 		}
 	}
+	checkCtx, checkCancel := context.WithTimeout(ctx, 15*time.Second)
+	e = checkClusterCredentials(checkCtx, c, o.namespace, cfg.AISecret, o.provider)
+	checkCancel()
+	if e != nil {
+		fmt.Fprintln(errout, e)
+		return 2
+	}
 	fmt.Fprintf(out, "%s\n", contextName)
 	notice(fmt.Sprintf("Cluster %q is ready for reviews in namespace %q", o.cluster, o.namespace))
 	if !o.localCredentials {
-		notice("No credentials were loaded; pass --local-credentials to copy this machine's provider sign-in into the cluster")
+		notice("Credential for " + o.provider + " is present in the cluster (offline check only); pass --local-credentials to verify a live request and refresh it")
 	}
 	return 0
 }

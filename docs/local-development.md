@@ -28,6 +28,20 @@ bosun up --local-credentials          # prepare a cluster, or refresh credential
 bosun review "$PWD" --local-credentials
 ```
 
+`bosun up` checks that the selected provider has a credential in the Kind
+Secret. Without `--local-credentials`, this is an offline presence and expiry
+check; it cannot prove the provider will accept the token. With
+`--local-credentials`, Bosun checks saved credential metadata and makes one
+short headless request through the selected provider's local CLI. It copies
+credentials only if that request
+succeeds, and reports a fixed authentication diagnosis without printing
+provider output if it fails. This live check can consume a small amount of
+provider usage and is limited to one minute. Use `--provider` to choose the
+provider whose credential is checked.
+An exported `CLAUDE_CREDENTIALS` or `CODEX_AUTH` JSON value cannot be verified
+by a different saved CLI login; use the CLI's own sign-in file or a provider API
+key/OAuth environment variable for the live check.
+
 Discovery order, first match wins per credential:
 
 1. An exported environment variable, which is always an explicit choice.

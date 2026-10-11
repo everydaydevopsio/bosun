@@ -38,9 +38,10 @@ you can ask Claude Code or Codex to review your changes instead of running the
 command yourself.
 
 bosun review creates the local Kind cluster when it is missing, so bosun up is
-only needed to prepare one ahead of time or to refresh credentials. Pass
---local-credentials to copy this machine's codex or claude sign-in into the
-cluster; bosun down removes the cluster and its snapshots.
+only needed to prepare one ahead of time or to refresh credentials. bosun up
+checks the selected provider credential in the cluster. Pass --local-credentials
+to verify a headless provider request before copying this machine's sign-in;
+bosun down removes the cluster and its snapshots.
 `
 
 // metaCommand handles the commands that need neither configuration nor a
