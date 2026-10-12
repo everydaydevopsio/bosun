@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.1.3] - 2026-10-12
+
+### Highlights
+- Updated the `bridgectl` base to **v1.4.4**. (#39)
+
+### Fixes
+- Added upstream base verification when reviewing pull requests from forks. (#38)
+
+### Changes
+- Updated documentation to resolve the release version dynamically rather than use a pinned version. (#35)
+
 ## [0.1.2] - 2026-10-10
 
 This release improves CLI setup, isolates reviewer credentials, and makes review failures easier to diagnose.
