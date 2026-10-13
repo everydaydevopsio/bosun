@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -9,15 +10,18 @@ import (
 
 	pb "github.com/everydaydevopsio/bosun/internal/bridgev1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakeBridge struct {
 	pb.BridgeServiceClient
-	events  []*pb.AttachSessionEvent
-	request *pb.StartSessionRequest
-	writes  int
-	stopped bool
-	silent  bool
+	events   []*pb.AttachSessionEvent
+	request  *pb.StartSessionRequest
+	writes   int
+	stopped  bool
+	silent   bool
+	startErr error
 }
 
 func TestFailedProviderExitExplainsRevokedLocalClaudeCredentials(t *testing.T) {
@@ -80,7 +84,48 @@ func TestProviderFailureDiagnostics(t *testing.T) {
 
 func (f *fakeBridge) StartSession(_ context.Context, r *pb.StartSessionRequest, _ ...grpc.CallOption) (*pb.StartSessionResponse, error) {
 	f.request = r
+	if f.startErr != nil {
+		return nil, f.startErr
+	}
 	return &pb.StartSessionResponse{SessionId: r.SessionId, Status: pb.SessionStatus_SESSION_STATUS_RUNNING}, nil
+}
+
+func TestSnapshotPathPolicyFailureIsSetupError(t *testing.T) {
+	t.Setenv("BOSUN_WORKER_IMAGE", "bosun:test")
+	denied := status.Error(codes.InvalidArgument, `start session: invalid argument: repo_path "/repos/review.123" is not under any allowed path`)
+	f := &fakeBridge{startErr: denied}
+	_, err := runSession(context.Background(), f, "/repos/review.123", "claude-bosun", "review")
+	if err == nil || !isSnapshotPathPolicyError(err) {
+		t.Fatalf("want snapshot path configuration failure, got %v", err)
+	}
+	for _, want := range []string{"bosun:test", "config/bridge-bosun.yaml", "/repos", "nonretryable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q from %q", want, err)
+		}
+	}
+	if !errors.Is(err, denied) {
+		t.Fatal("original bridgectl error was lost")
+	}
+	if got := agentFailureStage(err); got != StageSetup {
+		t.Fatalf("path policy stage = %s, want setup", got)
+	}
+}
+
+func TestUnrelatedStartSessionFailureStaysProviderError(t *testing.T) {
+	for _, tc := range []struct {
+		workspace string
+		err       error
+	}{
+		{"/repos/review.123", status.Error(codes.InvalidArgument, "invalid provider")},
+		{"/tmp/other", status.Error(codes.InvalidArgument, `repo_path "/tmp/other" is not under any allowed path`)},
+		{"/repos/review.123", status.Error(codes.PermissionDenied, `repo_path "/repos/review.123" is not under any allowed path`)},
+	} {
+		f := &fakeBridge{startErr: tc.err}
+		_, err := runSession(context.Background(), f, tc.workspace, "claude-bosun", "review")
+		if agentFailureStage(err) != StageProvider {
+			t.Fatalf("unrelated error classified as setup: %v", err)
+		}
+	}
 }
 func (f *fakeBridge) StopSession(_ context.Context, _ *pb.StopSessionRequest, _ ...grpc.CallOption) (*pb.StopSessionResponse, error) {
 	f.stopped = true

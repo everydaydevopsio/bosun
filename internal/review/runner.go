@@ -159,7 +159,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	reporter.Emit("stage", "starting provider")
 	output, err := w.Agent(ctx, workspace, cfg.ReviewProvider, prompt, max)
 	if err != nil {
-		return fail(StageProvider, err)
+		return fail(agentFailureStage(err), err)
 	}
 	// sanitize as well as redact: redact knows the GitHub token, but provider
 	// credentials only exist in the environment. A prompt-injected agent that

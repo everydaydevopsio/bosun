@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,8 +16,33 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/progress"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
+
+type snapshotPathPolicyError struct{ cause error }
+
+func (e *snapshotPathPolicyError) Error() string {
+	image := os.Getenv("BOSUN_WORKER_IMAGE")
+	if image == "" {
+		image = "the current Bosun worker image"
+	}
+	return fmt.Sprintf("nonretryable bridgectl path-policy incompatibility in %s: /repos/review.* is rejected; config/bridge-bosun.yaml must allow /repos. Rebuild or update the worker image before retrying: %v", image, e.cause)
+}
+func (e *snapshotPathPolicyError) Unwrap() error { return e.cause }
+
+func isSnapshotPathPolicyError(err error) bool {
+	var pathError *snapshotPathPolicyError
+	return errors.As(err, &pathError)
+}
+
+func agentFailureStage(err error) Stage {
+	if isSnapshotPathPolicyError(err) {
+		return StageSetup
+	}
+	return StageProvider
+}
 
 func bridgeTarget() string {
 	dir := os.Getenv("BRIDGECTL_STATE_DIR")
@@ -130,6 +156,9 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 	}
 	response, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{ProjectId: "bosun-review", SessionId: sessionID, RepoPath: workspace, Provider: provider, AgentOpts: opts, InitialCols: 200, InitialRows: 50})
 	if err != nil {
+		if status.Code(err) == codes.InvalidArgument && strings.HasPrefix(filepath.Clean(workspace), "/repos/review.") && strings.Contains(err.Error(), "repo_path") && strings.Contains(err.Error(), "not under any allowed path") {
+			return "", &snapshotPathPolicyError{cause: err}
+		}
 		return "", fmt.Errorf("start bridge session: %w", err)
 	}
 	defer func() {

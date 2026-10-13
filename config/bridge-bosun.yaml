@@ -13,6 +13,11 @@
 #
 # Auth comes from $CODEX_HOME/auth.json, which internal/review/credentials.go writes from
 # the CODEX_AUTH secret, so no provider-specific auth handling is needed.
+# Local Kind snapshots are mounted at /repos/review.*. bridgectl v1.4.4
+# rejects session paths outside its home unless this root is allowed.
+allowed_paths:
+  - /repos
+
 providers:
   codex-bosun:
     binary: "sh"

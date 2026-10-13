@@ -352,9 +352,11 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 		// offer the Claude selection. The flag itself takes "$PROVIDER", so
 		// assert the value is reachable rather than a literal flag spelling.
 		"claude-bosun",
-		// The default review is committed branch work, which requires a clean
-		// tree and a branch that is not the default branch.
+		// The default review is committed branch work, which must disclose
+		// uncommitted changes without requiring cleanup.
 		"git status --porcelain",
+		"It does not switch branches or change the source worktree",
+		"uncommitted changes were excluded",
 		"git rev-parse --abbrev-ref origin/HEAD",
 	} {
 		if !strings.Contains(body, want) {

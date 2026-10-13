@@ -702,3 +702,39 @@ image, which reads like a Bosun release number and ages the same way.
 - Result: implementation complete; review and merge gates pending. Coverage is below the 75% framework requirement.
 - Evidence links/commands: focused regression test red before implementation, then green; `make test`, `make lint`, `make build` pass; `make coverage` reports 36.4%.
 - PRD updates: GO-2 exact comparison requirement.
+
+# Task: Restore the local snapshot path contract
+
+## Context
+- Owner: Codex
+- Date: 2026-10-13
+- Mode: Autonomous
+- Requirement IDs: [issue #41](https://github.com/everydaydevopsio/bosun/issues/41), PRD GO-2
+
+## Scope
+- In scope: `/repos` bridgectl allowance, pinned-image contract test, setup diagnosis, skill guidance.
+- Out of scope: PR-aware submission and compact polling (#36), structured results (#37).
+
+## Acceptance Criteria
+- A local snapshot path is accepted and an outside path is denied by pinned bridgectl.
+- A path-policy mismatch reports a nonretryable setup error naming the image and config.
+- The installed skill allows committed branch review with unrelated dirty files.
+
+## Execution Checklist
+- [x] Reproduce the released-image rejection and failing config regression test.
+- [x] Implement the path allowance, diagnosis, image contract check, and guidance.
+- [x] Verify the contract with the released image plus candidate config.
+
+## Test Strategy
+- Unit: config and StartSession classification tests.
+- Integration: `scripts/smoke-bridge-path.sh` with both config versions.
+- Failure-path tests: unrelated InvalidArgument and paths outside `/repos`.
+
+## Rollback Strategy
+- Trigger: valid local sessions fail or path scope broadens unexpectedly.
+- Rollback steps: revert this change and select the preceding image.
+- Validation after rollback: provider session and path denial checks.
+
+## Outcome
+- Result: local implementation complete; CI and released-image verification pending.
+- Evidence links/commands: regression test red before fix; pinned-image script red on released config and green with candidate config.

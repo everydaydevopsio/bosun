@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"sigs.k8s.io/yaml"
 )
 
@@ -65,5 +66,21 @@ func TestBosunProviderWrappersPreservePromptAndCloseInput(t *testing.T) {
 				t.Fatalf("prompt changed: %q", out)
 			}
 		})
+	}
+}
+
+func TestBridgeConfigAllowsOnlySnapshotRoot(t *testing.T) {
+	data, err := os.ReadFile("../../config/bridge-bosun.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		AllowedPaths []string `json:"allowed_paths"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.AllowedPaths) != 1 || cfg.AllowedPaths[0] != cluster.ContainerRepos {
+		t.Fatalf("bridgectl must allow only the snapshot root %s, got %v", cluster.ContainerRepos, cfg.AllowedPaths)
 	}
 }

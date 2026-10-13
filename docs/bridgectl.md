@@ -17,6 +17,19 @@ The reviewer starts `bridgectl server start --config
 configuration adds Bosun's `codex-bosun` and `claude-bosun` providers. Provider processes inherit
 AI credentials but not Bosun's GitHub token or App credentials.
 
+The same config allows `/repos`, the Kind mount used for local `review.*`
+snapshots. Other paths outside bridgectl's normal home allowance stay blocked.
+If a worker image lacks this entry, startup reports a nonretryable setup error
+with the worker image reference and the config path. Update the worker image
+before retrying. CI checks this contract with the pinned bridgectl version:
+
+```bash
+scripts/smoke-bridge-path.sh bosun:test
+```
+
+For diagnosis against an already released image, pass the candidate config as
+the second argument. This mounts only that file into a disposable container.
+
 A review starts a session, attaches to its output stream, collects output,
 and stops the session during cleanup. The review succeeds only after a
 successful `SESSION_EXIT` with nonempty output. Stream errors, nonzero exits,
