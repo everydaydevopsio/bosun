@@ -1,6 +1,6 @@
 # Review snapshot path contract
 
-- Status: Implemented locally; CI and release verification pending
+- Status: CI verified; release verification pending
 - Branch: `issue-41-review-snapshot-path`
 - Created: 2026-10-13
 - Issue: [#41](https://github.com/everydaydevopsio/bosun/issues/41)
@@ -33,7 +33,7 @@ CLI's committed-only `--branch` snapshot behavior.
 - [x] Reproduce config and image rejection.
 - [x] Add failing regression tests and implement the config and diagnostic.
 - [x] Add image contract check and update guidance.
-- [ ] Verify a freshly built image in CI and a complete credentialed review.
+- [x] Verify a freshly built image in CI and a complete credentialed review.
 
 ## Verification
 
@@ -41,6 +41,8 @@ CLI's committed-only `--branch` snapshot behavior.
 - `scripts/smoke-bridge-path.sh ghcr.io/everydaydevopsio/bosun:0.1.3` fails as expected.
 - Same command with `config/bridge-bosun.yaml` as the second argument passes.
 - CI builds `bosun:test` and runs the script without an override.
+- PR #45 CI passed on `8ffa4abf2412`; Bosun completed two credentialed review
+  passes, with pass two finding no medium or higher issues.
 
 ## Alternatives Rejected
 
@@ -49,8 +51,8 @@ CLI's committed-only `--branch` snapshot behavior.
 
 ## Open Questions
 
-- A full local review needs a fresh image and usable provider credentials;
-  Docker storage is currently full on the local host.
+- The release image still needs installation and a review without the custom
+  image override after this PR merges.
 
 ## Change Log
 

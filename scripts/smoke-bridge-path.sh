@@ -31,16 +31,18 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 # stdin EOF stops echo sessions on this bridgectl version, so session-start
-# exits nonzero. The server's session list proves StartSession accepted the path.
+# exits nonzero after StartSession succeeds. Its "session ended" message proves
+# the requested path reached a session. Recheck the denied-path phrase alongside
+# pathPolicyDenial in internal/review/bridge.go when the base image pin changes.
 timeout 10s bridgectl session start /repos/review.contract --provider echo --no-tty </dev/null >/tmp/allowed.log 2>&1 || true
-if grep -q 'not under any allowed path' /tmp/allowed.log || ! bridgectl session list | grep -q 'echo'; then
+if ! grep -q '^session ended:' /tmp/allowed.log; then
   echo "SMOKE TEST FAILED: /repos snapshot session was rejected" >&2
   cat /tmp/allowed.log >&2
   exit 1
 fi
 
 timeout 10s bridgectl session start /tmp/bosun-review/ws-contract --provider echo --no-tty </dev/null >/tmp/hosted.log 2>&1 || true
-if grep -q 'not under any allowed path' /tmp/hosted.log || [ "$(bridgectl session list | grep -c 'echo')" -lt 2 ]; then
+if ! grep -q '^session ended:' /tmp/hosted.log; then
   echo "SMOKE TEST FAILED: hosted workspace session was rejected" >&2
   cat /tmp/hosted.log >&2
   exit 1
