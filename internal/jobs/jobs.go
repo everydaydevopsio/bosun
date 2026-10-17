@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/credentials"
 	"github.com/everydaydevopsio/bosun/internal/review"
@@ -138,7 +139,7 @@ func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app.kubernetes.io/name": "bosun-review", "bosun/repository": repositoryLabel(req.Repo)}, Annotations: map[string]string{"bosun/repository": req.Repo}},
 				Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: ptr(false), Containers: []corev1.Container{{
-					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: env(cfg, req),
+					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: append(env(cfg, req), corev1.EnvVar{Name: "BOSUN_WORKER_IMAGE", Value: cfg.ReviewImage}),
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), RunAsNonRoot: ptr(true), RunAsUser: &cfg.RunAsUser, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 				}}},
 			},
@@ -162,7 +163,7 @@ func SubmitLocal(ctx context.Context, client kubernetes.Interface, cfg config.Co
 		job.Annotations["bosun/snapshot"] = snapshot
 		pod := &job.Spec.Template.Spec
 		pod.SecurityContext = &corev1.PodSecurityContext{RunAsGroup: &group, RunAsUser: &cfg.RunAsUser, RunAsNonRoot: ptr(true)}
-		pod.Volumes = []corev1.Volume{{Name: "repos", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/repos", Type: ptr(corev1.HostPathDirectory)}}}}
+		pod.Volumes = []corev1.Volume{{Name: "repos", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: cluster.ContainerRepos, Type: ptr(corev1.HostPathDirectory)}}}}
 		c := &pod.Containers[0]
 		// Local jobs do not need GitHub credentials.
 		filtered := c.Env[:0]
@@ -172,8 +173,8 @@ func SubmitLocal(ctx context.Context, client kubernetes.Interface, cfg config.Co
 			}
 		}
 		c.Env = filtered
-		c.VolumeMounts = []corev1.VolumeMount{{Name: "repos", MountPath: "/repos"}}
-		path := "/repos/" + snapshot
+		c.VolumeMounts = []corev1.VolumeMount{{Name: "repos", MountPath: cluster.ContainerRepos}}
+		path := cluster.ContainerRepos + "/" + snapshot
 		c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_LOCAL_PATH", Value: path}, corev1.EnvVar{Name: "BOSUN_EVENTS", Value: "1"}, corev1.EnvVar{Name: "BOSUN_RUN_ID", Value: name}, corev1.EnvVar{Name: "BOSUN_EVENT_FILE", Value: path + ".events"}, corev1.EnvVar{Name: "BOSUN_BASE_SHA", Value: base}, corev1.EnvVar{Name: "GIT_CONFIG_COUNT", Value: "1"}, corev1.EnvVar{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"}, corev1.EnvVar{Name: "GIT_CONFIG_VALUE_0", Value: path})
 		if committed {
 			c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_COMMITTED_ONLY", Value: "1"})

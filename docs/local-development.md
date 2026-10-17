@@ -325,6 +325,14 @@ transport. The CLI honors `KUBECONFIG`, explicitly selects `kind-bosun` (or
 `kind-$BOSUN_KIND_CLUSTER`), and accepts `--context` and `--namespace` overrides.
 It never silently chooses the active Kubernetes context.
 
+With `--branch`, Bosun snapshots the named committed ref and ignores unrelated
+modified or untracked files in your checkout. It does not switch your branch.
+Without `--branch`, it includes working-tree changes; check the intended subject
+before choosing that mode. A `repo_path ... not under any allowed path` error for
+`/repos/review.*` means the worker image's bridgectl config is incompatible.
+Update or rebuild the image with `/repos` in `config/bridge-bosun.yaml`; retrying
+the same image cannot fix it.
+
 Progress goes to stderr and the final review to stdout. JSON mode emits
 versioned `bosun_event: 1` records on stdout. Updates include stage, elapsed time,
 quiet time, session state, pod warnings, and deadline remaining. Provider

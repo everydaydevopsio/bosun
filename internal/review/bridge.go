@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -12,11 +13,44 @@ import (
 	"time"
 
 	bridgev1 "github.com/everydaydevopsio/bosun/internal/bridgev1"
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/progress"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
+
+type snapshotPathPolicyError struct {
+	cause     error
+	workspace string
+}
+
+// bridgectl v1.4.4 reports path-policy denials with this phrase. Recheck this
+// match and scripts/smoke-bridge-path.sh when the Dockerfile pin changes.
+const pathPolicyDenial = "not under any allowed path"
+
+func (e *snapshotPathPolicyError) Error() string {
+	image := os.Getenv("BOSUN_WORKER_IMAGE")
+	if image == "" {
+		image = "the current Bosun worker image"
+	}
+	return fmt.Sprintf("nonretryable bridgectl path-policy incompatibility in %s: workspace %q is rejected; config/bridge-bosun.yaml must allow %s and %s. Rebuild or update the worker image before retrying: %v", image, e.workspace, cluster.ContainerRepos, HostedWorkspaceRoot, e.cause)
+}
+func (e *snapshotPathPolicyError) Unwrap() error { return e.cause }
+
+func isSnapshotPathPolicyError(err error) bool {
+	var pathError *snapshotPathPolicyError
+	return errors.As(err, &pathError)
+}
+
+func agentFailureStage(err error) Stage {
+	if isSnapshotPathPolicyError(err) {
+		return StageSetup
+	}
+	return StageProvider
+}
 
 func bridgeTarget() string {
 	dir := os.Getenv("BRIDGECTL_STATE_DIR")
@@ -130,6 +164,11 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 	}
 	response, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{ProjectId: "bosun-review", SessionId: sessionID, RepoPath: workspace, Provider: provider, AgentOpts: opts, InitialCols: 200, InitialRows: 50})
 	if err != nil {
+		cleanWorkspace := filepath.Clean(workspace)
+		bosunWorkspace := strings.HasPrefix(cleanWorkspace, cluster.ContainerRepos+"/review.") || strings.HasPrefix(cleanWorkspace, HostedWorkspaceRoot+"/ws-")
+		if status.Code(err) == codes.InvalidArgument && bosunWorkspace && strings.Contains(err.Error(), "repo_path") && strings.Contains(err.Error(), pathPolicyDenial) {
+			return "", &snapshotPathPolicyError{cause: err, workspace: cleanWorkspace}
+		}
 		return "", fmt.Errorf("start bridge session: %w", err)
 	}
 	defer func() {

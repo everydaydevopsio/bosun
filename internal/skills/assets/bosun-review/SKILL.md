@@ -32,20 +32,20 @@ around a missing or old binary.
 
 The default is the committed work on this branch, compared with the branch it
 was created from — the same change a reviewer sees in a pull request. Confirm
-three things first, in order, and stop at the first one that fails.
+the subject and comparison before launching.
 
-**1. The tree is clean.**
+**1. Choose committed or working-tree content.**
 
 ```bash
 git status --porcelain
 ```
 
-Any output means uncommitted work. Stop and tell the user which files, then let
-them choose rather than choosing for them:
-
-- commit them and review the branch, which is what the rest of this assumes; or
-- review the working tree as it stands, with `bosun review "$PWD"` and no
-  `--branch` — useful before committing, but it is not what a reviewer will see.
+For a PR or branch review, use `--branch` as below. It snapshots only committed
+content at that ref, even if this checkout has unrelated modified or untracked
+files. It does not switch branches or change the source worktree. State that
+uncommitted changes were excluded. If the user wants those changes reviewed,
+use `bosun review "$PWD"` without `--branch`; that snapshots the working tree
+and requires checking that its contents are the intended subject.
 
 **2. There is a branch to compare.**
 

@@ -90,6 +90,9 @@ jobs:
       - name: Build the image
         run: docker build --build-arg VERSION=validate -t bosun:validate .
 
+      - name: Bridgectl workspace path contract
+        run: scripts/smoke-bridge-path.sh bosun:validate
+
       # Asserts the value, not just the exit code: if VERSION propagation
       # regresses the binary still exits 0 while reporting "bosun dev", and the
       # release would ship an artifact whose version does not match its tag.
