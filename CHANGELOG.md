@@ -13,6 +13,24 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.1.4] - 2026-10-17
+
+This patch release fixes review workspace handling in `bridgectl` and strengthens path validation tests.
+
+### Highlights
+
+- `bridgectl` now supports both local review snapshots and hosted review workspaces.
+
+### Fixes
+
+- Corrected path handling that prevented local review snapshots and hosted review workspaces from being accepted by `bridgectl`. (#41, #45)
+
+### Changes
+
+- Tightened tests for `bridgectl`’s expected path behavior to help prevent regressions. (#41)
+
+**Full changelog:** [v0.1.3...v0.1.4](../../compare/v0.1.3...v0.1.4)
+
 ## [0.1.3] - 2026-10-12
 
 ### Highlights
