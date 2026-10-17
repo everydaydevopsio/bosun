@@ -13,6 +13,8 @@ fi
 docker run --rm -i --tmpfs /repos:mode=1777 "${mount_args[@]}" --entrypoint sh "$image" -s <<'IN_CONTAINER'
 set -eu
 mkdir /repos/review.contract /tmp/bosun-outside-contract
+mkdir -m 700 /tmp/bosun-review
+mkdir /tmp/bosun-review/ws-contract
 bridgectl server start --config /app/bosun/config/bridge-bosun.yaml >/tmp/bridge.log 2>&1 &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
@@ -37,11 +39,18 @@ if grep -q 'not under any allowed path' /tmp/allowed.log || ! bridgectl session 
   exit 1
 fi
 
+timeout 10s bridgectl session start /tmp/bosun-review/ws-contract --provider echo --no-tty </dev/null >/tmp/hosted.log 2>&1 || true
+if grep -q 'not under any allowed path' /tmp/hosted.log || [ "$(bridgectl session list | grep -c 'echo')" -lt 2 ]; then
+  echo "SMOKE TEST FAILED: hosted workspace session was rejected" >&2
+  cat /tmp/hosted.log >&2
+  exit 1
+fi
+
 timeout 10s bridgectl session start /tmp/bosun-outside-contract --provider echo --no-tty </dev/null >/tmp/denied.log 2>&1 || true
 if ! grep -q 'not under any allowed path' /tmp/denied.log; then
   echo "SMOKE TEST FAILED: outside session path was accepted" >&2
   cat /tmp/denied.log >&2
   exit 1
 fi
-echo "SMOKE TEST PASSED: /repos accepted, outside path denied"
+echo "SMOKE TEST PASSED: local and hosted roots accepted, outside path denied"
 IN_CONTAINER

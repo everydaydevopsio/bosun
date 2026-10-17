@@ -716,7 +716,7 @@ image, which reads like a Bosun release number and ages the same way.
 - Out of scope: PR-aware submission and compact polling (#36), structured results (#37).
 
 ## Acceptance Criteria
-- A local snapshot path is accepted and an outside path is denied by pinned bridgectl.
+- Local and hosted workspace paths are accepted and an outside path is denied by pinned bridgectl.
 - A path-policy mismatch reports a nonretryable setup error naming the image and config.
 - The installed skill allows committed branch review with unrelated dirty files.
 

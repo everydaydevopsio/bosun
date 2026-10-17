@@ -127,6 +127,16 @@ func TestUnrelatedStartSessionFailureStaysProviderError(t *testing.T) {
 		}
 	}
 }
+
+func TestHostedWorkspacePathPolicyFailureIsSetupError(t *testing.T) {
+	workspace := HostedWorkspaceRoot + "/ws-123"
+	denied := status.Error(codes.InvalidArgument, `repo_path "`+workspace+`" is not under any allowed path`)
+	f := &fakeBridge{startErr: denied}
+	_, err := runSession(context.Background(), f, workspace, "claude-bosun", "review")
+	if !isSnapshotPathPolicyError(err) || agentFailureStage(err) != StageSetup {
+		t.Fatalf("hosted workspace denial must be a setup error: %v", err)
+	}
+}
 func (f *fakeBridge) StopSession(_ context.Context, _ *pb.StopSessionRequest, _ ...grpc.CallOption) (*pb.StopSessionResponse, error) {
 	f.stopped = true
 	return &pb.StopSessionResponse{}, nil

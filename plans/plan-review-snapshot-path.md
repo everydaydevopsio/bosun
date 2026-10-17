@@ -14,8 +14,9 @@ agent reads code and reports a generic provider failure.
 
 ## Approach
 
-Allow the single Kind snapshot root in Bosun's bridgectl config. Exercise both
-an accepted snapshot and a rejected outside path with the pinned image in CI.
+Allow the Kind snapshot root and a dedicated hosted workspace root in Bosun's
+bridgectl config. Exercise both accepted roots and a rejected outside path with
+the pinned image in CI and release validation.
 Classify this exact StartSession rejection as a setup incompatibility, retaining
 the original error and image reference. Align the installed skill with the
 CLI's committed-only `--branch` snapshot behavior.
@@ -43,9 +44,8 @@ CLI's committed-only `--branch` snapshot behavior.
 
 ## Alternatives Rejected
 
-- Disable bridgectl path validation: grants access beyond the snapshot mount.
-- Allow `/tmp`: the worker's repository mount is `/repos`, and broader access
-  would not express the actual contract.
+- Disable bridgectl path validation: grants access beyond the review roots.
+- Allow all of `/tmp`: a dedicated hosted root limits the granted path.
 
 ## Open Questions
 
@@ -57,3 +57,4 @@ CLI's committed-only `--branch` snapshot behavior.
 | Date | Change |
 | --- | --- |
 | 2026-10-13 | Reproduced the failure, implemented the narrow path contract and diagnostic. |
+| 2026-10-17 | Bosun review found the hosted workspace path; added a dedicated root and release gate. |

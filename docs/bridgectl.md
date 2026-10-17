@@ -18,10 +18,12 @@ configuration adds Bosun's `codex-bosun` and `claude-bosun` providers. Provider 
 AI credentials but not Bosun's GitHub token or App credentials.
 
 The same config allows `/repos`, the Kind mount used for local `review.*`
-snapshots. Other paths outside bridgectl's normal home allowance stay blocked.
+snapshots, and `/tmp/bosun-review`, the dedicated root for hosted review
+workspaces. Other paths outside bridgectl's normal home allowance stay blocked.
 If a worker image lacks this entry, startup reports a nonretryable setup error
 with the worker image reference and the config path. Update the worker image
-before retrying. CI checks this contract with the pinned bridgectl version:
+before retrying. CI and release validation check both workspace roots and an
+outside path with the pinned bridgectl version:
 
 ```bash
 scripts/smoke-bridge-path.sh bosun:test

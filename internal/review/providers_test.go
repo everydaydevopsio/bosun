@@ -69,7 +69,7 @@ func TestBosunProviderWrappersPreservePromptAndCloseInput(t *testing.T) {
 	}
 }
 
-func TestBridgeConfigAllowsOnlySnapshotRoot(t *testing.T) {
+func TestBridgeConfigAllowsOnlyReviewRoots(t *testing.T) {
 	data, err := os.ReadFile("../../config/bridge-bosun.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,18 @@ func TestBridgeConfigAllowsOnlySnapshotRoot(t *testing.T) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.AllowedPaths) != 1 || cfg.AllowedPaths[0] != cluster.ContainerRepos {
-		t.Fatalf("bridgectl must allow only the snapshot root %s, got %v", cluster.ContainerRepos, cfg.AllowedPaths)
+	if len(cfg.AllowedPaths) != 2 || cfg.AllowedPaths[0] != cluster.ContainerRepos || cfg.AllowedPaths[1] != HostedWorkspaceRoot {
+		t.Fatalf("bridgectl must allow only the local and hosted workspace roots, got %v", cfg.AllowedPaths)
+	}
+}
+
+func TestHostedWorkspaceUsesDedicatedRoot(t *testing.T) {
+	workspace, err := makeHostedWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(workspace) })
+	if filepath.Dir(workspace) != HostedWorkspaceRoot {
+		t.Fatalf("hosted workspace %q is outside %q", workspace, HostedWorkspaceRoot)
 	}
 }

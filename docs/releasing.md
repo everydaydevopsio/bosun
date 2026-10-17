@@ -34,7 +34,9 @@ The workflow then:
 
 1. **validate** — runs `.github/workflows/validate.yml`: gofmt, `go vet`, tests with
    coverage, CLI build and `bosun version`, Helm lint and render, shellcheck, image
-   build and smoke test. Nothing is tagged until this passes.
+   build and smoke test, including bridgectl sessions in both the local and
+   hosted workspace roots and rejection of an outside path. Nothing is tagged
+   until this passes.
 2. **bump_and_tag** — computes the next semver from the previous tag, rewrites
    `charts/bosun/Chart.yaml` `version` and `appVersion`, generates release notes and
    a `CHANGELOG.md` entry with [castoff](https://github.com/everydaydevopsio/castoff),

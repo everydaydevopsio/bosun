@@ -28,6 +28,18 @@ type Worker struct {
 }
 
 func Run(ctx context.Context, cfg config.Config) error { return (Worker{}).Run(ctx, cfg) }
+
+// HostedWorkspaceRoot is the only /tmp subtree bridgectl may use for hosted
+// review sessions. Keep it in sync with config/bridge-bosun.yaml.
+const HostedWorkspaceRoot = "/tmp/bosun-review"
+
+func makeHostedWorkspace() (string, error) {
+	if err := os.MkdirAll(HostedWorkspaceRoot, 0700); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(HostedWorkspaceRoot, "ws-")
+}
+
 func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	sanitize := diagnosticRedactor()
 	var reporter *progress.Reporter
@@ -129,7 +141,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 				return fail(StageClone, err)
 			}
 		}
-		workspace, err = os.MkdirTemp("", "bosun-review-")
+		workspace, err = makeHostedWorkspace()
 		if err != nil {
 			return fail(StageSetup, err)
 		}
