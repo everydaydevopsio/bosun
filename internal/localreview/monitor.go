@@ -60,12 +60,18 @@ func render(e progress.Event, jsonMode bool, out, errout io.Writer) {
 	fmt.Fprintf(errout, "[%s] %s: %s\n", elapsed, e.Type, e.Message)
 }
 func cleanSnapshot(r *record) error {
-	hostRepos, err := cluster.HostRepos()
-	if err != nil {
-		return err
+	hostRepos := r.SnapshotRoot
+	if hostRepos == "" {
+		// Records written before SnapshotRoot was persisted retain their old
+		// cleanup behavior, including the former /tmp snapshot root.
+		var err error
+		hostRepos, err = cluster.HostRepos()
+		if err != nil {
+			return err
+		}
 	}
 	// Existing 0.1.4 review records still point to the former snapshot root.
-	if (filepath.Dir(r.Snapshot) != hostRepos && filepath.Dir(r.Snapshot) != "/tmp/bosun-repos") || !strings.HasPrefix(filepath.Base(r.Snapshot), "review.") {
+	if (filepath.Dir(r.Snapshot) != hostRepos && filepath.Dir(r.Snapshot) != "/tmp/bosun-repos") || !filepath.IsAbs(hostRepos) || hostRepos == "/" || !strings.HasPrefix(filepath.Base(r.Snapshot), "review.") {
 		return fmt.Errorf("refusing invalid snapshot cleanup path")
 	}
 	if err := os.RemoveAll(r.Snapshot); err != nil {

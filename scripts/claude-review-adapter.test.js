@@ -52,6 +52,14 @@ test('keeps complete review clean even if a tool call was denied', () => {
   assert.equal(collector.output(), review);
 });
 
+test('includes denial summary for lowercase, indented incomplete trailer', () => {
+  const collector = createCollector();
+  collector.accept(JSON.stringify({ type: 'result', result: 'Could not read diff\n  bosun-review: incomplete', permission_denials: [
+    { tool_name: 'Bash', tool_input: { command: 'git merge-base HEAD main' } },
+  ] }));
+  assert.match(collector.output(), /^Claude denied 1 tool call/);
+});
+
 test('labels fallback tool errors without claiming Claude denied them', () => {
   const collector = createCollector();
   collector.accept(JSON.stringify({ type: 'assistant', message: { content: [

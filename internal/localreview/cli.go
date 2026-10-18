@@ -38,13 +38,13 @@ type options struct {
 	keepSnapshots                              bool
 }
 type record struct {
-	Job, Context, Namespace, Snapshot, Repo, Provider, Image string
-	Started                                                  time.Time
-	Finished                                                 time.Time
-	WorkerFinished                                           time.Time
-	TypicalLow, TypicalHigh                                  time.Duration
-	Changes                                                  int
-	Result, Outcome                                          string
+	Job, Context, Namespace, Snapshot, SnapshotRoot, Repo, Provider, Image string
+	Started                                                                time.Time
+	Finished                                                               time.Time
+	WorkerFinished                                                         time.Time
+	TypicalLow, TypicalHigh                                                time.Duration
+	Changes                                                                int
+	Result, Outcome                                                        string
 	// Failure carries why a run ended badly, so a later reconnect explains
 	// itself instead of reporting a stored result that does not exist.
 	Failure string
@@ -348,7 +348,7 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	cfg.ReviewTimeoutSeconds = int64(o.timeout.Seconds())
 	cfg.ReviewImage = image
 	expectedJob := jobs.Name(filepath.Base(s.Repo), s.Branch, filepath.Base(s.Path))
-	r := record{Job: expectedJob, Context: o.context, Namespace: o.namespace, Snapshot: s.Path, Repo: s.Repo, Provider: o.provider, Image: cfg.ReviewImage, Started: started, Changes: s.Changes}
+	r := record{Job: expectedJob, Context: o.context, Namespace: o.namespace, Snapshot: s.Path, SnapshotRoot: filepath.Dir(s.Path), Repo: s.Repo, Provider: o.provider, Image: cfg.ReviewImage, Started: started, Changes: s.Changes}
 	if e = save(&r); e != nil {
 		fmt.Fprintln(errout, "Cannot save reconnect metadata:", e)
 		return 1

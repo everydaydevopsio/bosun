@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,21 +32,11 @@ func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace
 	if err := probe(ctx, provider); err != nil {
 		return err
 	}
-	// A headless request can refresh an expiring CLI token on disk. Discover
-	// captured its old bytes before the probe, so reload file-backed values
-	// before copying them into the cluster Secret.
-	for i := range found {
-		if !filepath.IsAbs(found[i].From) {
-			continue
-		}
-		value, err := os.ReadFile(found[i].From)
-		if err != nil {
-			return fmt.Errorf("reread %s after provider check: %w", found[i].Key, err)
-		}
-		found[i].Value, err = credentials.Normalize(found[i].Key, string(value))
-		if err != nil {
-			return fmt.Errorf("reread %s after provider check: %w", found[i].Key, err)
-		}
+	// A headless request can refresh a file or macOS Keychain token. Discovery
+	// captured its old bytes before the probe, so reload the selected provider.
+	found, err := credentials.Refresh(ctx, provider, found)
+	if err != nil {
+		return err
 	}
 	if err := credentials.Missing(provider, found); err != nil {
 		return err
@@ -131,6 +120,10 @@ func ensureCluster(ctx context.Context, name string, notice func(string)) error 
 func runUp(ctx context.Context, o options, out, errout io.Writer) int {
 	notice := func(m string) { fmt.Fprintln(errout, m) }
 	if e := ensureCluster(ctx, o.cluster, notice); e != nil {
+		fmt.Fprintln(errout, e)
+		return 1
+	}
+	if e := checkSnapshotMount(ctx, o.cluster); e != nil {
 		fmt.Fprintln(errout, e)
 		return 1
 	}

@@ -18,6 +18,10 @@ const allowed = [
   'Bash(git rev-list *)', 'Bash(git cat-file -p *)',
   'Bash(git branch --show-current)',
 ].join(',');
+const disallowed = [
+  'Bash(git diff *--output*)', 'Bash(git log *--output*)', 'Bash(git show *--output*)',
+  'Bash(git diff *--ext-diff*)', 'Bash(git log *--ext-diff*)', 'Bash(git show *--ext-diff*)',
+].join(',');
 
 function commandKind(input) {
   if (typeof input !== 'string') return 'unknown command';
@@ -91,7 +95,7 @@ function createCollector() {
       }
     },
     output() {
-      const incomplete = !finalResult || /^BOSUN-REVIEW:\s*incomplete\s*$/im.test(finalResult);
+      const incomplete = !finalResult || /^\s*bosun-review:\s*incomplete\s*$/im.test(finalResult);
       const summary = incomplete || error
         ? denialSummary(denials.length ? denials : deniedResults, denials.length > 0)
         : '';
@@ -108,6 +112,7 @@ if (require.main === module) {
     '--print', '--output-format', 'stream-json', '--verbose',
     '--no-session-persistence', '--permission-mode', 'dontAsk',
     '--tools', 'Read,Glob,Grep,Bash', '--allowedTools', allowed,
+    '--disallowedTools', disallowed,
     '--', ...process.argv.slice(2),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const collector = createCollector();

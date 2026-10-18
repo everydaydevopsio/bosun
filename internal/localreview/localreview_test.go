@@ -23,6 +23,21 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+func TestCleanSnapshotUsesSubmittedRootAfterEnvironmentChanges(t *testing.T) {
+	root := t.TempDir()
+	snapshot := filepath.Join(root, "review.saved")
+	if err := os.Mkdir(snapshot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
+	if err := cleanSnapshot(&record{Snapshot: snapshot, SnapshotRoot: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
+		t.Fatalf("snapshot still present: %v", err)
+	}
+}
+
 func gitTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
