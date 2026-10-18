@@ -280,19 +280,35 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 
 func TestMonitorStopsRepeatedFailedMount(t *testing.T) {
 	t.Setenv("BOSUN_STATE_DIR", t.TempDir())
+	hostRepos := t.TempDir()
+	t.Setenv("BOSUN_REPOS_DIR", hostRepos)
+	snapshot := filepath.Join(hostRepos, "review.test")
+	if err := os.Mkdir(snapshot, 0700); err != nil {
+		t.Fatal(err)
+	}
 	deleted := false
+	var deletePolicy *metav1.DeletionPropagation
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/apis/batch/v1/namespaces/bosun/jobs/job":
 			if r.Method == http.MethodDelete {
+				var opts metav1.DeleteOptions
+				if err := json.NewDecoder(r.Body).Decode(&opts); err != nil {
+					t.Errorf("decode delete options: %v", err)
+				}
+				deletePolicy = opts.PropagationPolicy
 				deleted = true
 				fmt.Fprint(w, `{}`)
 				return
 			}
 			json.NewEncoder(w).Encode(&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "bosun"}})
 		case "/api/v1/namespaces/bosun/pods":
-			json.NewEncoder(w).Encode(&corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod", UID: "pod-id"}, Status: corev1.PodStatus{Phase: corev1.PodPending}}}})
+			pods := &corev1.PodList{}
+			if !deleted {
+				pods.Items = []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod", UID: "pod-id"}, Status: corev1.PodStatus{Phase: corev1.PodPending}}}
+			}
+			json.NewEncoder(w).Encode(pods)
 		case "/api/v1/namespaces/bosun/events":
 			json.NewEncoder(w).Encode(&corev1.EventList{Items: []corev1.Event{{Reason: "FailedMount", Count: 2, Message: "hostPath type check failed: /repos is not a directory"}}})
 		default:
@@ -300,17 +316,23 @@ func TestMonitorStopsRepeatedFailedMount(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := record{Job: "job", Namespace: "bosun", Started: time.Now(), Snapshot: filepath.Join(t.TempDir(), "review.test")}
+	r := record{Job: "job", Namespace: "bosun", Started: time.Now(), Snapshot: snapshot}
 	var out, diag bytes.Buffer
 	if code := monitor(context.Background(), client, &r, options{}, &out, &diag); code != 1 {
 		t.Fatalf("monitor returned %d: %s", code, diag.String())
 	}
 	if !deleted || r.Outcome != "failed" || !strings.Contains(r.Failure, "hostPath type check failed") {
 		t.Fatalf("deleted=%v outcome=%q failure=%q", deleted, r.Outcome, r.Failure)
+	}
+	if deletePolicy == nil || *deletePolicy != metav1.DeletePropagationForeground {
+		t.Fatalf("Job delete policy = %v, want foreground", deletePolicy)
+	}
+	if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
+		t.Fatalf("snapshot retained after pods disappeared: %v", err)
 	}
 	stored, err := load("job")
 	if err != nil || stored.Outcome != "failed" {

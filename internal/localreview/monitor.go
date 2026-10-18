@@ -196,19 +196,7 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 						if eventErr == nil {
 							for _, event := range events.Items {
 								if fatalMountEvent(event) {
-									r.Outcome = "failed"
-									r.Failure = "Kind snapshot mount failed: " + event.Message + "; restart the Kind node or recreate it with bosun down --keep-snapshots && bosun up"
-									r.Finished = time.Now()
-									message("failed", r.Failure)
-									if e := save(r); e != nil {
-										message("warning", "Cannot persist failure: "+e.Error())
-									}
-									deleteCtx, stop := context.WithTimeout(ctx, 10*time.Second)
-									if e := c.BatchV1().Jobs(r.Namespace).Delete(deleteCtx, r.Job, metav1.DeleteOptions{}); e != nil {
-										message("warning", "Cannot stop unusable Job: "+e.Error())
-									}
-									stop()
-									return 1
+									return stopFailedMount(c, r, event.Message, message)
 								}
 								key := event.Reason + "/" + string(pod.UID)
 								if warnings[key] != event.Message {
@@ -361,6 +349,40 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 		case <-ticker.C:
 		}
 	}
+}
+
+func stopFailedMount(c kubernetes.Interface, r *record, detail string, message func(string, string)) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	policy := metav1.DeletePropagationForeground
+	err := c.BatchV1().Jobs(r.Namespace).Delete(ctx, r.Job, metav1.DeleteOptions{PropagationPolicy: &policy})
+	stopped := err == nil || apierrors.IsNotFound(err)
+	if !stopped {
+		message("warning", "Cannot stop unusable Job; snapshot retained at "+r.Snapshot+": "+err.Error())
+	}
+	for stopped {
+		pods, e := c.CoreV1().Pods(r.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "job-name=" + r.Job})
+		if e == nil && len(pods.Items) == 0 {
+			if e := cleanSnapshot(r); e != nil {
+				message("warning", "Could not remove snapshot "+r.Snapshot+": "+e.Error())
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			message("warning", "Reviewer shutdown unconfirmed; snapshot retained at "+r.Snapshot)
+			stopped = false
+		case <-time.After(time.Second):
+		}
+	}
+	r.Outcome = "failed"
+	r.Failure = "Kind snapshot mount failed: " + detail + "; restart the Kind node or recreate it with bosun down --keep-snapshots && bosun up"
+	r.Finished = time.Now()
+	if e := save(r); e != nil {
+		message("warning", "Cannot persist failure: "+e.Error())
+	}
+	message("failed", r.Failure)
+	return 1
 }
 func cancelReview(c kubernetes.Interface, r *record, message func(string, string)) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

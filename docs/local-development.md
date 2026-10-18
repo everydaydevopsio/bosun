@@ -225,7 +225,8 @@ bosun down --keep-snapshots # keep local review snapshots
 
 This deletes the Kind cluster and, unless you keep them, repository snapshots
 under `~/Library/Application Support/bosun/repos` on macOS or
-`${XDG_DATA_HOME:-~/.local/share}/bosun/repos` on Linux. Set `BOSUN_REPOS_DIR`
+`~/.local/share/bosun/repos` on Linux. `XDG_DATA_HOME/bosun/repos` takes
+precedence over those defaults on either platform. Set `BOSUN_REPOS_DIR`
 to an absolute path before creating the cluster to use another disk; `bosun down`
 keeps a custom directory for manual cleanup. The snapshot directory is shared by every
 Bosun cluster on the host, so `--keep-snapshots` matters when you run more than
