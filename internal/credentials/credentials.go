@@ -87,13 +87,24 @@ func Discover(ctx context.Context) []Credential {
 	return discover(ctx, source{home: home, keychain: keychainCredential})
 }
 
+// Normalize applies the same checks to a credential read after a live probe
+// as to one found during discovery. Never include the value in an error.
+func Normalize(key, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("credential is empty")
+	}
+	if jsonCredential(key) && !json.Valid([]byte(value)) {
+		return "", fmt.Errorf("credential is not valid JSON")
+	}
+	return value, nil
+}
+
 func discover(ctx context.Context, s source) []Credential {
 	found := map[string]Credential{}
 	add := func(key, value, from string) {
-		if value = strings.TrimSpace(value); value == "" {
-			return
-		}
-		if jsonCredential(key) && !json.Valid([]byte(value)) {
+		var err error
+		if value, err = Normalize(key, value); err != nil {
 			return
 		}
 		if _, taken := found[key]; taken {

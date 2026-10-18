@@ -44,7 +44,10 @@ func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace
 		if err != nil {
 			return fmt.Errorf("reread %s after provider check: %w", found[i].Key, err)
 		}
-		found[i].Value = string(value)
+		found[i].Value, err = credentials.Normalize(found[i].Key, string(value))
+		if err != nil {
+			return fmt.Errorf("reread %s after provider check: %w", found[i].Key, err)
+		}
 	}
 	if err := credentials.Missing(provider, found); err != nil {
 		return err

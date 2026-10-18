@@ -36,7 +36,7 @@ function commandKind(input) {
   return `${prefix} ${verb}${args.length ? ' ' + args.join(' ') : ''}${compound}`;
 }
 
-function denialSummary(denials) {
+function denialSummary(denials, confirmed = true) {
   if (!Array.isArray(denials) || denials.length === 0) return '';
   const kinds = new Map();
   for (const denial of denials.slice(0, 20)) {
@@ -46,7 +46,17 @@ function denialSummary(denials) {
     kinds.set(kind, (kinds.get(kind) || 0) + 1);
   }
   const details = [...kinds].map(([kind, count]) => `${kind} (${count})`).join(', ');
-  return `Claude denied ${denials.length} tool call(s): ${details}. Permission mode: dontAsk; inspect the Git allowlist in config/bridge-bosun.yaml.`;
+  return confirmed
+    ? `Claude denied ${denials.length} tool call(s): ${details}. Permission mode: dontAsk; inspect the Git allowlist in config/bridge-bosun.yaml.`
+    : `${denials.length} tool error(s) mentioned permissions: ${details}. Inspect the provider tool result and filesystem access.`;
+}
+
+function stderrKind(stderr) {
+  if (/unknown (option|argument|flag)|invalid option/i.test(stderr)) return 'CLI_FLAG_ERROR';
+  if (/not logged in|unauthorized|api error: 401|invalid_grant/i.test(stderr)) return 'AUTH_ERROR';
+  if (/permission denied|EACCES/i.test(stderr)) return 'FILE_PERMISSION_ERROR';
+  if (/ENOENT|no such file or directory/i.test(stderr)) return 'FILE_NOT_FOUND';
+  return stderr ? 'OTHER_STDERR_ERROR' : '';
 }
 
 function createCollector() {
@@ -81,7 +91,10 @@ function createCollector() {
       }
     },
     output() {
-      const summary = denialSummary(denials.length ? denials : deniedResults);
+      const incomplete = !finalResult || /^BOSUN-REVIEW:\s*incomplete\s*$/im.test(finalResult);
+      const summary = incomplete || error
+        ? denialSummary(denials.length ? denials : deniedResults, denials.length > 0)
+        : '';
       // Bosun bounds incomplete-review reasons to their first 500 characters.
       return [summary, finalResult || ''].filter(Boolean).join('\n\n');
     },
@@ -96,8 +109,13 @@ if (require.main === module) {
     '--no-session-persistence', '--permission-mode', 'dontAsk',
     '--tools', 'Read,Glob,Grep,Bash', '--allowedTools', allowed,
     '--', ...process.argv.slice(2),
-  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const collector = createCollector();
+  let stderr = '';
+  child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-2048); });
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, () => child.kill(signal));
+  }
   const lines = readline.createInterface({ input: child.stdout });
   lines.on('line', line => {
     if (line.length <= 2 * 1024 * 1024) collector.accept(line);
@@ -107,10 +125,10 @@ if (require.main === module) {
     const output = collector.output();
     if (output) process.stdout.write(output + '\n');
     if (collector.failed() || code !== 0) {
-      process.stdout.write(`Claude stream failed: ${collector.error() || `exit ${code}`}\n`);
+      process.stdout.write(`Claude stream failed: ${collector.error() || `exit ${code}`}; stderr category: ${stderrKind(stderr) || 'none'}\n`);
       process.exitCode = 1;
     }
   });
 }
 
-module.exports = { commandKind, denialSummary, createCollector };
+module.exports = { commandKind, denialSummary, createCollector, stderrKind };

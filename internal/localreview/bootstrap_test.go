@@ -40,7 +40,7 @@ func TestLoadCredentialsUploadsTokenRefreshedByProbe(t *testing.T) {
 	err := loadCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun",
 		[]credentials.Credential{{Key: "claude-credentials", Value: old, From: path}},
 		func(string) {}, func(context.Context, string) error {
-			return os.WriteFile(path, []byte(fresh), 0600)
+			return os.WriteFile(path, []byte(" \n"+fresh+"\n"), 0600)
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +51,26 @@ func TestLoadCredentialsUploadsTokenRefreshedByProbe(t *testing.T) {
 	}
 	if string(secret.Data["claude-credentials"]) != fresh {
 		t.Fatal("uploaded stale credential captured before probe")
+	}
+}
+
+func TestLoadCredentialsRejectsInvalidRefreshedFile(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	path := filepath.Join(t.TempDir(), ".credentials.json")
+	old := `{"claudeAiOauth":{"accessToken":"old"}}`
+	if err := os.WriteFile(path, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := loadCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun",
+		[]credentials.Credential{{Key: "claude-credentials", Value: old, From: path}},
+		func(string) {}, func(context.Context, string) error {
+			return os.WriteFile(path, []byte(`{"claudeAiOauth":`), 0600)
+		})
+	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("invalid refreshed credential accepted: %v", err)
+	}
+	if _, err := client.CoreV1().Secrets("bosun").Get(context.Background(), "bosun-ai", metav1.GetOptions{}); err == nil {
+		t.Fatal("uploaded malformed credential")
 	}
 }
 

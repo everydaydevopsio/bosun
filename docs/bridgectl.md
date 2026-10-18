@@ -107,9 +107,11 @@ Rebuild/reload the worker image and refresh your exported
 The packaged provider names remain separate from these Bosun-owned definitions.
 
 `claude-bosun` runs the packaged Claude executable with `--print`, stream JSON
-output, and session persistence disabled. An adapter forwards only the final
-review and a bounded summary of denied tool calls (tool and Git subcommand, not
-arguments or raw events). The prompt is a quoted argument and stdin is closed.
+output, and session persistence disabled. An adapter forwards the final review;
+on incomplete runs it adds a bounded summary of denied tool calls (command
+shape, not raw arguments or events). On provider failures it classifies a
+bounded stderr tail without printing its contents. The prompt is a quoted
+argument and stdin is closed.
 The wrapper adds the exact mounted checkout to Git's per-pod safe-directory
 config before Claude starts, because local snapshots have a different owner.
 `--permission-mode dontAsk` and an explicit tool allowlist permit reading,

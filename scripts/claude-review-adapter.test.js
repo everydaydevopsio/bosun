@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createCollector, denialSummary } = require('./claude-review-adapter');
+const { createCollector, denialSummary, stderrKind } = require('./claude-review-adapter');
 
 test('keeps final review and reports denied Git command without arguments', () => {
   const collector = createCollector();
@@ -41,4 +41,31 @@ test('masks paths and notes command forms that cannot match a narrow Git rule', 
   } }]);
   assert.match(summary, /git -C <dir> rev-parse HEAD <arg> <arg> <arg> \[compound or redirected\]/);
   assert.doesNotMatch(summary, /review.secret|private\/token/);
+});
+
+test('keeps complete review clean even if a tool call was denied', () => {
+  const collector = createCollector();
+  const review = 'Reviewed HEAD\nBOSUN-REVIEW: complete';
+  collector.accept(JSON.stringify({ type: 'result', result: review, permission_denials: [
+    { tool_name: 'Bash', tool_input: { command: 'git branch -D main' } },
+  ] }));
+  assert.equal(collector.output(), review);
+});
+
+test('labels fallback tool errors without claiming Claude denied them', () => {
+  const collector = createCollector();
+  collector.accept(JSON.stringify({ type: 'assistant', message: { content: [
+    { type: 'tool_use', id: 'call-1', name: 'Read', input: { file_path: '/private/data' } },
+  ] } }));
+  collector.accept(JSON.stringify({ type: 'user', message: { content: [
+    { type: 'tool_result', tool_use_id: 'call-1', is_error: true, content: 'EACCES permission denied' },
+  ] } }));
+  collector.accept(JSON.stringify({ type: 'result', result: 'BOSUN-REVIEW: incomplete' }));
+  assert.match(collector.output(), /^1 tool error\(s\) mentioned permissions: Read/);
+  assert.doesNotMatch(collector.output(), /Git allowlist/);
+});
+
+test('classifies stderr without exposing its text', () => {
+  assert.equal(stderrKind('Unknown option --secret=private'), 'CLI_FLAG_ERROR');
+  assert.equal(stderrKind('opaque secret data'), 'OTHER_STDERR_ERROR');
 });
