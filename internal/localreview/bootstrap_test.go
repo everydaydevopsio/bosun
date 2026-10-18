@@ -29,6 +29,31 @@ func TestLoadCredentialsChecksProviderBeforeWritingSecret(t *testing.T) {
 	}
 }
 
+func TestLoadCredentialsUploadsTokenRefreshedByProbe(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	path := filepath.Join(t.TempDir(), ".credentials.json")
+	old := `{"claudeAiOauth":{"accessToken":"old"}}`
+	fresh := `{"claudeAiOauth":{"accessToken":"fresh"}}`
+	if err := os.WriteFile(path, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := loadCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun",
+		[]credentials.Credential{{Key: "claude-credentials", Value: old, From: path}},
+		func(string) {}, func(context.Context, string) error {
+			return os.WriteFile(path, []byte(fresh), 0600)
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := client.CoreV1().Secrets("bosun").Get(context.Background(), "bosun-ai", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(secret.Data["claude-credentials"]) != fresh {
+		t.Fatal("uploaded stale credential captured before probe")
+	}
+}
+
 func TestLoadCredentialsDoesNotVerifyDifferentLocalLogin(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	err := loadCredentials(context.Background(), client, "bosun", "bosun-ai", "claude-bosun",
@@ -96,9 +121,8 @@ func TestLoadCredentials(t *testing.T) {
 	}{
 		{
 			name: "writes what it found", provider: "codex-bosun",
-			found:      []credentials.Credential{{Key: "codex-auth", Value: "{}", From: "/home/u/.codex/auth.json"}},
-			wantKeys:   []string{"codex-auth"},
-			wantNotice: "/home/u/.codex/auth.json",
+			found:    []credentials.Credential{{Key: "codex-auth", Value: "{}"}},
+			wantKeys: []string{"codex-auth"},
 		},
 		{
 			name: "fails when the provider's credential is the one missing", provider: "claude-bosun",
@@ -112,6 +136,14 @@ func TestLoadCredentials(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "writes what it found" {
+				path := filepath.Join(t.TempDir(), "auth.json")
+				if err := os.WriteFile(path, []byte(tc.found[0].Value), 0600); err != nil {
+					t.Fatal(err)
+				}
+				tc.found[0].From = path
+				tc.wantNotice = path
+			}
 			client := fake.NewSimpleClientset()
 			var notices []string
 			e := loadCredentials(context.Background(), client, "bosun", "bosun-ai", tc.provider, tc.found, func(m string) { notices = append(notices, m) }, func(context.Context, string) error { return nil })

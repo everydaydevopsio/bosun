@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +31,22 @@ func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace
 		return err
 	}
 	if err := probe(ctx, provider); err != nil {
+		return err
+	}
+	// A headless request can refresh an expiring CLI token on disk. Discover
+	// captured its old bytes before the probe, so reload file-backed values
+	// before copying them into the cluster Secret.
+	for i := range found {
+		if !filepath.IsAbs(found[i].From) {
+			continue
+		}
+		value, err := os.ReadFile(found[i].From)
+		if err != nil {
+			return fmt.Errorf("reread %s after provider check: %w", found[i].Key, err)
+		}
+		found[i].Value = string(value)
+	}
+	if err := credentials.Missing(provider, found); err != nil {
 		return err
 	}
 	notice("Verified " + provider + " with a headless provider request")
