@@ -13,6 +13,25 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.1.5] - 2026-10-18
+
+### Highlights
+
+- **More reliable local reviews:** Review snapshots now use durable host storage, with added test coverage for snapshot paths and mount failures.
+- **Improved Claude review troubleshooting:** Permission failures now provide clearer diagnostics without adding diagnostic noise to completed reviews.
+
+### Fixes
+
+- Stop pods whose mounts fail before cleaning up snapshots.
+- Configure Git trust for the exact mounted checkout so Claude can inspect it.
+- Upload Claude credentials after a headless refresh.
+- Place permission-denial diagnostics before the length-limited review reason to keep troubleshooting details visible.
+
+### Changes
+
+- Updated `golang.org/x/sys` from `0.48.0` to `0.49.0` (#43).
+- Incorporated final Bosun review fixes as part of the durable local-review mount work (#46).
+
 ## [0.1.4] - 2026-10-17
 
 This patch release fixes review workspace handling in `bridgectl` and strengthens path validation tests.
