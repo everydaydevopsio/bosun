@@ -71,7 +71,8 @@ function createCollector() {
     },
     output() {
       const summary = denialSummary(denials.length ? denials : deniedResults);
-      return [finalResult || '', summary].filter(Boolean).join('\n\n');
+      // Bosun bounds incomplete-review reasons to their first 500 characters.
+      return [summary, finalResult || ''].filter(Boolean).join('\n\n');
     },
     failed() { return Boolean(error || !finalResult); },
     error() { return error; },

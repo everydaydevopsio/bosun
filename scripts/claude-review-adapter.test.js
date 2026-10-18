@@ -11,6 +11,7 @@ test('keeps final review and reports denied Git command without arguments', () =
   ] }));
   assert.match(collector.output(), /BOSUN-REVIEW: incomplete/);
   assert.match(collector.output(), /git merge-base \(1\)/);
+  assert.match(collector.output(), /^Claude denied/);
   assert.doesNotMatch(collector.output(), /secret-value|private prompt/);
   assert.equal(collector.failed(), false);
 });
