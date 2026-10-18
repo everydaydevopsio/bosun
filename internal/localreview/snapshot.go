@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 )
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
@@ -83,10 +85,14 @@ func snapshot(ctx context.Context, path, branch, base string) (s Snapshot, err e
 	if err != nil {
 		return
 	}
-	if err = os.MkdirAll("/tmp/bosun-repos", 0755); err != nil {
+	hostRepos, e := cluster.HostRepos()
+	if e != nil {
+		return s, e
+	}
+	if err = os.MkdirAll(hostRepos, 0755); err != nil {
 		return
 	}
-	s.Path, err = os.MkdirTemp("/tmp/bosun-repos", "review.")
+	s.Path, err = os.MkdirTemp(hostRepos, "review.")
 	if err != nil {
 		return
 	}

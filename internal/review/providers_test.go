@@ -47,10 +47,18 @@ func TestBosunProviderWrappersPreservePromptAndCloseInput(t *testing.T) {
 			}
 			binary := "node /app/node_modules/@openai/codex/bin/codex.js"
 			if name == "claude-bosun" {
-				binary = "/app/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-				for _, flag := range []string{"--print", "--output-format text", "--permission-mode dontAsk"} {
-					if !strings.Contains(command, flag) {
-						t.Fatalf("missing %s", flag)
+				binary = "node /app/bosun/scripts/claude-review-adapter.js"
+				if !strings.Contains(command, `git config --global --add safe.directory "$PWD"`) {
+					t.Fatal("Claude wrapper must trust the exact mounted review path")
+				}
+				command = strings.Replace(command, `git config --global --add safe.directory "$PWD"`, "true", 1)
+				adapter, err := os.ReadFile("../../scripts/claude-review-adapter.js")
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, flag := range []string{"--output-format', 'stream-json", "--permission-mode', 'dontAsk", "Bash(git merge-base *)"} {
+					if !strings.Contains(string(adapter), flag) {
+						t.Fatalf("adapter missing %s", flag)
 					}
 				}
 			}

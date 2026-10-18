@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/progress"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,7 +60,18 @@ func render(e progress.Event, jsonMode bool, out, errout io.Writer) {
 	fmt.Fprintf(errout, "[%s] %s: %s\n", elapsed, e.Type, e.Message)
 }
 func cleanSnapshot(r *record) error {
-	if filepath.Dir(r.Snapshot) != "/tmp/bosun-repos" || !strings.HasPrefix(filepath.Base(r.Snapshot), "review.") {
+	hostRepos := r.SnapshotRoot
+	if hostRepos == "" {
+		// Records written before SnapshotRoot was persisted retain their old
+		// cleanup behavior, including the former /tmp snapshot root.
+		var err error
+		hostRepos, err = cluster.HostRepos()
+		if err != nil {
+			return err
+		}
+	}
+	// Existing 0.1.4 review records still point to the former snapshot root.
+	if (filepath.Dir(r.Snapshot) != hostRepos && filepath.Dir(r.Snapshot) != "/tmp/bosun-repos") || !filepath.IsAbs(hostRepos) || hostRepos == "/" || !strings.HasPrefix(filepath.Base(r.Snapshot), "review.") {
 		return fmt.Errorf("refusing invalid snapshot cleanup path")
 	}
 	if err := os.RemoveAll(r.Snapshot); err != nil {
@@ -69,6 +81,10 @@ func cleanSnapshot(r *record) error {
 		return err
 	}
 	return nil
+}
+
+func fatalMountEvent(event corev1.Event) bool {
+	return event.Reason == "FailedMount" && event.Count >= 2 && strings.Contains(event.Message, "hostPath type check failed") && strings.Contains(event.Message, cluster.ContainerRepos)
 }
 func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, out, errout io.Writer) int {
 	if r.Outcome != "" && !r.Finished.IsZero() {
@@ -185,6 +201,9 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 						stop()
 						if eventErr == nil {
 							for _, event := range events.Items {
+								if fatalMountEvent(event) {
+									return stopFailedMount(c, r, event.Message, message)
+								}
 								key := event.Reason + "/" + string(pod.UID)
 								if warnings[key] != event.Message {
 									message("warning", event.Reason+": "+event.Message)
@@ -336,6 +355,40 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 		case <-ticker.C:
 		}
 	}
+}
+
+func stopFailedMount(c kubernetes.Interface, r *record, detail string, message func(string, string)) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	policy := metav1.DeletePropagationForeground
+	err := c.BatchV1().Jobs(r.Namespace).Delete(ctx, r.Job, metav1.DeleteOptions{PropagationPolicy: &policy})
+	stopped := err == nil || apierrors.IsNotFound(err)
+	if !stopped {
+		message("warning", "Cannot stop unusable Job; snapshot retained at "+r.Snapshot+": "+err.Error())
+	}
+	for stopped {
+		pods, e := c.CoreV1().Pods(r.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "job-name=" + r.Job})
+		if e == nil && len(pods.Items) == 0 {
+			if e := cleanSnapshot(r); e != nil {
+				message("warning", "Could not remove snapshot "+r.Snapshot+": "+e.Error())
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			message("warning", "Reviewer shutdown unconfirmed; snapshot retained at "+r.Snapshot)
+			stopped = false
+		case <-time.After(time.Second):
+		}
+	}
+	r.Outcome = "failed"
+	r.Failure = "Kind snapshot mount failed: " + detail + "; restart the Kind node or recreate it with bosun down --keep-snapshots && bosun up"
+	r.Finished = time.Now()
+	if e := save(r); e != nil {
+		message("warning", "Cannot persist failure: "+e.Error())
+	}
+	message("failed", r.Failure)
+	return 1
 }
 func cancelReview(c kubernetes.Interface, r *record, message func(string, string)) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

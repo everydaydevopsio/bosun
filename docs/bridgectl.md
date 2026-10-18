@@ -106,9 +106,15 @@ Rebuild/reload the worker image and refresh your exported
 `BOSUN_REVIEW_PROVIDER` when upgrading; the old custom name is not an alias.
 The packaged provider names remain separate from these Bosun-owned definitions.
 
-`claude-bosun` runs the packaged Claude executable with `--print`, text output,
-and session persistence disabled. The prompt is a quoted argument and stdin is
-closed. `--permission-mode dontAsk` and an explicit tool allowlist permit reading,
+`claude-bosun` runs the packaged Claude executable with `--print`, stream JSON
+output, and session persistence disabled. An adapter forwards the final review;
+on incomplete runs it adds a bounded summary of denied tool calls (command
+shape, not raw arguments or events). On provider failures it classifies a
+bounded stderr tail without printing its contents. The prompt is a quoted
+argument and stdin is closed.
+The wrapper adds the exact mounted checkout to Git's per-pod safe-directory
+config before Claude starts, because local snapshots have a different owner.
+`--permission-mode dontAsk` and an explicit tool allowlist permit reading,
 searching, and Git inspection without interactive approval; edits and arbitrary
 shell/test commands are not preapproved. This tool policy is not an OS sandbox.
 It accepts `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or materialized

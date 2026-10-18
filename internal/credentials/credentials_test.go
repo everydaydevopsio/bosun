@@ -11,6 +11,28 @@ import (
 	"time"
 )
 
+func TestRefreshKeychainAfterProviderProbe(t *testing.T) {
+	old := `{"claudeAiOauth":{"accessToken":"old"}}`
+	fresh := `{"claudeAiOauth":{"accessToken":"fresh"}}`
+	found := []Credential{{Key: "claude-credentials", Value: old, From: claudeKeychainSource}}
+	updated, err := refresh(context.Background(), "claude-bosun", found, func(context.Context) (string, error) {
+		return " \n" + fresh + "\n", nil
+	})
+	if err != nil || updated[0].Value != fresh || found[0].Value != old {
+		t.Fatalf("keychain refresh = %v, %v", updated, err)
+	}
+}
+
+func TestRefreshIgnoresUnrelatedProviderFile(t *testing.T) {
+	found := []Credential{
+		{Key: "claude-credentials", Value: `{"claudeAiOauth":{"accessToken":"good"}}`, From: "CLAUDE_CREDENTIALS"},
+		{Key: "codex-auth", Value: `{}`, From: filepath.Join(t.TempDir(), "deleted-auth.json")},
+	}
+	if _, err := refresh(context.Background(), "claude-bosun", found, nil); err != nil {
+		t.Fatalf("unrelated Codex file blocked Claude: %v", err)
+	}
+}
+
 func TestMissingRejectsExpiredUnrefreshableClaudeCredential(t *testing.T) {
 	expired := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"fake-token","expiresAt":%d,"refreshToken":""}}`, time.Now().Add(-time.Hour).UnixMilli())
 	err := Missing("claude-bosun", []Credential{{Key: "claude-credentials", Value: expired}})

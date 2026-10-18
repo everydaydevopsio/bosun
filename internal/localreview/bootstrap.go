@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -29,6 +30,15 @@ func loadCredentials(ctx context.Context, client kubernetes.Interface, namespace
 		return err
 	}
 	if err := probe(ctx, provider); err != nil {
+		return err
+	}
+	// A headless request can refresh a file or macOS Keychain token. Discovery
+	// captured its old bytes before the probe, so reload the selected provider.
+	found, err := credentials.Refresh(ctx, provider, found)
+	if err != nil {
+		return err
+	}
+	if err := credentials.Missing(provider, found); err != nil {
 		return err
 	}
 	notice("Verified " + provider + " with a headless provider request")
@@ -94,7 +104,11 @@ func ensureCluster(ctx context.Context, name string, notice func(string)) error 
 	if exists {
 		return nil
 	}
-	notice(fmt.Sprintf("Creating Kind cluster %q with %s mounted at %s; this takes a minute on a cold machine", name, cluster.HostRepos, cluster.ContainerRepos))
+	hostRepos, err := cluster.HostRepos()
+	if err != nil {
+		return err
+	}
+	notice(fmt.Sprintf("Creating Kind cluster %q with %s mounted at %s; this takes a minute on a cold machine", name, hostRepos, cluster.ContainerRepos))
 	if err = k.Create(ctx); err != nil {
 		return err
 	}
@@ -106,6 +120,10 @@ func ensureCluster(ctx context.Context, name string, notice func(string)) error 
 func runUp(ctx context.Context, o options, out, errout io.Writer) int {
 	notice := func(m string) { fmt.Fprintln(errout, m) }
 	if e := ensureCluster(ctx, o.cluster, notice); e != nil {
+		fmt.Fprintln(errout, e)
+		return 1
+	}
+	if e := checkSnapshotMount(ctx, o.cluster); e != nil {
 		fmt.Fprintln(errout, e)
 		return 1
 	}
@@ -172,10 +190,19 @@ func runDown(ctx context.Context, o options, out, errout io.Writer) int {
 	if o.keepSnapshots {
 		return 0
 	}
+	if os.Getenv("BOSUN_REPOS_DIR") != "" {
+		fmt.Fprintln(errout, "kept custom BOSUN_REPOS_DIR snapshots; remove them manually if desired")
+		return 0
+	}
 	if e = cluster.RemoveSnapshots(); e != nil {
 		fmt.Fprintln(errout, "remove snapshots:", e)
 		return 1
 	}
-	fmt.Fprintf(out, "removed %s\n", cluster.HostRepos)
+	hostRepos, e := cluster.HostRepos()
+	if e != nil {
+		fmt.Fprintln(errout, e)
+		return 1
+	}
+	fmt.Fprintf(out, "removed %s\n", hostRepos)
 	return 0
 }

@@ -30,7 +30,7 @@ Keychain, so there was nothing to `cat` into a variable.
 
 The CLI owns the cluster lifecycle and credential discovery.
 
-- `bosun up` ensures the Kind cluster (created with `/tmp/bosun-repos` mounted at
+- `bosun up` ensures the Kind cluster (created with a durable per-user snapshot directory mounted at
   `/repos`), the namespace, and — with `--local-credentials` — the `bosun-ai`
   Secret built from credentials found on this machine.
 - `bosun down` deletes the cluster and the snapshot directory.

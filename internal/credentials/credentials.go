@@ -48,6 +48,8 @@ func ForProvider(provider string) []Spec {
 // records where it came from so the CLI can tell the user what it picked up.
 type Credential struct{ Key, Value, From string }
 
+const claudeKeychainSource = "the macOS keychain (Claude Code-credentials)"
+
 // jsonCredential reports whether a key holds a credential file's contents
 // rather than a plain token. The reviewer writes these back out as files, and
 // refuses anything that is not valid JSON, so reject it here instead.
@@ -87,13 +89,67 @@ func Discover(ctx context.Context) []Credential {
 	return discover(ctx, source{home: home, keychain: keychainCredential})
 }
 
+// Normalize applies the same checks to a credential read after a live probe
+// as to one found during discovery. Never include the value in an error.
+func Normalize(key, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("credential is empty")
+	}
+	if jsonCredential(key) && !json.Valid([]byte(value)) {
+		return "", fmt.Errorf("credential is not valid JSON")
+	}
+	return value, nil
+}
+
+// Refresh rereads credentials for the chosen provider after its live check.
+// Other providers' files may change independently and must not block setup.
+func Refresh(ctx context.Context, provider string, found []Credential) ([]Credential, error) {
+	return refresh(ctx, provider, found, keychainCredential)
+}
+
+func refresh(ctx context.Context, provider string, found []Credential, keychain func(context.Context) (string, error)) ([]Credential, error) {
+	selected := map[string]bool{}
+	for _, spec := range ForProvider(provider) {
+		selected[spec.Key] = true
+	}
+	updated := append([]Credential(nil), found...)
+	for i := range updated {
+		c := &updated[i]
+		if !selected[c.Key] {
+			continue
+		}
+		var value string
+		switch {
+		case filepath.IsAbs(c.From):
+			data, err := os.ReadFile(c.From)
+			if err != nil {
+				return nil, fmt.Errorf("reread %s after provider check: %w", c.Key, err)
+			}
+			value = string(data)
+		case c.From == claudeKeychainSource:
+			var err error
+			value, err = keychain(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("reread %s from keychain after provider check: %w", c.Key, err)
+			}
+		default:
+			continue
+		}
+		var err error
+		c.Value, err = Normalize(c.Key, value)
+		if err != nil {
+			return nil, fmt.Errorf("reread %s after provider check: %w", c.Key, err)
+		}
+	}
+	return updated, nil
+}
+
 func discover(ctx context.Context, s source) []Credential {
 	found := map[string]Credential{}
 	add := func(key, value, from string) {
-		if value = strings.TrimSpace(value); value == "" {
-			return
-		}
-		if jsonCredential(key) && !json.Valid([]byte(value)) {
+		var err error
+		if value, err = Normalize(key, value); err != nil {
 			return
 		}
 		if _, taken := found[key]; taken {
@@ -136,7 +192,7 @@ func discover(ctx context.Context, s source) []Credential {
 	}
 	if _, have := found["claude-credentials"]; !have && s.keychain != nil {
 		if value, err := s.keychain(ctx); err == nil {
-			add("claude-credentials", value, "the macOS keychain (Claude Code-credentials)")
+			add("claude-credentials", value, claudeKeychainSource)
 		}
 	}
 

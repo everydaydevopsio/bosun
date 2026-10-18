@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,9 +19,32 @@ import (
 // ContainerRepos is where the node sees it. The pair is a contract between the
 // CLI, the cluster config, and the Job's volume mount.
 const (
-	HostRepos      = "/tmp/bosun-repos"
 	ContainerRepos = "/repos"
 )
+
+// HostRepos returns the durable host directory shared with the Kind node.
+func HostRepos() (string, error) {
+	if override := os.Getenv("BOSUN_REPOS_DIR"); override != "" {
+		if !filepath.IsAbs(override) || filepath.Clean(override) == "/" {
+			return "", fmt.Errorf("BOSUN_REPOS_DIR must be an absolute directory other than /")
+		}
+		return filepath.Clean(override), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		if !filepath.IsAbs(xdg) {
+			return "", fmt.Errorf("XDG_DATA_HOME must be absolute")
+		}
+		return filepath.Join(xdg, "bosun", "repos"), nil
+	}
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "Application Support", "bosun", "repos"), nil
+	}
+	return filepath.Join(home, ".local", "share", "bosun", "repos"), nil
+}
 
 // configYAML is the cluster definition, embedded so a released binary can
 // create a cluster with no repository checked out. Kept identical to the
@@ -94,15 +119,19 @@ func (k *Kind) Exists(ctx context.Context) (bool, error) {
 // bind mount's source is created as root, and the unprivileged CLI then cannot
 // write the snapshots the Job is meant to read.
 func (k *Kind) Create(ctx context.Context) error {
-	if err := os.MkdirAll(HostRepos, 0755); err != nil {
-		return fmt.Errorf("create %s: %w", HostRepos, err)
+	hostRepos, err := HostRepos()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(hostRepos, 0755); err != nil {
+		return fmt.Errorf("create %s: %w", hostRepos, err)
 	}
 	f, err := os.CreateTemp("", "bosun-kind-*.yaml")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if _, err = f.WriteString(configYAML); err != nil {
+	if _, err = f.WriteString(strings.Replace(configYAML, "BOSUN_HOST_REPOS", strconv.Quote(hostRepos), 1)); err != nil {
 		f.Close()
 		return err
 	}
@@ -129,8 +158,12 @@ func (k *Kind) Delete(ctx context.Context) error {
 // RemoveSnapshots deletes the host snapshot directory. It is separate from
 // Delete because a cluster can be rebuilt while snapshots are still wanted.
 func RemoveSnapshots() error {
-	if filepath.Clean(HostRepos) != HostRepos || !strings.HasPrefix(HostRepos, "/tmp/") {
-		return fmt.Errorf("refusing to remove %s", HostRepos)
+	hostRepos, err := HostRepos()
+	if err != nil {
+		return err
 	}
-	return os.RemoveAll(HostRepos)
+	if os.Getenv("BOSUN_REPOS_DIR") != "" {
+		return fmt.Errorf("refusing to remove custom snapshot directory %s; remove it manually if desired", hostRepos)
+	}
+	return os.RemoveAll(hostRepos)
 }

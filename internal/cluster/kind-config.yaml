@@ -3,5 +3,6 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
     extraMounts:
-      - hostPath: /tmp/bosun-repos
+      # Replaced with an absolute host path by cluster.(*Kind).Create; this is a template.
+      - hostPath: BOSUN_HOST_REPOS
         containerPath: /repos

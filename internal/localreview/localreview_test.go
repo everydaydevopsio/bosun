@@ -23,6 +23,21 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+func TestCleanSnapshotUsesSubmittedRootAfterEnvironmentChanges(t *testing.T) {
+	root := t.TempDir()
+	snapshot := filepath.Join(root, "review.saved")
+	if err := os.Mkdir(snapshot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
+	if err := cleanSnapshot(&record{Snapshot: snapshot, SnapshotRoot: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
+		t.Fatalf("snapshot still present: %v", err)
+	}
+}
+
 func gitTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -40,6 +55,7 @@ func write(t *testing.T, path, value string) {
 	}
 }
 func TestSnapshotBranchIsolationAndDirtyCheckout(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "-b", "main")
 	write(t, filepath.Join(repo, "file"), "base")
@@ -87,6 +103,7 @@ func TestSnapshotBranchIsolationAndDirtyCheckout(t *testing.T) {
 	}
 }
 func TestSnapshotLinkedWorktree(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "-b", "main")
 	write(t, filepath.Join(repo, "file"), "base")
@@ -110,6 +127,7 @@ func TestSnapshotLinkedWorktree(t *testing.T) {
 }
 
 func TestSnapshotUsesVerifiedUpstreamBaseInForkLayout(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	upstream := t.TempDir()
 	gitTest(t, upstream, "init", "-b", "main")
 	write(t, filepath.Join(upstream, "file"), "common")
@@ -153,6 +171,43 @@ func TestReviewHeaderReportsComparisonCommits(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("review header %q is missing %q", got, want)
 		}
+	}
+}
+func TestFatalMountEvent(t *testing.T) {
+	event := corev1.Event{Reason: "FailedMount", Count: 2, Message: `MountVolume.SetUp failed: hostPath type check failed: /repos is not a directory`}
+	if !fatalMountEvent(event) {
+		t.Fatal("repeated broken snapshot mount must fail promptly")
+	}
+	event.Count = 1
+	if fatalMountEvent(event) {
+		t.Fatal("first mount retry should not fail")
+	}
+	event.Count = 2
+	event.Message = "volume is not ready"
+	if fatalMountEvent(event) {
+		t.Fatal("transient mount warning should not fail")
+	}
+}
+func TestCheckSnapshotMountProbesNode(t *testing.T) {
+	hostRepos := filepath.Join(t.TempDir(), "bosun", "repos")
+	t.Setenv("BOSUN_REPOS_DIR", hostRepos)
+	bin := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = inspect ]; then printf '%s\n' "$BOSUN_REPOS_DIR"; exit 0; fi
+if [ "${BOSUN_TEST_DOCKER_MISSING:-}" = 1 ]; then exit 1; fi
+for arg; do :; done
+test -f "$BOSUN_REPOS_DIR/${arg##*/}"
+`
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := checkSnapshotMount(context.Background(), "bosun"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOSUN_TEST_DOCKER_MISSING", "1")
+	if err := checkSnapshotMount(context.Background(), "bosun"); err == nil || !strings.Contains(err.Error(), "cannot see") {
+		t.Fatalf("missing node mount: %v", err)
 	}
 }
 func TestFlagsAfterPath(t *testing.T) {
@@ -235,6 +290,68 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMonitorStopsRepeatedFailedMount(t *testing.T) {
+	t.Setenv("BOSUN_STATE_DIR", t.TempDir())
+	hostRepos := t.TempDir()
+	t.Setenv("BOSUN_REPOS_DIR", hostRepos)
+	snapshot := filepath.Join(hostRepos, "review.test")
+	if err := os.Mkdir(snapshot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	var deletePolicy *metav1.DeletionPropagation
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/apis/batch/v1/namespaces/bosun/jobs/job":
+			if r.Method == http.MethodDelete {
+				var opts metav1.DeleteOptions
+				if err := json.NewDecoder(r.Body).Decode(&opts); err != nil {
+					t.Errorf("decode delete options: %v", err)
+				}
+				deletePolicy = opts.PropagationPolicy
+				deleted = true
+				fmt.Fprint(w, `{}`)
+				return
+			}
+			json.NewEncoder(w).Encode(&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "bosun"}})
+		case "/api/v1/namespaces/bosun/pods":
+			pods := &corev1.PodList{}
+			if !deleted {
+				pods.Items = []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod", UID: "pod-id"}, Status: corev1.PodStatus{Phase: corev1.PodPending}}}
+			}
+			json.NewEncoder(w).Encode(pods)
+		case "/api/v1/namespaces/bosun/events":
+			json.NewEncoder(w).Encode(&corev1.EventList{Items: []corev1.Event{{Reason: "FailedMount", Count: 2, Message: "hostPath type check failed: /repos is not a directory"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := record{Job: "job", Namespace: "bosun", Started: time.Now(), Snapshot: snapshot}
+	var out, diag bytes.Buffer
+	if code := monitor(context.Background(), client, &r, options{}, &out, &diag); code != 1 {
+		t.Fatalf("monitor returned %d: %s", code, diag.String())
+	}
+	if !deleted || r.Outcome != "failed" || !strings.Contains(r.Failure, "hostPath type check failed") {
+		t.Fatalf("deleted=%v outcome=%q failure=%q", deleted, r.Outcome, r.Failure)
+	}
+	if deletePolicy == nil || *deletePolicy != metav1.DeletePropagationForeground {
+		t.Fatalf("Job delete policy = %v, want foreground", deletePolicy)
+	}
+	if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
+		t.Fatalf("snapshot retained after pods disappeared: %v", err)
+	}
+	stored, err := load("job")
+	if err != nil || stored.Outcome != "failed" {
+		t.Fatalf("durable failure: %+v, %v", stored, err)
 	}
 }
 
