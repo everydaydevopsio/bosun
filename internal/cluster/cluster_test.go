@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -149,6 +151,39 @@ func TestHostRepos(t *testing.T) {
 	got, err := HostRepos()
 	if err != nil || !strings.HasSuffix(got, "/repos") {
 		t.Fatalf("HostRepos = %q, %v", got, err)
+	}
+	t.Setenv("BOSUN_REPOS_DIR", "")
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	got, err = HostRepos()
+	if err != nil || got != filepath.Join(dataHome, "bosun", "repos") {
+		t.Fatalf("XDG HostRepos = %q, %v", got, err)
+	}
+	t.Setenv("XDG_DATA_HOME", "relative")
+	if _, err := HostRepos(); err == nil {
+		t.Fatal("relative XDG_DATA_HOME was accepted")
+	}
+	t.Setenv("XDG_DATA_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".local", "share", "bosun", "repos")
+	if runtime.GOOS == "darwin" {
+		want = filepath.Join(home, "Library", "Application Support", "bosun", "repos")
+	}
+	got, err = HostRepos()
+	if err != nil || got != want {
+		t.Fatalf("default HostRepos = %q, %v; want %q", got, err, want)
+	}
+}
+
+func TestRemoveSnapshotsPreservesCustomDirectory(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BOSUN_REPOS_DIR", dir)
+	if err := RemoveSnapshots(); err == nil {
+		t.Fatal("custom snapshot directory was removed")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("custom snapshot directory was changed: %v", err)
 	}
 }
 
