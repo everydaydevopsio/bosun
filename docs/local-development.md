@@ -111,7 +111,7 @@ needs. `bosun up` does the same work ahead of time.
 
 | Command | Creates | Needs |
 | --- | --- | --- |
-| `bosun up` | Kind cluster with `/tmp/bosun-repos` mounted at `/repos`, the `bosun` namespace, and with `--local-credentials` the `bosun-ai` Secret | `kind`, `docker` |
+| `bosun up` | Kind cluster with the durable per-user snapshot directory mounted at `/repos`, the `bosun` namespace, and with `--local-credentials` the `bosun-ai` Secret | `kind`, `docker` |
 | `bosun down` | removes the cluster and the snapshot directory (`--keep-snapshots` to leave it) | `kind`, `docker` |
 | `./scripts/kind-up.sh` | everything `bosun up` does, plus the locally built `bosun:dev` image and the Helm chart | also `kubectl`, `helm`, a source checkout |
 
@@ -220,13 +220,22 @@ kubectl -n bosun delete deployment bosun-bosun
 
 ```bash
 bosun down                  # or ./scripts/kind-down.sh, which calls it
-bosun down --keep-snapshots # keep /tmp/bosun-repos
+bosun down --keep-snapshots # keep local review snapshots
 ```
 
-This deletes the Kind cluster and, unless you keep them, the temporary repository
-snapshots under `/tmp/bosun-repos`. The snapshot directory is shared by every
+This deletes the Kind cluster and, unless you keep them, repository snapshots
+under `~/Library/Application Support/bosun/repos` on macOS or
+`${XDG_DATA_HOME:-~/.local/share}/bosun/repos` on Linux. Set `BOSUN_REPOS_DIR`
+to an absolute path before creating the cluster to use another disk; `bosun down`
+keeps a custom directory for manual cleanup. The snapshot directory is shared by every
 Bosun cluster on the host, so `--keep-snapshots` matters when you run more than
 one.
+
+Clusters created before this path change keep their `/tmp/bosun-repos` mount.
+Recreate one with `bosun down --keep-snapshots && bosun up` before submitting a
+review. If a long-lived node reports `hostPath type check failed` or remains in
+`ContainerCreating`, run `docker restart bosun-control-plane` to restore its
+bind mount, then retry; recreating the cluster is another remedy.
 
 ## Reviewing from inside Claude Code or Codex
 
@@ -319,8 +328,9 @@ CLI version, and a check that cannot run at all because `docker` or `crictl` is
 unavailable. An image you named yourself through the environment is never
 refused, only reported.
 
-The backend is the configured local Kind cluster, whose node must mount
-`/tmp/bosun-repos` at `/repos`. Remote clusters are not supported by this snapshot
+The backend is the configured local Kind cluster, whose node must mount the
+configured durable snapshot directory at `/repos`. Bosun probes a marker from
+inside the node before submitting a review. Remote clusters are not supported by this snapshot
 transport. The CLI honors `KUBECONFIG`, explicitly selects `kind-bosun` (or
 `kind-$BOSUN_KIND_CLUSTER`), and accepts `--context` and `--namespace` overrides.
 It never silently chooses the active Kubernetes context.

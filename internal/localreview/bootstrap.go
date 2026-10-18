@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -94,7 +95,11 @@ func ensureCluster(ctx context.Context, name string, notice func(string)) error 
 	if exists {
 		return nil
 	}
-	notice(fmt.Sprintf("Creating Kind cluster %q with %s mounted at %s; this takes a minute on a cold machine", name, cluster.HostRepos, cluster.ContainerRepos))
+	hostRepos, err := cluster.HostRepos()
+	if err != nil {
+		return err
+	}
+	notice(fmt.Sprintf("Creating Kind cluster %q with %s mounted at %s; this takes a minute on a cold machine", name, hostRepos, cluster.ContainerRepos))
 	if err = k.Create(ctx); err != nil {
 		return err
 	}
@@ -172,10 +177,19 @@ func runDown(ctx context.Context, o options, out, errout io.Writer) int {
 	if o.keepSnapshots {
 		return 0
 	}
+	if os.Getenv("BOSUN_REPOS_DIR") != "" {
+		fmt.Fprintln(errout, "kept custom BOSUN_REPOS_DIR snapshots; remove them manually if desired")
+		return 0
+	}
 	if e = cluster.RemoveSnapshots(); e != nil {
 		fmt.Fprintln(errout, "remove snapshots:", e)
 		return 1
 	}
-	fmt.Fprintf(out, "removed %s\n", cluster.HostRepos)
+	hostRepos, e := cluster.HostRepos()
+	if e != nil {
+		fmt.Fprintln(errout, e)
+		return 1
+	}
+	fmt.Fprintf(out, "removed %s\n", hostRepos)
 	return 0
 }

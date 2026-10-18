@@ -23,6 +23,7 @@ func writeNested(t *testing.T, path, body string) {
 // nested .env files, credential caches. They are neither tracked nor part of
 // the changes under review, so they must not be copied into the snapshot.
 func TestDirtySnapshotExcludesGitIgnoredFiles(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "--initial-branch=main")
 	write(t, filepath.Join(repo, ".gitignore"), ".env*\n.npmrc\nsecrets/\nnode_modules/\n")

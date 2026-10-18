@@ -273,10 +273,8 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		fmt.Fprintln(errout, "context does not point to the expected Kind cluster")
 		return 2
 	}
-	// Inspect only mount metadata, never container credentials.
-	b, e := exec.CommandContext(ctx, "docker", "inspect", "--format", `{{range .Mounts}}{{if eq .Destination "`+cluster.ContainerRepos+`"}}{{.Source}}{{end}}{{end}}`, clusterName+"-control-plane").Output()
-	if e != nil || strings.TrimSpace(string(b)) != cluster.HostRepos {
-		fmt.Fprintf(errout, "Kind %s mount is missing or inaccessible; recreate the cluster with bosun down && bosun up\n", cluster.ContainerRepos)
+	if e := checkSnapshotMount(ctx, clusterName); e != nil {
+		fmt.Fprintln(errout, e)
 		return 2
 	}
 	// The namespace holds the admission lease, the Job, and the AI Secret.
@@ -384,6 +382,36 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	o.follow = true
 	o.owner = true
 	return monitor(ctx, c, &r, o, out, errout)
+}
+
+// checkSnapshotMount verifies the current host directory is visible inside the
+// running node. Docker mount metadata alone can refer to an unlinked /tmp inode.
+func checkSnapshotMount(ctx context.Context, clusterName string) error {
+	hostRepos, err := cluster.HostRepos()
+	if err != nil {
+		return err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	node := clusterName + "-control-plane"
+	b, err := exec.CommandContext(probeCtx, "docker", "inspect", "--format", `{{range .Mounts}}{{if eq .Destination "`+cluster.ContainerRepos+`"}}{{.Source}}{{end}}{{end}}`, node).Output()
+	if err != nil || strings.TrimSpace(string(b)) != hostRepos {
+		return fmt.Errorf("Kind %s mount does not map host %s; recreate the cluster with bosun down --keep-snapshots && bosun up", cluster.ContainerRepos, hostRepos)
+	}
+	if err := os.MkdirAll(hostRepos, 0755); err != nil {
+		return fmt.Errorf("create snapshot root: %w", err)
+	}
+	marker, err := os.CreateTemp(hostRepos, ".bosun-mount-")
+	if err != nil {
+		return fmt.Errorf("create mount probe: %w", err)
+	}
+	_ = marker.Close()
+	defer os.Remove(marker.Name())
+	path := filepath.Join(cluster.ContainerRepos, filepath.Base(marker.Name()))
+	if err := exec.CommandContext(probeCtx, "docker", "exec", node, "test", "-f", path).Run(); err != nil {
+		return fmt.Errorf("Kind node cannot see the current snapshot mount %s (host: %s); restart the node with docker restart %s, or recreate it with bosun down --keep-snapshots && bosun up", cluster.ContainerRepos, hostRepos, node)
+	}
+	return nil
 }
 func reviewHeader(job string, s Snapshot, provider string, timeout time.Duration) string {
 	scope := "including working-tree changes"

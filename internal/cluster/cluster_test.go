@@ -57,8 +57,8 @@ func TestEmbeddedConfigMountsTheSnapshotDirectory(t *testing.T) {
 		t.Fatalf("want one control-plane node, got %+v", parsed.Nodes)
 	}
 	mounts := parsed.Nodes[0].ExtraMounts
-	if len(mounts) != 1 || mounts[0].HostPath != HostRepos || mounts[0].ContainerPath != ContainerRepos {
-		t.Fatalf("mount %+v does not map %s to %s", mounts, HostRepos, ContainerRepos)
+	if len(mounts) != 1 || mounts[0].HostPath != "BOSUN_HOST_REPOS" || mounts[0].ContainerPath != ContainerRepos {
+		t.Fatalf("mount %+v does not map the host snapshot directory to %s", mounts, ContainerRepos)
 	}
 }
 
@@ -100,8 +100,19 @@ func TestExists(t *testing.T) {
 }
 
 func TestCreateRunsKindWithTheEmbeddedConfig(t *testing.T) {
+	hostRepos := t.TempDir() + "/bosun/repos"
+	t.Setenv("BOSUN_REPOS_DIR", hostRepos)
 	calls, run := recorder("", nil)
-	k := &Kind{Name: "bosun", run: run}
+	var rendered []byte
+	wrapped := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		var err error
+		rendered, err = os.ReadFile(args[len(args)-1])
+		if err != nil {
+			return nil, err
+		}
+		return run(ctx, name, args...)
+	}
+	k := &Kind{Name: "bosun", run: wrapped}
 	if e := k.Create(context.Background()); e != nil {
 		t.Fatal(e)
 	}
@@ -121,8 +132,23 @@ func TestCreateRunsKindWithTheEmbeddedConfig(t *testing.T) {
 	}
 	// The host side of the mount must exist before kind creates the node, or
 	// Docker creates it as root and snapshots cannot be written into it.
-	if _, e := os.Stat(HostRepos); e != nil {
-		t.Errorf("%s was not created: %v", HostRepos, e)
+	if _, e := os.Stat(hostRepos); e != nil {
+		t.Errorf("%s was not created: %v", hostRepos, e)
+	}
+	if !strings.Contains(string(rendered), "hostPath: \""+hostRepos+"\"") {
+		t.Errorf("kind config did not mount %s: %s", hostRepos, rendered)
+	}
+}
+
+func TestHostRepos(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", "relative/path")
+	if _, err := HostRepos(); err == nil {
+		t.Fatal("relative override was accepted")
+	}
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir()+"/repos")
+	got, err := HostRepos()
+	if err != nil || !strings.HasSuffix(got, "/repos") {
+		t.Fatalf("HostRepos = %q, %v", got, err)
 	}
 }
 

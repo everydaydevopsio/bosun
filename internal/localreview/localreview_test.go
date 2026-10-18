@@ -40,6 +40,7 @@ func write(t *testing.T, path, value string) {
 	}
 }
 func TestSnapshotBranchIsolationAndDirtyCheckout(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "-b", "main")
 	write(t, filepath.Join(repo, "file"), "base")
@@ -87,6 +88,7 @@ func TestSnapshotBranchIsolationAndDirtyCheckout(t *testing.T) {
 	}
 }
 func TestSnapshotLinkedWorktree(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "-b", "main")
 	write(t, filepath.Join(repo, "file"), "base")
@@ -110,6 +112,7 @@ func TestSnapshotLinkedWorktree(t *testing.T) {
 }
 
 func TestSnapshotUsesVerifiedUpstreamBaseInForkLayout(t *testing.T) {
+	t.Setenv("BOSUN_REPOS_DIR", t.TempDir())
 	upstream := t.TempDir()
 	gitTest(t, upstream, "init", "-b", "main")
 	write(t, filepath.Join(upstream, "file"), "common")
@@ -153,6 +156,43 @@ func TestReviewHeaderReportsComparisonCommits(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("review header %q is missing %q", got, want)
 		}
+	}
+}
+func TestFatalMountEvent(t *testing.T) {
+	event := corev1.Event{Reason: "FailedMount", Count: 2, Message: `MountVolume.SetUp failed: hostPath type check failed: /repos is not a directory`}
+	if !fatalMountEvent(event) {
+		t.Fatal("repeated broken snapshot mount must fail promptly")
+	}
+	event.Count = 1
+	if fatalMountEvent(event) {
+		t.Fatal("first mount retry should not fail")
+	}
+	event.Count = 2
+	event.Message = "volume is not ready"
+	if fatalMountEvent(event) {
+		t.Fatal("transient mount warning should not fail")
+	}
+}
+func TestCheckSnapshotMountProbesNode(t *testing.T) {
+	hostRepos := filepath.Join(t.TempDir(), "bosun", "repos")
+	t.Setenv("BOSUN_REPOS_DIR", hostRepos)
+	bin := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = inspect ]; then printf '%s\n' "$BOSUN_REPOS_DIR"; exit 0; fi
+if [ "${BOSUN_TEST_DOCKER_MISSING:-}" = 1 ]; then exit 1; fi
+for arg; do :; done
+test -f "$BOSUN_REPOS_DIR/${arg##*/}"
+`
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := checkSnapshotMount(context.Background(), "bosun"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOSUN_TEST_DOCKER_MISSING", "1")
+	if err := checkSnapshotMount(context.Background(), "bosun"); err == nil || !strings.Contains(err.Error(), "cannot see") {
+		t.Fatalf("missing node mount: %v", err)
 	}
 }
 func TestFlagsAfterPath(t *testing.T) {

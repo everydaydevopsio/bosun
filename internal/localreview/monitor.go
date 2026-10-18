@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/progress"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,7 +60,12 @@ func render(e progress.Event, jsonMode bool, out, errout io.Writer) {
 	fmt.Fprintf(errout, "[%s] %s: %s\n", elapsed, e.Type, e.Message)
 }
 func cleanSnapshot(r *record) error {
-	if filepath.Dir(r.Snapshot) != "/tmp/bosun-repos" || !strings.HasPrefix(filepath.Base(r.Snapshot), "review.") {
+	hostRepos, err := cluster.HostRepos()
+	if err != nil {
+		return err
+	}
+	// Existing 0.1.4 review records still point to the former snapshot root.
+	if (filepath.Dir(r.Snapshot) != hostRepos && filepath.Dir(r.Snapshot) != "/tmp/bosun-repos") || !strings.HasPrefix(filepath.Base(r.Snapshot), "review.") {
 		return fmt.Errorf("refusing invalid snapshot cleanup path")
 	}
 	if err := os.RemoveAll(r.Snapshot); err != nil {
@@ -69,6 +75,10 @@ func cleanSnapshot(r *record) error {
 		return err
 	}
 	return nil
+}
+
+func fatalMountEvent(event corev1.Event) bool {
+	return event.Reason == "FailedMount" && event.Count >= 2 && strings.Contains(event.Message, "hostPath type check failed") && strings.Contains(event.Message, cluster.ContainerRepos)
 }
 func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, out, errout io.Writer) int {
 	if r.Outcome != "" && !r.Finished.IsZero() {
@@ -185,6 +195,21 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 						stop()
 						if eventErr == nil {
 							for _, event := range events.Items {
+								if fatalMountEvent(event) {
+									r.Outcome = "failed"
+									r.Failure = "Kind snapshot mount failed: " + event.Message + "; restart the Kind node or recreate it with bosun down --keep-snapshots && bosun up"
+									r.Finished = time.Now()
+									message("failed", r.Failure)
+									if e := save(r); e != nil {
+										message("warning", "Cannot persist failure: "+e.Error())
+									}
+									deleteCtx, stop := context.WithTimeout(ctx, 10*time.Second)
+									if e := c.BatchV1().Jobs(r.Namespace).Delete(deleteCtx, r.Job, metav1.DeleteOptions{}); e != nil {
+										message("warning", "Cannot stop unusable Job: "+e.Error())
+									}
+									stop()
+									return 1
+								}
 								key := event.Reason + "/" + string(pod.UID)
 								if warnings[key] != event.Message {
 									message("warning", event.Reason+": "+event.Message)
