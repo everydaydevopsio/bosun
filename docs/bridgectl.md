@@ -110,6 +110,8 @@ The packaged provider names remain separate from these Bosun-owned definitions.
 output, and session persistence disabled. An adapter forwards only the final
 review and a bounded summary of denied tool calls (tool and Git subcommand, not
 arguments or raw events). The prompt is a quoted argument and stdin is closed.
+The wrapper adds the exact mounted checkout to Git's per-pod safe-directory
+config before Claude starts, because local snapshots have a different owner.
 `--permission-mode dontAsk` and an explicit tool allowlist permit reading,
 searching, and Git inspection without interactive approval; edits and arbitrary
 shell/test commands are not preapproved. This tool policy is not an OS sandbox.

@@ -41,7 +41,9 @@ providers:
     binary: "sh"
     args:
       - "-c"
-      - 'exec node /app/bosun/scripts/claude-review-adapter.js "$@" </dev/null'
+      # Host-mounted snapshots have a different UID. Git 2.43 requires the
+      # exact path in protected config; its /* suffix is not supported.
+      - 'git config --global --add safe.directory "$PWD" && exec node /app/bosun/scripts/claude-review-adapter.js "$@" </dev/null'
       - "claude-bosun"
     startup_timeout: "120s"
     validate_startup: false

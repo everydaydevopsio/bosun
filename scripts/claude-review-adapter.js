@@ -21,8 +21,19 @@ const allowed = [
 
 function commandKind(input) {
   if (typeof input !== 'string') return 'unknown command';
-  const match = /^\s*git\s+([a-z][a-z-]*)\b/.exec(input);
-  return match ? `git ${match[1]}` : 'other command';
+  const parts = input.trim().split(/\s+/).slice(0, 12);
+  const compound = /[;&|`$()<>]/.test(input) ? ' [compound or redirected]' : '';
+  if (parts[0] !== 'git') return `other command: ${/^[a-z][a-z-]*$/.test(parts[0]) ? parts[0] : '<masked>'}${compound}`;
+  let pos = 1;
+  let prefix = 'git';
+  if (parts[pos] === '-C') { prefix += ' -C <dir>'; pos += 2; }
+  const verb = /^[a-z][a-z-]*$/.test(parts[pos] || '') ? parts[pos] : '<masked>';
+  const args = parts.slice(pos + 1).map(arg => {
+    if (/^--[a-z][a-z-]*$/.test(arg) || /^-[a-zA-Z]+$/.test(arg)) return arg;
+    if (/^(HEAD|main|origin\/HEAD|[0-9a-f]{40})$/.test(arg)) return arg.length === 40 ? '<sha>' : arg;
+    return '<arg>';
+  });
+  return `${prefix} ${verb}${args.length ? ' ' + args.join(' ') : ''}${compound}`;
 }
 
 function denialSummary(denials) {

@@ -10,7 +10,7 @@ test('keeps final review and reports denied Git command without arguments', () =
     { tool_name: 'Bash', tool_input: { command: 'git merge-base secret-value HEAD' } },
   ] }));
   assert.match(collector.output(), /BOSUN-REVIEW: incomplete/);
-  assert.match(collector.output(), /git merge-base \(1\)/);
+  assert.match(collector.output(), /git merge-base <arg> HEAD \(1\)/);
   assert.match(collector.output(), /^Claude denied/);
   assert.doesNotMatch(collector.output(), /secret-value|private prompt/);
   assert.equal(collector.failed(), false);
@@ -32,5 +32,13 @@ test('reports a denied tool result when older Claude omits result permission_den
     { type: 'tool_result', tool_use_id: 'call-1', is_error: true, content: 'Permission denied' },
   ] } }));
   collector.accept(JSON.stringify({ type: 'result', result: 'BOSUN-REVIEW: incomplete' }));
-  assert.match(collector.output(), /git diff \(1\)/);
+  assert.match(collector.output(), /git diff --stat HEAD \(1\)/);
+});
+
+test('masks paths and notes command forms that cannot match a narrow Git rule', () => {
+  const summary = denialSummary([{ tool_name: 'Bash', tool_input: {
+    command: 'git -C /repos/review.secret rev-parse HEAD && cat /private/token',
+  } }]);
+  assert.match(summary, /git -C <dir> rev-parse HEAD <arg> <arg> <arg> \[compound or redirected\]/);
+  assert.doesNotMatch(summary, /review.secret|private\/token/);
 });

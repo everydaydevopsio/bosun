@@ -48,6 +48,10 @@ func TestBosunProviderWrappersPreservePromptAndCloseInput(t *testing.T) {
 			binary := "node /app/node_modules/@openai/codex/bin/codex.js"
 			if name == "claude-bosun" {
 				binary = "node /app/bosun/scripts/claude-review-adapter.js"
+				if !strings.Contains(command, `git config --global --add safe.directory "$PWD"`) {
+					t.Fatal("Claude wrapper must trust the exact mounted review path")
+				}
+				command = strings.Replace(command, `git config --global --add safe.directory "$PWD"`, "true", 1)
 				adapter, err := os.ReadFile("../../scripts/claude-review-adapter.js")
 				if err != nil {
 					t.Fatal(err)
