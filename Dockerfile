@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 WORKDIR /app/bosun
 COPY prompts ./prompts
 COPY config ./config
+COPY scripts/claude-review-adapter*.js ./scripts/
+RUN node --test scripts/claude-review-adapter.test.js
 COPY --from=build /out/bosun /usr/local/bin/bosun
 
 # The base image sets org.opencontainers.image.* to bridgectl's identity, and an
