@@ -74,7 +74,7 @@ func runDoctor(ctx context.Context, o options, out, errout io.Writer) int {
 	image, _ := reviewImage(version.Version)
 	r := doctorReport{Schema: 1, Cluster: o.cluster, CLIVersion: version.Version, SkillVersion: skills.Version, ReviewerImage: image, Healthy: true}
 	r.add(doctorCheck{Name: "bosun CLI", Status: "ok", Version: version.Version, Required: true})
-	doctorSkills(&r)
+	doctorSkills(&r, o.provider)
 	doctorCluster(ctx, o, &r)
 	if err := r.print(out, o.json); err != nil {
 		fmt.Fprintln(errout, "write doctor report:", err)
@@ -86,7 +86,13 @@ func runDoctor(ctx context.Context, o options, out, errout io.Writer) int {
 	return 0
 }
 
-func doctorSkills(r *doctorReport) {
+func doctorSkills(r *doctorReport, provider string) {
+	selected := ""
+	if strings.HasPrefix(provider, "claude") {
+		selected = "claude"
+	} else if strings.HasPrefix(provider, "codex") {
+		selected = "codex"
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		r.add(doctorCheck{Name: "skills", Status: "error", Detail: err.Error(), Required: true})
@@ -98,7 +104,8 @@ func doctorSkills(r *doctorReport) {
 		return
 	}
 	for _, s := range statuses {
-		c := doctorCheck{Name: s.Name + " skill", Version: s.Version, Detail: s.Path, Required: s.State != "unconfigured"}
+		c := doctorCheck{Name: s.Name + " skill", Version: s.Version, Detail: s.Path,
+			Required: s.Name == selected && s.State != "unconfigured" && s.State != "different"}
 		switch s.State {
 		case "current":
 			c.Status = "ok"

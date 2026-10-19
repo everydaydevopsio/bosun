@@ -10,6 +10,7 @@ package skills
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io"
@@ -32,6 +33,10 @@ const (
 
 var versionPattern = regexp.MustCompile(`<!-- bosun-skill-version: ([^ ]+) -->`)
 
+// Hash of the exact skill shipped in v0.1.5, before skill revisions were
+// recorded in the file. Keep this fixed when the current skill text changes.
+const legacyV015SHA256 = "36f25878ec357ff7c9c9809ada075ea4bb3593baac7a5d695bc5bca92995dbed"
+
 // Status describes one target without changing an installed skill.
 type Status struct {
 	Target  Target `json:"-"`
@@ -48,9 +53,6 @@ func Inspect(home string) ([]Status, error) {
 	if err != nil {
 		return nil, err
 	}
-	// v0.1.5 shipped this exact asset before the revision marker was added.
-	// Recognize that known copy separately from a file with local edits.
-	legacy := bytes.Replace(want, []byte("<!-- bosun-skill-version: "+Version+" -->\n\n"), nil, 1)
 	var result []Status
 	for _, target := range Targets(home) {
 		path := filepath.Join(target.Dir, "skills", skillName, "SKILL.md")
@@ -67,7 +69,7 @@ func Inspect(home string) ([]Status, error) {
 			status.State = "unreadable"
 		case bytes.Equal(data, want):
 			status.State = "current"
-		case bytes.Equal(data, legacy):
+		case fmt.Sprintf("%x", sha256.Sum256(data)) == legacyV015SHA256:
 			status.State = "outdated"
 		default:
 			status.State = "different"

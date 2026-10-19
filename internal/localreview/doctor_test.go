@@ -118,3 +118,31 @@ func TestDoctorDistinguishesMissingCredentialFromAPIFailure(t *testing.T) {
 		t.Fatalf("API error misreported: %+v", check)
 	}
 }
+
+func TestDoctorOnlyRequiresSelectedProviderSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".codex", "skills", "bosun-review"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	r := doctorReport{Healthy: true}
+	doctorSkills(&r, "claude-bosun")
+	if !r.Healthy {
+		t.Fatalf("unused Codex skill blocked Claude readiness: %+v", r.Checks)
+	}
+	r = doctorReport{Healthy: true}
+	doctorSkills(&r, "codex-bosun")
+	if r.Healthy {
+		t.Fatalf("selected Codex skill missing but doctor is healthy: %+v", r.Checks)
+	}
+	path := filepath.Join(home, ".codex", "skills", "bosun-review", "SKILL.md")
+	if err := os.WriteFile(path, []byte("custom skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r = doctorReport{Healthy: true}
+	doctorSkills(&r, "codex-bosun")
+	if !r.Healthy || r.Checks[1].Status != "different" {
+		t.Fatalf("intentional skill edit blocked readiness: %+v", r.Checks)
+	}
+}

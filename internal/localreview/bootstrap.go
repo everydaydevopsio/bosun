@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -287,6 +288,9 @@ func preflightReset(ctx context.Context, o options, discover func(context.Contex
 	if o.purgeSnapshots && os.Getenv("BOSUN_REPOS_DIR") != "" {
 		return fmt.Errorf("refusing to purge a custom BOSUN_REPOS_DIR; remove it manually if desired")
 	}
+	if ref, _ := reviewImage(version.Version); !pullable(ref) && !o.force {
+		return fmt.Errorf("reviewer image %s exists only on the current Kind node and will be lost during reset; pass --force and then build and load it with ./scripts/kind-up.sh", ref)
+	}
 	found := discover(ctx)
 	if err := credentials.Missing(o.provider, found); err != nil {
 		return fmt.Errorf("cannot reset without local provider credentials: %w", err)
@@ -303,12 +307,41 @@ func preflightReset(ctx context.Context, o options, discover func(context.Contex
 	return err
 }
 
+// Kind clusters share one host snapshot root, so purging it while another
+// cluster exists could delete a checkout that another review is using.
+func guardSharedSnapshots(ctx context.Context, o options) error {
+	if !o.purgeSnapshots {
+		return nil
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(checkCtx, "kind", "get", "clusters").Output()
+	if err != nil {
+		return fmt.Errorf("cannot verify other Kind clusters before purging shared snapshots: %w", err)
+	}
+	var others []string
+	for _, line := range strings.Split(string(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" && name != o.cluster && name != "No kind clusters found." {
+			others = append(others, name)
+		}
+	}
+	if len(others) > 0 {
+		return fmt.Errorf("cannot purge shared snapshots while other Kind clusters exist (%s); remove them separately or reset without --purge-snapshots", strings.Join(others, ", "))
+	}
+	return nil
+}
+
 func runReset(ctx context.Context, o options, out, errout io.Writer) int {
 	if err := cluster.RequireTools(); err != nil {
 		fmt.Fprintln(errout, err)
 		return 1
 	}
 	if err := preflightReset(ctx, o, credentials.Discover, probeLocalProvider); err != nil {
+		fmt.Fprintln(errout, err)
+		return 2
+	}
+	if err := guardSharedSnapshots(ctx, o); err != nil {
 		fmt.Fprintln(errout, err)
 		return 2
 	}

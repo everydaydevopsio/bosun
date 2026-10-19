@@ -3,6 +3,7 @@ package skills
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -183,11 +184,13 @@ func TestInspectReportsInstalledSkillVersionAndDrift(t *testing.T) {
 		t.Fatalf("unexpected initial status: %+v", statuses)
 	}
 	path := statuses[0].Path
-	want, err := assets.ReadFile(assetPath)
+	legacy, err := os.ReadFile(filepath.Join("testdata", "bosun-review-v0.1.5.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := bytes.Replace(want, []byte("<!-- bosun-skill-version: "+Version+" -->\n\n"), nil, 1)
+	if got := fmt.Sprintf("%x", sha256.Sum256(legacy)); got != legacyV015SHA256 {
+		t.Fatalf("v0.1.5 fixture hash changed: %s", got)
+	}
 	if err := os.WriteFile(path, legacy, 0644); err != nil {
 		t.Fatal(err)
 	}

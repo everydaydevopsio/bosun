@@ -327,6 +327,7 @@ func TestUnfinishedReviewJobs(t *testing.T) {
 
 func TestResetPreflightRejectsUnsafeCredentialsBeforeDeletion(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("BOSUN_REVIEW_IMAGE", "ghcr.io/everydaydevopsio/bosun:0.1.5")
 	cases := []struct {
 		name, provider string
 		local, purge   bool
@@ -362,6 +363,37 @@ func TestResetPreflightRejectsUnsafeCredentialsBeforeDeletion(t *testing.T) {
 				t.Fatal("provider probed after an earlier preflight failure")
 			}
 		})
+	}
+}
+
+func TestResetPreflightProtectsNodeOnlyImage(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "bosun:dev")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	credential := []credentials.Credential{{Key: "claude-credentials", Value: `{"claudeAiOauth":{"accessToken":"test"}}`, From: "/tmp/auth.json"}}
+	discover := func(context.Context) []credentials.Credential { return credential }
+	probe := func(context.Context, string) error { return nil }
+	o := options{provider: "claude-bosun", localCredentials: true}
+	if err := preflightReset(context.Background(), o, discover, probe); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("node-only image was not protected: %v", err)
+	}
+	o.force = true
+	if err := preflightReset(context.Background(), o, discover, probe); err != nil {
+		t.Fatalf("forced node-only image reset was rejected: %v", err)
+	}
+}
+
+func TestPurgeRefusesOtherKindClusters(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\nif [ \"$1 $2\" = 'get clusters' ]; then printf 'bosun\\nscratch\\n'; fi\n"
+	if err := os.WriteFile(filepath.Join(dir, "kind"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := guardSharedSnapshots(context.Background(), options{cluster: "bosun", purgeSnapshots: true}); err == nil || !strings.Contains(err.Error(), "scratch") {
+		t.Fatalf("shared snapshots could be purged with another cluster: %v", err)
+	}
+	if err := guardSharedSnapshots(context.Background(), options{cluster: "bosun"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

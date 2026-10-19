@@ -134,7 +134,10 @@ Reset refuses to interrupt active review Jobs unless `--force` is passed.
 It also rejects `--local-credentials=false`, because deleting the cluster
 removes the credential Secret and would leave the replacement unable to review.
 For a source build using `bosun:dev`, reset reports that the development image
-must be rebuilt and loaded before reviews can run.
+must be rebuilt and loaded before reviews can run; use `--force` to accept that
+interruption. Snapshot storage is shared by all local Bosun clusters, so
+`--purge-snapshots` refuses while any other Kind cluster exists, even with
+`--force`.
 
 Run `bosun doctor --provider claude-bosun` to inspect readiness, or add `--json`
 for automation. It exits nonzero when a required check fails and reports fixes.
@@ -144,7 +147,10 @@ image, invalid image metadata, or version mismatch is a failure. The controller
 Deployment is optional for local reviews; when present, doctor reports its image
 and readiness. Skill versions are independent revisions of the embedded review
 instructions. A differing skill is left alone so local edits are preserved;
-inspect it before using `bosun init --force`.
+inspect it before using `bosun init --force`. Doctor reports both Claude and Codex
+skills, but only a missing or outdated skill for the selected provider fails the
+readiness result. An intentionally edited skill is reported as differing without
+failing the health check.
 
 From the Bosun repository:
 
