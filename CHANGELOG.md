@@ -13,6 +13,21 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.1.6] - 2026-10-19
+
+### Highlights
+- Added local cluster reset and doctor commands to support environment recovery and troubleshooting.
+
+### Fixes
+- Added safeguards to reset operations and protected shared snapshots.
+- Scoped doctor skill checks to avoid checking beyond the intended context.
+
+### Changes
+- Improved doctor diagnostics to make troubleshooting more informative.
+- Merged the reset and doctor updates in PR #48.
+
+**Full changelog:** v0.1.5 → v0.1.6
+
 ## [0.1.5] - 2026-10-18
 
 ### Highlights
