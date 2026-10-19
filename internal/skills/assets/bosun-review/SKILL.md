@@ -11,6 +11,8 @@ description: >
 
 # Bosun code review
 
+<!-- bosun-skill-version: 1 -->
+
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
 

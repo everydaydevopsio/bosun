@@ -3,6 +3,7 @@ package skills
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -164,6 +165,55 @@ func TestInstallCreatesTheSkillsDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "skills", "bosun-review", "SKILL.md")); err != nil {
 		t.Fatalf("skill not installed: %v", err)
+	}
+}
+
+func TestInspectReportsInstalledSkillVersionAndDrift(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(home, Detect(home), false); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := Inspect(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].State != "current" || statuses[0].Version != Version || statuses[1].State != "unconfigured" {
+		t.Fatalf("unexpected initial status: %+v", statuses)
+	}
+	path := statuses[0].Path
+	legacy, err := os.ReadFile(filepath.Join("testdata", "bosun-review-v0.1.5.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(legacy)); got != legacyV015SHA256 {
+		t.Fatalf("v0.1.5 fixture hash changed: %s", got)
+	}
+	if err := os.WriteFile(path, legacy, 0644); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = Inspect(home)
+	if err != nil || statuses[0].State != "outdated" || statuses[0].Version != "pre-versioned" {
+		t.Fatalf("known prior skill not recognized: %+v, %v", statuses[0], err)
+	}
+	if err := os.WriteFile(path, []byte("custom skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = Inspect(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].State != "different" || statuses[0].Version != "unknown" {
+		t.Fatalf("custom skill not reported: %+v", statuses[0])
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = Inspect(home)
+	if err != nil || statuses[0].State != "missing" {
+		t.Fatalf("missing skill not reported: %+v, %v", statuses[0], err)
 	}
 }
 

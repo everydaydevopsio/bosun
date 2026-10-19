@@ -103,19 +103,10 @@ func checkImage(ctx context.Context, ref, cliVersion string, inspect inspector) 
 		}
 		return "", fmt.Errorf("image %s is not loaded into the Kind cluster; build and load it with ./scripts/kind-up.sh", ref)
 	}
-	var doc struct {
-		Info struct {
-			ImageSpec struct {
-				Config struct {
-					Labels map[string]string `json:"Labels"`
-				} `json:"config"`
-			} `json:"imageSpec"`
-		} `json:"info"`
-	}
-	if e := json.Unmarshal(data, &doc); e != nil {
+	labels, e := imageLabels(data)
+	if e != nil {
 		return fmt.Sprintf("Could not verify the reviewer image %s on the Kind node: %v", ref, e), nil
 	}
-	labels := doc.Info.ImageSpec.Config.Labels
 	if title := labels[titleLabel]; title != "bosun" {
 		detail := "carries no Bosun image label"
 		if title != "" {
@@ -130,4 +121,20 @@ func checkImage(ctx context.Context, ref, cliVersion string, inspect inspector) 
 		return "", nil
 	}
 	return fmt.Sprintf("Reviewer image %s was built from version %s; this CLI is %s", ref, imageVersion, cli), nil
+}
+
+func imageLabels(data []byte) (map[string]string, error) {
+	var doc struct {
+		Info struct {
+			ImageSpec struct {
+				Config struct {
+					Labels map[string]string `json:"Labels"`
+				} `json:"config"`
+			} `json:"imageSpec"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	return doc.Info.ImageSpec.Config.Labels, nil
 }

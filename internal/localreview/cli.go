@@ -36,6 +36,8 @@ type options struct {
 	owner                                      bool
 	localCredentials, noBootstrap              bool
 	keepSnapshots                              bool
+	purgeSnapshots                             bool
+	force                                      bool
 }
 type record struct {
 	Job, Context, Namespace, Snapshot, SnapshotRoot, Repo, Provider, Image string
@@ -142,11 +144,17 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 		f.BoolVar(&o.detach, "detach", false, "Submit without waiting; retain snapshot")
 		f.BoolVar(&o.localCredentials, "local-credentials", false, "Load this machine's provider sign-in into the cluster before reviewing")
 		f.BoolVar(&o.noBootstrap, "no-bootstrap", false, "Fail instead of creating the Kind cluster when it is missing")
-	case "up":
+	case "up", "reset", "doctor":
 		f.StringVar(&o.cluster, "cluster", defaultCluster, "Kind cluster name")
 		f.StringVar(&o.namespace, "namespace", cfg.Namespace, "Kubernetes namespace")
 		f.StringVar(&o.provider, "provider", cfg.ReviewProvider, "Provider whose credentials must be present")
-		f.BoolVar(&o.localCredentials, "local-credentials", false, "Load this machine's provider sign-in into the cluster")
+		if command == "up" || command == "reset" {
+			f.BoolVar(&o.localCredentials, "local-credentials", command == "reset", "Load this machine's provider sign-in into the cluster")
+		}
+		if command == "reset" {
+			f.BoolVar(&o.purgeSnapshots, "purge-snapshots", false, "Delete durable review snapshots before recreating the cluster")
+			f.BoolVar(&o.force, "force", false, "Delete the cluster even when active review Jobs cannot be ruled out")
+		}
 	case "down":
 		f.StringVar(&o.cluster, "cluster", defaultCluster, "Kind cluster name")
 		f.BoolVar(&o.keepSnapshots, "keep-snapshots", false, "Keep the snapshot directory on the host")
@@ -160,7 +168,7 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 	if f.NArg() > 1 {
 		return o, nil, fmt.Errorf("expected at most one path or job name")
 	}
-	if (command == "up" || command == "down") && f.NArg() > 0 {
+	if (command == "up" || command == "down" || command == "reset" || command == "doctor") && f.NArg() > 0 {
 		return o, nil, fmt.Errorf("%s takes no positional arguments", command)
 	}
 	if command == "review" && o.timeout < time.Second {
@@ -197,6 +205,10 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		return runUp(ctx, o, out, errout)
 	case "down":
 		return runDown(ctx, o, out, errout)
+	case "reset":
+		return runReset(ctx, o, out, errout)
+	case "doctor":
+		return runDoctor(ctx, o, out, errout)
 	}
 	if command == "review-status" {
 		if len(pos) != 1 {
