@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/everydaydevopsio/bosun/internal/credentials"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -268,10 +269,11 @@ func TestResetClusterOrderAndFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []string
 			k := fakeLifecycle{exists: tc.exists, deleteErr: tc.deleteErr, calls: &calls}
-			code, err := resetCluster(context.Background(), "bosun", k, tc.purge,
+			code, err := resetCluster(context.Background(), "bosun", k, tc.purge, false,
+				func(context.Context) ([]string, error) { calls = append(calls, "active"); return nil, nil },
 				func() error { calls = append(calls, "purge"); return tc.purgeErr },
 				func() int { calls = append(calls, "up"); return tc.upCode }, io.Discard)
-			if got := strings.Join(calls, ","); got != tc.want {
+			if got := strings.Join(calls, ","); got != strings.ReplaceAll(tc.want, "delete", "active,delete") {
 				t.Fatalf("calls = %q, want %q", got, tc.want)
 			}
 			wantErr := tc.deleteErr != nil || tc.purgeErr != nil
@@ -283,8 +285,8 @@ func TestResetClusterOrderAndFailure(t *testing.T) {
 }
 
 func TestParseResetAndDoctor(t *testing.T) {
-	o, _, err := parse("reset", []string{"--cluster", "other", "--purge-snapshots", "--provider", "claude-bosun"}, io.Discard)
-	if err != nil || o.cluster != "other" || !o.purgeSnapshots || !o.localCredentials || o.provider != "claude-bosun" {
+	o, _, err := parse("reset", []string{"--cluster", "other", "--purge-snapshots", "--force", "--provider", "claude-bosun"}, io.Discard)
+	if err != nil || o.cluster != "other" || !o.purgeSnapshots || !o.force || !o.localCredentials || o.provider != "claude-bosun" {
 		t.Fatalf("reset options = %+v, err=%v", o, err)
 	}
 	o, _, err = parse("doctor", []string{"--json", "--cluster", "other"}, io.Discard)
@@ -293,6 +295,73 @@ func TestParseResetAndDoctor(t *testing.T) {
 	}
 	if _, _, err = parse("reset", []string{"extra"}, io.Discard); err == nil {
 		t.Fatal("reset accepted a positional argument")
+	}
+}
+
+func TestResetRefusesActiveReviewsUnlessForced(t *testing.T) {
+	var calls []string
+	k := fakeLifecycle{exists: true, calls: &calls}
+	active := func(context.Context) ([]string, error) { return []string{"bosun/review-running"}, nil }
+	code, err := resetCluster(context.Background(), "bosun", k, false, false, active, func() error { return nil }, func() int { return 0 }, io.Discard)
+	if code == 0 || err == nil || strings.Contains(strings.Join(calls, ","), "delete") {
+		t.Fatalf("active review was interrupted: code=%d err=%v calls=%v", code, err, calls)
+	}
+	calls = nil
+	code, err = resetCluster(context.Background(), "bosun", k, false, true, active, func() error { return nil }, func() int { return 0 }, io.Discard)
+	if code != 0 || err != nil || !strings.Contains(strings.Join(calls, ","), "delete") {
+		t.Fatalf("forced reset did not proceed: code=%d err=%v calls=%v", code, err, calls)
+	}
+}
+
+func TestUnfinishedReviewJobs(t *testing.T) {
+	jobs := []batchv1.Job{
+		{ObjectMeta: metav1.ObjectMeta{Name: "running", Namespace: "bosun"}, Status: batchv1.JobStatus{Active: 1}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pending", Namespace: "bosun"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "bosun"}, Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}}},
+	}
+	got := unfinishedReviewJobs(jobs)
+	if strings.Join(got, ",") != "bosun/pending,bosun/running" {
+		t.Fatalf("unfinished jobs = %v", got)
+	}
+}
+
+func TestResetPreflightRejectsUnsafeCredentialsBeforeDeletion(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	cases := []struct {
+		name, provider string
+		local, purge   bool
+		from           string
+		credential     string
+		probeErr       error
+		customDir      bool
+	}{
+		{name: "disabled credentials", provider: "claude-bosun"},
+		{name: "missing credentials", local: true, provider: "claude-bosun"},
+		{name: "source mismatch", local: true, provider: "claude-bosun", credential: `{"claudeAiOauth":{"accessToken":"test"}}`, from: "CLAUDE_CREDENTIALS"},
+		{name: "failed probe", local: true, provider: "claude-bosun", credential: `{"claudeAiOauth":{"accessToken":"test"}}`, from: "/tmp/auth.json", probeErr: fmt.Errorf("probe failed")},
+		{name: "custom purge", local: true, purge: true, provider: "claude-bosun", customDir: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.customDir {
+				t.Setenv("BOSUN_REPOS_DIR", filepath.Join(t.TempDir(), "repos"))
+			}
+			probed := false
+			err := preflightReset(context.Background(), options{provider: tc.provider, localCredentials: tc.local, purgeSnapshots: tc.purge},
+				func(context.Context) []credentials.Credential {
+					if tc.credential == "" {
+						return nil
+					}
+					return []credentials.Credential{{Key: "claude-credentials", Value: tc.credential, From: tc.from}}
+				},
+				func(context.Context, string) error { probed = true; return tc.probeErr })
+			if err == nil {
+				t.Fatal("unsafe reset preflight passed")
+			}
+			if tc.name != "failed probe" && probed {
+				t.Fatal("provider probed after an earlier preflight failure")
+			}
+		})
 	}
 }
 

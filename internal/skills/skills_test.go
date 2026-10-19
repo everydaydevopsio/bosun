@@ -183,6 +183,18 @@ func TestInspectReportsInstalledSkillVersionAndDrift(t *testing.T) {
 		t.Fatalf("unexpected initial status: %+v", statuses)
 	}
 	path := statuses[0].Path
+	want, err := assets.ReadFile(assetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := bytes.Replace(want, []byte("<!-- bosun-skill-version: "+Version+" -->\n\n"), nil, 1)
+	if err := os.WriteFile(path, legacy, 0644); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = Inspect(home)
+	if err != nil || statuses[0].State != "outdated" || statuses[0].Version != "pre-versioned" {
+		t.Fatalf("known prior skill not recognized: %+v, %v", statuses[0], err)
+	}
 	if err := os.WriteFile(path, []byte("custom skill"), 0644); err != nil {
 		t.Fatal(err)
 	}

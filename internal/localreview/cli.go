@@ -37,6 +37,7 @@ type options struct {
 	localCredentials, noBootstrap              bool
 	keepSnapshots                              bool
 	purgeSnapshots                             bool
+	force                                      bool
 }
 type record struct {
 	Job, Context, Namespace, Snapshot, SnapshotRoot, Repo, Provider, Image string
@@ -152,6 +153,7 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 		}
 		if command == "reset" {
 			f.BoolVar(&o.purgeSnapshots, "purge-snapshots", false, "Delete durable review snapshots before recreating the cluster")
+			f.BoolVar(&o.force, "force", false, "Delete the cluster even when active review Jobs cannot be ruled out")
 		}
 	case "down":
 		f.StringVar(&o.cluster, "cluster", defaultCluster, "Kind cluster name")

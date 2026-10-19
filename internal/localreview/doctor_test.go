@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +13,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -102,5 +106,15 @@ func TestDoctorReportsControllerImageVersionAndReadiness(t *testing.T) {
 	doctorController(context.Background(), "bosun", fake.NewSimpleClientset(deployment), &r)
 	if r.Checks[0].Status != "unready" || r.Healthy {
 		t.Fatalf("unready controller reported healthy: %+v", r)
+	}
+}
+
+func TestDoctorDistinguishesMissingCredentialFromAPIFailure(t *testing.T) {
+	notFound := fmt.Errorf("read secret: %w", apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "bosun-ai"))
+	if check := credentialDoctorCheck(notFound, "bosun up"); check.Status != "missing" || check.Remedy != "bosun up" {
+		t.Fatalf("missing secret: %+v", check)
+	}
+	if check := credentialDoctorCheck(errors.New("API timeout"), "bosun up"); check.Status != "error" || !strings.Contains(check.Detail, "timeout") {
+		t.Fatalf("API error misreported: %+v", check)
 	}
 }

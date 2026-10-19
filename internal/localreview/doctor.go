@@ -16,6 +16,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/skills"
 	"github.com/everydaydevopsio/bosun/internal/version"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -107,6 +108,9 @@ func doctorSkills(r *doctorReport) {
 		case "missing":
 			c.Status = "missing"
 			c.Remedy = "bosun init --target " + s.Name
+		case "outdated":
+			c.Status = "outdated"
+			c.Remedy = "bosun init --force --target " + s.Name
 		default:
 			c.Status = s.State
 			c.Remedy = "inspect local edits before bosun init --force --target " + s.Name
@@ -168,11 +172,19 @@ func doctorCluster(ctx context.Context, o options, r *doctorReport) {
 	}
 	r.add(doctorCheck{Name: "namespace", Status: "ok", Detail: o.namespace, Required: true})
 	if err := checkClusterCredentials(kubeCtx, c, o.namespace, config.Load().AISecret, o.provider); err != nil {
-		r.add(doctorCheck{Name: "credentials", Status: "missing", Detail: "selected provider credential is unavailable", Remedy: up, Required: true})
+		r.add(credentialDoctorCheck(err, up))
 	} else {
 		r.add(doctorCheck{Name: "credentials", Status: "ok", Detail: o.provider + " present (not live-tested)", Required: true})
 	}
 	doctorController(kubeCtx, o.namespace, c, r)
+}
+
+func credentialDoctorCheck(err error, up string) doctorCheck {
+	check := doctorCheck{Name: "credentials", Status: "error", Detail: err.Error(), Remedy: "check Kubernetes access and provider configuration", Required: true}
+	if apierrors.IsNotFound(err) || strings.Contains(err.Error(), "no usable credentials found") {
+		check.Status, check.Remedy = "missing", up
+	}
+	return check
 }
 
 func findReadyNode(nodes []corev1.Node, name string) *corev1.Node {

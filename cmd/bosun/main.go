@@ -29,7 +29,7 @@ const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provide
        bosun init [--target claude,codex] [--force] [--print]
        bosun up [--local-credentials] [--cluster NAME]
        bosun down [--keep-snapshots] [--cluster NAME]
-       bosun reset [--cluster NAME] [--provider NAME] [--local-credentials] [--purge-snapshots]
+       bosun reset [--cluster NAME] [--provider NAME] [--purge-snapshots] [--force]
        bosun doctor [--cluster NAME] [--provider NAME] [--json]
        bosun serve
        bosun reviewer

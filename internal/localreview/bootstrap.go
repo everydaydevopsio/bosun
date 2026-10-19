@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/credentials"
 	"github.com/everydaydevopsio/bosun/internal/version"
+	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -79,7 +81,7 @@ func probeSourceMismatch(provider string, found []credentials.Credential) error 
 func checkClusterCredentials(ctx context.Context, client kubernetes.Interface, namespace, secret, provider string) error {
 	s, err := client.CoreV1().Secrets(namespace).Get(ctx, secret, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return fmt.Errorf("provider credential Secret %s/%s is missing; run bosun up --local-credentials --provider %s", namespace, secret, provider)
+		return fmt.Errorf("provider credential Secret %s/%s is missing; run bosun up --local-credentials --provider %s: %w", namespace, secret, provider, err)
 	}
 	if err != nil {
 		return fmt.Errorf("check provider credential Secret %s/%s: %w", namespace, secret, err)
@@ -215,12 +217,25 @@ type clusterLifecycle interface {
 
 // resetCluster keeps the deletion and recreation sequence testable without a
 // Docker daemon. A failed delete must never be followed by an attempted create.
-func resetCluster(ctx context.Context, name string, k clusterLifecycle, purge bool, removeSnapshots func() error, up func() int, out io.Writer) (int, error) {
+func resetCluster(ctx context.Context, name string, k clusterLifecycle, purge, force bool, active func(context.Context) ([]string, error), removeSnapshots func() error, up func() int, out io.Writer) (int, error) {
 	exists, err := k.Exists(ctx)
 	if err != nil {
 		return 1, err
 	}
 	if exists {
+		jobs, checkErr := active(ctx)
+		if checkErr != nil && !force {
+			return 2, fmt.Errorf("cannot check active reviews before deleting cluster %s: %w; retry with --force only if interrupting reviews is acceptable", name, checkErr)
+		}
+		if len(jobs) > 0 && !force {
+			return 2, fmt.Errorf("cluster %s has active review Jobs (%s); wait for them or pass --force to interrupt them", name, strings.Join(jobs, ", "))
+		}
+		if checkErr != nil {
+			fmt.Fprintf(out, "warning: could not check active review Jobs: %v\n", checkErr)
+		}
+		if len(jobs) > 0 {
+			fmt.Fprintf(out, "warning: interrupting active review Jobs: %s\n", strings.Join(jobs, ", "))
+		}
 		if err := k.Delete(ctx); err != nil {
 			return 1, err
 		}
@@ -234,38 +249,71 @@ func resetCluster(ctx context.Context, name string, k clusterLifecycle, purge bo
 	return up(), nil
 }
 
+func unfinishedReviewJobs(jobs []batchv1.Job) []string {
+	var names []string
+	for _, job := range jobs {
+		finished := false
+		for _, condition := range job.Status.Conditions {
+			if (condition.Type == batchv1.JobComplete || condition.Type == batchv1.JobFailed) && condition.Status == "True" {
+				finished = true
+			}
+		}
+		if !finished && job.DeletionTimestamp == nil {
+			names = append(names, job.Namespace+"/"+job.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func activeReviewJobs(ctx context.Context, o options) ([]string, error) {
+	c, err := client("kind-" + o.cluster)
+	if err != nil {
+		return nil, err
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	jobs, err := c.BatchV1().Jobs(metav1.NamespaceAll).List(checkCtx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=bosun"})
+	if err != nil {
+		return nil, err
+	}
+	return unfinishedReviewJobs(jobs.Items), nil
+}
+
+func preflightReset(ctx context.Context, o options, discover func(context.Context) []credentials.Credential, probe func(context.Context, string) error) error {
+	if !o.localCredentials {
+		return fmt.Errorf("reset cannot preserve the cluster's provider Secret with --local-credentials=false; use a local provider sign-in")
+	}
+	if o.purgeSnapshots && os.Getenv("BOSUN_REPOS_DIR") != "" {
+		return fmt.Errorf("refusing to purge a custom BOSUN_REPOS_DIR; remove it manually if desired")
+	}
+	found := discover(ctx)
+	if err := credentials.Missing(o.provider, found); err != nil {
+		return fmt.Errorf("cannot reset without local provider credentials: %w", err)
+	}
+	if err := probeSourceMismatch(o.provider, found); err != nil {
+		return err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := probe(probeCtx, o.provider); err != nil {
+		return fmt.Errorf("cannot reset without a working provider sign-in: %w", err)
+	}
+	_, err := cluster.HostRepos()
+	return err
+}
+
 func runReset(ctx context.Context, o options, out, errout io.Writer) int {
 	if err := cluster.RequireTools(); err != nil {
 		fmt.Fprintln(errout, err)
 		return 1
 	}
-	if o.purgeSnapshots && os.Getenv("BOSUN_REPOS_DIR") != "" {
-		fmt.Fprintln(errout, "refusing to purge a custom BOSUN_REPOS_DIR; remove it manually if desired")
-		return 2
-	}
-	if o.localCredentials {
-		found := credentials.Discover(ctx)
-		if err := credentials.Missing(o.provider, found); err != nil {
-			fmt.Fprintln(errout, "cannot reset without local provider credentials:", err)
-			return 2
-		}
-		if err := probeSourceMismatch(o.provider, found); err != nil {
-			fmt.Fprintln(errout, err)
-			return 2
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		err := probeLocalProvider(probeCtx, o.provider)
-		cancel()
-		if err != nil {
-			fmt.Fprintln(errout, "cannot reset without a working provider sign-in:", err)
-			return 2
-		}
-	}
-	if _, err := cluster.HostRepos(); err != nil {
+	if err := preflightReset(ctx, o, credentials.Discover, probeLocalProvider); err != nil {
 		fmt.Fprintln(errout, err)
 		return 2
 	}
-	code, err := resetCluster(ctx, o.cluster, cluster.New(o.cluster), o.purgeSnapshots, cluster.RemoveSnapshots,
+	code, err := resetCluster(ctx, o.cluster, cluster.New(o.cluster), o.purgeSnapshots, o.force,
+		func(ctx context.Context) ([]string, error) { return activeReviewJobs(ctx, o) }, cluster.RemoveSnapshots,
 		func() int {
 			if code := runUp(ctx, o, out, errout); code != 0 {
 				return code

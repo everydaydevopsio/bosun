@@ -48,6 +48,9 @@ func Inspect(home string) ([]Status, error) {
 	if err != nil {
 		return nil, err
 	}
+	// v0.1.5 shipped this exact asset before the revision marker was added.
+	// Recognize that known copy separately from a file with local edits.
+	legacy := bytes.Replace(want, []byte("<!-- bosun-skill-version: "+Version+" -->\n\n"), nil, 1)
 	var result []Status
 	for _, target := range Targets(home) {
 		path := filepath.Join(target.Dir, "skills", skillName, "SKILL.md")
@@ -64,12 +67,16 @@ func Inspect(home string) ([]Status, error) {
 			status.State = "unreadable"
 		case bytes.Equal(data, want):
 			status.State = "current"
+		case bytes.Equal(data, legacy):
+			status.State = "outdated"
 		default:
 			status.State = "different"
 		}
 		if err == nil {
 			if match := versionPattern.FindSubmatch(data); len(match) == 2 {
 				status.Version = string(match[1])
+			} else if status.State == "outdated" {
+				status.Version = "pre-versioned"
 			} else {
 				status.Version = "unknown"
 			}

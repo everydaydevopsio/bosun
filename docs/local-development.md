@@ -130,6 +130,11 @@ those snapshots; Bosun refuses to purge a custom `BOSUN_REPOS_DIR`. The command
 checks local credentials before deleting the cluster, then verifies them again
 and loads them into the new cluster. A released CLI uses its matching published
 reviewer image; it does not need a locally built Docker image.
+Reset refuses to interrupt active review Jobs unless `--force` is passed.
+It also rejects `--local-credentials=false`, because deleting the cluster
+removes the credential Secret and would leave the replacement unable to review.
+For a source build using `bosun:dev`, reset reports that the development image
+must be rebuilt and loaded before reviews can run.
 
 Run `bosun doctor --provider claude-bosun` to inspect readiness, or add `--json`
 for automation. It exits nonzero when a required check fails and reports fixes.
