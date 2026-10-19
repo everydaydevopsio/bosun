@@ -167,6 +167,41 @@ func TestInstallCreatesTheSkillsDirectory(t *testing.T) {
 	}
 }
 
+func TestInspectReportsInstalledSkillVersionAndDrift(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(home, Detect(home), false); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := Inspect(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].State != "current" || statuses[0].Version != Version || statuses[1].State != "unconfigured" {
+		t.Fatalf("unexpected initial status: %+v", statuses)
+	}
+	path := statuses[0].Path
+	if err := os.WriteFile(path, []byte("custom skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = Inspect(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].State != "different" || statuses[0].Version != "unknown" {
+		t.Fatalf("custom skill not reported: %+v", statuses[0])
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = Inspect(home)
+	if err != nil || statuses[0].State != "missing" {
+		t.Fatalf("missing skill not reported: %+v, %v", statuses[0], err)
+	}
+}
+
 // --print exists so the content can be inspected or redirected without
 // touching the filesystem.
 func TestPrint(t *testing.T) {

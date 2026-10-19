@@ -11,6 +11,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/credentials"
+	"github.com/everydaydevopsio/bosun/internal/version"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -205,4 +206,85 @@ func runDown(ctx context.Context, o options, out, errout io.Writer) int {
 	}
 	fmt.Fprintf(out, "removed %s\n", hostRepos)
 	return 0
+}
+
+type clusterLifecycle interface {
+	Exists(context.Context) (bool, error)
+	Delete(context.Context) error
+}
+
+// resetCluster keeps the deletion and recreation sequence testable without a
+// Docker daemon. A failed delete must never be followed by an attempted create.
+func resetCluster(ctx context.Context, name string, k clusterLifecycle, purge bool, removeSnapshots func() error, up func() int, out io.Writer) (int, error) {
+	exists, err := k.Exists(ctx)
+	if err != nil {
+		return 1, err
+	}
+	if exists {
+		if err := k.Delete(ctx); err != nil {
+			return 1, err
+		}
+		fmt.Fprintf(out, "deleted cluster %s\n", name)
+	}
+	if purge {
+		if err := removeSnapshots(); err != nil {
+			return 1, fmt.Errorf("purge snapshots: %w", err)
+		}
+	}
+	return up(), nil
+}
+
+func runReset(ctx context.Context, o options, out, errout io.Writer) int {
+	if err := cluster.RequireTools(); err != nil {
+		fmt.Fprintln(errout, err)
+		return 1
+	}
+	if o.purgeSnapshots && os.Getenv("BOSUN_REPOS_DIR") != "" {
+		fmt.Fprintln(errout, "refusing to purge a custom BOSUN_REPOS_DIR; remove it manually if desired")
+		return 2
+	}
+	if o.localCredentials {
+		found := credentials.Discover(ctx)
+		if err := credentials.Missing(o.provider, found); err != nil {
+			fmt.Fprintln(errout, "cannot reset without local provider credentials:", err)
+			return 2
+		}
+		if err := probeSourceMismatch(o.provider, found); err != nil {
+			fmt.Fprintln(errout, err)
+			return 2
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		err := probeLocalProvider(probeCtx, o.provider)
+		cancel()
+		if err != nil {
+			fmt.Fprintln(errout, "cannot reset without a working provider sign-in:", err)
+			return 2
+		}
+	}
+	if _, err := cluster.HostRepos(); err != nil {
+		fmt.Fprintln(errout, err)
+		return 2
+	}
+	code, err := resetCluster(ctx, o.cluster, cluster.New(o.cluster), o.purgeSnapshots, cluster.RemoveSnapshots,
+		func() int {
+			if code := runUp(ctx, o, out, errout); code != 0 {
+				return code
+			}
+			ref, _ := reviewImage(version.Version)
+			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			warning, imageErr := checkImage(probeCtx, ref, version.Version, kindInspector(o.cluster))
+			if imageErr != nil {
+				fmt.Fprintln(errout, imageErr)
+				return 1
+			}
+			if warning != "" {
+				fmt.Fprintln(errout, warning)
+			}
+			return 0
+		}, out)
+	if err != nil {
+		fmt.Fprintln(errout, err)
+	}
+	return code
 }

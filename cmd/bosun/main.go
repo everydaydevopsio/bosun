@@ -29,6 +29,8 @@ const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provide
        bosun init [--target claude,codex] [--force] [--print]
        bosun up [--local-credentials] [--cluster NAME]
        bosun down [--keep-snapshots] [--cluster NAME]
+       bosun reset [--cluster NAME] [--provider NAME] [--local-credentials] [--purge-snapshots]
+       bosun doctor [--cluster NAME] [--provider NAME] [--json]
        bosun serve
        bosun reviewer
        bosun version
@@ -42,6 +44,8 @@ only needed to prepare one ahead of time or to refresh credentials. bosun up
 checks the selected provider credential in the cluster. Pass --local-credentials
 to verify a headless provider request before copying this machine's sign-in;
 bosun down removes the cluster and its snapshots.
+bosun reset recreates the cluster and preserves snapshots by default.
+bosun doctor checks local review readiness without changing the cluster.
 `
 
 // metaCommand handles the commands that need neither configuration nor a
@@ -143,7 +147,7 @@ func main() {
 		switch os.Args[1] {
 		case "init":
 			os.Exit(runInit(os.Args[2:], os.Stdout, os.Stderr))
-		case "review", "review-status", "up", "down":
+		case "review", "review-status", "up", "down", "reset", "doctor":
 			os.Exit(localreview.Run(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr))
 		case "serve", "reviewer":
 			if len(os.Args) > 2 {

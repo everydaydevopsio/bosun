@@ -235,6 +235,67 @@ func TestParseLifecycleCommands(t *testing.T) {
 	}
 }
 
+type fakeLifecycle struct {
+	exists    bool
+	deleteErr error
+	calls     *[]string
+}
+
+func (f fakeLifecycle) Exists(context.Context) (bool, error) {
+	*f.calls = append(*f.calls, "exists")
+	return f.exists, nil
+}
+func (f fakeLifecycle) Delete(context.Context) error {
+	*f.calls = append(*f.calls, "delete")
+	return f.deleteErr
+}
+
+func TestResetClusterOrderAndFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, want    string
+		exists, purge bool
+		deleteErr     error
+		purgeErr      error
+		upCode        int
+	}{
+		{name: "existing preserves snapshots", exists: true, want: "exists,delete,up"},
+		{name: "absent creates", want: "exists,up"},
+		{name: "purge is explicit", exists: true, purge: true, want: "exists,delete,purge,up"},
+		{name: "failed deletion stops", exists: true, deleteErr: fmt.Errorf("delete failed"), want: "exists,delete"},
+		{name: "failed purge stops", exists: true, purge: true, purgeErr: fmt.Errorf("purge failed"), want: "exists,delete,purge"},
+		{name: "failed recreate propagates", exists: true, upCode: 2, want: "exists,delete,up"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			k := fakeLifecycle{exists: tc.exists, deleteErr: tc.deleteErr, calls: &calls}
+			code, err := resetCluster(context.Background(), "bosun", k, tc.purge,
+				func() error { calls = append(calls, "purge"); return tc.purgeErr },
+				func() int { calls = append(calls, "up"); return tc.upCode }, io.Discard)
+			if got := strings.Join(calls, ","); got != tc.want {
+				t.Fatalf("calls = %q, want %q", got, tc.want)
+			}
+			wantErr := tc.deleteErr != nil || tc.purgeErr != nil
+			if (err != nil) != wantErr || (wantErr && code == 0) || (!wantErr && code != tc.upCode) {
+				t.Fatalf("code=%d err=%v", code, err)
+			}
+		})
+	}
+}
+
+func TestParseResetAndDoctor(t *testing.T) {
+	o, _, err := parse("reset", []string{"--cluster", "other", "--purge-snapshots", "--provider", "claude-bosun"}, io.Discard)
+	if err != nil || o.cluster != "other" || !o.purgeSnapshots || !o.localCredentials || o.provider != "claude-bosun" {
+		t.Fatalf("reset options = %+v, err=%v", o, err)
+	}
+	o, _, err = parse("doctor", []string{"--json", "--cluster", "other"}, io.Discard)
+	if err != nil || !o.json || o.cluster != "other" {
+		t.Fatalf("doctor options = %+v, err=%v", o, err)
+	}
+	if _, _, err = parse("reset", []string{"extra"}, io.Discard); err == nil {
+		t.Fatal("reset accepted a positional argument")
+	}
+}
+
 // BOSUN_KIND_CLUSTER names the cluster for every command, not just review.
 func TestParseHonoursClusterEnvironment(t *testing.T) {
 	t.Setenv("BOSUN_KIND_CLUSTER", "custom")

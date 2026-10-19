@@ -113,6 +113,8 @@ needs. `bosun up` does the same work ahead of time.
 | --- | --- | --- |
 | `bosun up` | Kind cluster with the durable per-user snapshot directory mounted at `/repos`, the `bosun` namespace, and with `--local-credentials` the `bosun-ai` Secret | `kind`, `docker` |
 | `bosun down` | removes the cluster and the snapshot directory (`--keep-snapshots` to leave it) | `kind`, `docker` |
+| `bosun reset` | recreates the selected cluster, keeping review snapshots unless `--purge-snapshots` is passed; refreshes local provider credentials by default | `kind`, `docker`, a local provider sign-in |
+| `bosun doctor` | reads Kind, Kubernetes, image, credential, and installed skill status without changing them | `kind`, `docker` for cluster checks |
 | `./scripts/kind-up.sh` | everything `bosun up` does, plus the locally built `bosun:dev` image and the Helm chart | also `kubectl`, `helm`, a source checkout |
 
 The CLI does not install the Helm chart. A local review submits its Job through
@@ -120,6 +122,24 @@ your kubeconfig and holds its own admission lease, so the chart's Deployment,
 Service, and RBAC — which exist for the GitHub webhook path — are not involved.
 Run `./scripts/kind-up.sh` when you want the controller too, or when you are
 working from source and need `bosun:dev` built and loaded.
+
+To recover a stale Kind node, run `bosun reset --provider claude-bosun` (or
+`codex-bosun` for a Codex sign-in). It deletes and recreates only the selected
+cluster and retains the durable snapshot directory. `--purge-snapshots` deletes
+those snapshots; Bosun refuses to purge a custom `BOSUN_REPOS_DIR`. The command
+checks local credentials before deleting the cluster, then verifies them again
+and loads them into the new cluster. A released CLI uses its matching published
+reviewer image; it does not need a locally built Docker image.
+
+Run `bosun doctor --provider claude-bosun` to inspect readiness, or add `--json`
+for automation. It exits nonzero when a required check fails and reports fixes.
+A published reviewer image that has not been pulled into the Kind node yet is
+reported as `not cached`: the first review can pull it. A missing local `bosun:dev`
+image, invalid image metadata, or version mismatch is a failure. The controller
+Deployment is optional for local reviews; when present, doctor reports its image
+and readiness. Skill versions are independent revisions of the embedded review
+instructions. A differing skill is left alone so local edits are preserved;
+inspect it before using `bosun init --force`.
 
 From the Bosun repository:
 

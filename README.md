@@ -96,6 +96,12 @@ brew install everydaydevopsio/bosun/bosun
 bosun version
 ```
 
+`bosun init` installs the matching review skill for configured coding agents.
+`bosun doctor` reports local Kind and skill health; `bosun reset` recreates a
+stale Kind cluster while retaining review snapshots. See
+[local development](docs/local-development.md#start-the-environment) for flags
+and recovery steps.
+
 macOS builds are signed with a Developer ID certificate and notarized by Apple, so
 they run without a Gatekeeper prompt. Windows binaries are not published yet.
 
