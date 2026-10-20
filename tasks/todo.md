@@ -738,3 +738,54 @@ image, which reads like a Bosun release number and ages the same way.
 ## Outcome
 - Result: local implementation complete; CI and released-image verification pending.
 - Evidence links/commands: regression test red before fix; pinned-image script red on released config and green with candidate config.
+
+# Task: Tell the pull request when a review fails
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-21
+- Mode: Autonomous
+- Requirement IDs: [issue #28](https://github.com/everydaydevopsio/bosun/issues/28)
+- Plan: `plans/pr-review-surface.md` (Phases 1 and 4)
+
+## Scope
+- In scope: the `<sub>` ref/commit metadata line on every publication, a failure
+  comment on terminal error, the one-terminal-publication invariant, docs.
+- Out of scope: inline review threads (#53), structured findings (#37),
+  capacity rejections raised in the controller before a Job exists.
+
+## Acceptance Criteria
+- A published review names the ref and resolved commit it reviewed. ✅
+- A failed hosted review publishes exactly one failure comment carrying the
+  redacted reason and the commit it tried to review. ✅
+- A review that landed is never contradicted by a failure comment. ✅
+
+## Execution Checklist
+- [x] Metadata line and code-span escaping in `postReview`.
+- [x] `postFailure`, published from the redacted `safeError` text on its own
+      deadline so a timed-out review can still report.
+- [x] Keep the webhook's commit through a failed clone.
+- [x] Guard the one-terminal-publication invariant with `published`.
+- [x] Document the output contract in `docs/github-app.md`.
+
+## Test Strategy
+- Unit: marker shape, metadata correlation, code-span escaping.
+- Integration: hosted clone failure publishes one failure comment with no
+  credential material; hosted success plus a failing output writer publishes
+  only the review.
+- Failure-path tests: both of the above are failure paths.
+- Requirement-to-test mapping: `internal/review/publication_test.go`.
+
+## Rollback Strategy
+- Trigger: failure comments become noisy, or a consumer breaks on the metadata
+  line.
+- Rollback steps: revert the branch; the comment format is additive, so no
+  state needs cleaning up.
+- Validation after rollback: `make test`.
+
+## Outcome
+- Result: complete. Bosun 0.1.6 reviewed the change and found two defects
+  (clone failure clobbering the commit; a review contradicted by a failure
+  comment); both were reproduced with tests and fixed.
+- Evidence links/commands: `make test`, `make lint`;
+  job `review-bosun-issue-28-failure-comment-67498b0536`.

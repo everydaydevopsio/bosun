@@ -222,10 +222,65 @@ func (g githubClient) resolvePR(ctx context.Context, repo string, number int, to
 	}
 	return pr.Head.Ref, pr.Head.SHA, nil
 }
-func (g githubClient) postReview(ctx context.Context, repo string, number int, token, output string) error {
+
+// Marker lines identify Bosun's output on a pull request. A consumer selects
+// comments by these prefixes, so treat them as an interface: changing one is a
+// breaking change for every agent driving a review loop.
+const (
+	reviewMarker  = "## Bosun code review"
+	failureMarker = "## Bosun code review failed"
+)
+
+// failureReasonLimit keeps a runaway diagnostic from becoming a comment GitHub
+// rejects. Reasons are one sentence in practice; this is a backstop.
+const failureReasonLimit = 4000
+
+// metadata is the correlation line every Bosun publication carries. A branch
+// moves, so output that does not name its revision can only be matched to a
+// push by timestamp, and two pushes in quick succession are ambiguous.
+func metadata(ref, sha string) string {
+	return "<sub>`" + codeSpan(ref) + "` @ `" + codeSpan(sha) + "`</sub>"
+}
+
+// codeSpan makes caller-supplied text safe to render inside a Markdown code
+// span: a backtick would close the span early and let the remainder escape
+// into markup, and a newline would end it outright.
+func codeSpan(text string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		switch r {
+		case '`':
+			return '\''
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		return r
+	}, text))
+}
+
+func (g githubClient) postComment(ctx context.Context, repo string, number int, token, body string) error {
+	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number), token, map[string]string{"body": body}, nil)
+}
+
+func (g githubClient) postReview(ctx context.Context, repo string, number int, token, ref, sha, output string) error {
 	text := []rune(output)
 	if len(text) > 60000 {
 		text = append(text[:60000], []rune("\n\n[Review truncated]")...)
 	}
-	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number), token, map[string]string{"body": "## Bosun code review\n\n" + string(text)}, nil)
+	return g.postComment(ctx, repo, number, token, reviewMarker+"\n\n"+metadata(ref, sha)+"\n\n"+string(text))
+}
+
+// postFailure tells the pull request that a review died. The hosted path is
+// fire-and-forget, so without it silence is the default experience of failure
+// and a failed review is indistinguishable from one that never ran.
+//
+// reason must already be redacted: it reaches a pull request verbatim.
+func (g githubClient) postFailure(ctx context.Context, repo string, number int, token, ref, sha, reason string) error {
+	text := []rune(codeSpan(reason))
+	if len(text) > failureReasonLimit {
+		text = append(text[:failureReasonLimit], []rune(" [truncated]")...)
+	}
+	if len(text) == 0 {
+		text = []rune("no reason reported")
+	}
+	return g.postComment(ctx, repo, number, token, failureMarker+"\n\n"+metadata(ref, sha)+"\n\n`"+string(text)+"`")
 }

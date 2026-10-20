@@ -136,11 +136,41 @@ kubectl -n bosun patch secret bosun-github --type=json \
   -p='[{"op":"remove","path":"/data/token"}]'
 ```
 
+## What Bosun publishes
+
+Every hosted review with a pull-request number ends in exactly one comment: a
+review, or a failure. Both open with a marker line and a metadata line naming
+the reviewed ref and commit, so a consumer can correlate output to a specific
+push rather than to a timestamp.
+
+```markdown
+## Bosun code review
+
+<sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
+
+<findings>
+```
+
+```markdown
+## Bosun code review failed
+
+<sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
+
+`provider: context deadline exceeded`
+```
+
+The failure reason is the redacted diagnostic, prefixed with the stage that
+failed (`setup`, `clone`, `provider`, `review`, or `publish`). It reports
+infrastructure failure, not findings. Treat both marker lines as an interface:
+agents select Bosun's comments by them.
+
 ## What this does not do yet
 
-Bosun posts reviews as pull-request conversation comments. Installation tokens
-request only `contents: read` and `pull_requests: write`; no Checks permission
-is requested. Branch-only reviews remain in Job logs.
+Findings are prose inside the comment, not inline review threads with
+resolvable anchors (#53). Installation tokens request only `contents: read`
+and `pull_requests: write`; no Checks permission is requested. Branch-only
+reviews, and failures that happen before a token is obtained, remain in Job
+logs.
 
 ## Notes
 

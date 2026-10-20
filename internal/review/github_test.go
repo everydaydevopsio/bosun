@@ -94,7 +94,7 @@ func TestAgentEnvironmentExcludesGitHubCredentials(t *testing.T) {
 func TestGitHubFailureDoesNotEchoResponseSecrets(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "sensitive token", 403) }))
 	defer api.Close()
-	err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "test-token", "review")
+	err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "test-token", "feature", "0123456789abcdef0123456789abcdef01234567", "review")
 	if err == nil || strings.Contains(err.Error(), "sensitive token") {
 		t.Fatalf("unexpected error: %v", err)
 	}
