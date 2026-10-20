@@ -11,12 +11,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,6 +41,18 @@ func validRepository(repo string) bool {
 type githubClient struct {
 	base string
 	http *http.Client
+}
+
+// httpError carries the status code so a caller can act on it. The message
+// deliberately omits the response body: GitHub echoes request material, and a
+// publish failure must not reintroduce a credential into a diagnostic.
+type httpError struct {
+	status       int
+	method, path string
+}
+
+func (e httpError) Error() string {
+	return fmt.Sprintf("GitHub %s %s returned HTTP %d", e.method, e.path, e.status)
 }
 
 func (g githubClient) request(ctx context.Context, method, path, token string, body, result any) error {
@@ -64,7 +78,7 @@ func (g githubClient) request(ctx context.Context, method, path, token string, b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("GitHub %s %s returned HTTP %d", method, path, resp.StatusCode)
+		return httpError{status: resp.StatusCode, method: method, path: path}
 	}
 	if result != nil {
 		return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(result)
@@ -261,12 +275,137 @@ func (g githubClient) postComment(ctx context.Context, repo string, number int, 
 	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number), token, map[string]string{"body": body}, nil)
 }
 
+// postReview publishes findings as a pull-request review with inline comments.
+//
+// Review threads are what a consuming agent needs: a conversation comment has
+// nothing to reply to and nothing to resolve, so the record of which findings
+// were handled lives only in that agent's context and cannot survive a fresh
+// session. Output with no parsable findings still publishes as a comment --
+// losing a review because a model skipped the output contract would be a worse
+// failure than publishing it unanchored.
 func (g githubClient) postReview(ctx context.Context, repo string, number int, token, ref, sha, output string) error {
+	summary, findings := parseFindings(output)
+	if len(findings) == 0 {
+		return g.postComment(ctx, repo, number, token, reviewMarker+"\n\n"+metadata(ref, sha)+"\n\n"+truncateOutput(summary))
+	}
+	// A finding on a file the pull request does not touch cannot be a thread.
+	// An unavailable file list is not a reason to lose the review: publish
+	// unfiltered and let the fallback below handle a rejected position.
+	inline, outside := findings, []Finding(nil)
+	if files, err := g.prFiles(ctx, repo, number, token); err == nil {
+		inline, outside = nil, nil
+		for _, f := range findings {
+			if files[f.Path] {
+				inline = append(inline, f)
+			} else {
+				outside = append(outside, f)
+			}
+		}
+	}
+	body := map[string]any{
+		"event": "COMMENT",
+		// Anchor the review to the commit that was actually read. GitHub
+		// defaults this to the pull request's latest commit, so a push landing
+		// mid-review would attach these findings to lines they never
+		// described, under a summary naming a different SHA.
+		"commit_id": sha,
+		"body":      reviewBody(ref, sha, summary, "Findings outside the diff", outside),
+		"comments":  inlineComments(inline),
+	}
+	err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
+	var status httpError
+	if !errors.As(err, &status) || status.status != http.StatusUnprocessableEntity {
+		return err
+	}
+	// GitHub rejects the whole review when any single comment position is
+	// invalid, and a line the reviewer read is not necessarily a line the diff
+	// exposes. Retry once with everything in the body rather than lose it.
+	//
+	// commit_id is kept: with no positions to place, it is the record of what
+	// was read. A rejection because the commit itself left the pull request --
+	// a force-push mid-review -- fails here, and that is the right outcome,
+	// because the push that removed it has already triggered its own review.
+	body["comments"] = []any{}
+	body["body"] = reviewBody(ref, sha, summary, "Findings", findings)
+	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
+}
+
+// prFiles lists the paths the pull request touches.
+func (g githubClient) prFiles(ctx context.Context, repo string, number int, token string) (map[string]bool, error) {
+	files := map[string]bool{}
+	for page := 1; page <= 10; page++ {
+		var batch []struct {
+			Filename string `json:"filename"`
+		}
+		path := fmt.Sprintf("/repos/%s/pulls/%d/files?per_page=100&page=%d", repo, number, page)
+		if err := g.request(ctx, "GET", path, token, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, f := range batch {
+			files[f.Filename] = true
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return files, nil
+}
+
+func inlineComments(findings []Finding) []map[string]any {
+	comments := make([]map[string]any, 0, len(findings))
+	for _, f := range findings {
+		comment := map[string]any{"path": f.Path, "line": f.Line, "side": "RIGHT", "body": findingBody(f)}
+		if f.EndLine > f.Line {
+			comment["line"], comment["start_line"] = f.EndLine, f.Line
+			comment["start_side"] = "RIGHT"
+		}
+		comments = append(comments, comment)
+	}
+	return comments
+}
+
+// findingBody opens with the severity so a reader, and a consuming agent
+// scoring threads, can triage without parsing prose.
+func findingBody(f Finding) string {
+	body := "**" + f.Severity + "** — " + f.Title
+	if f.Body != "" {
+		body += "\n\n" + f.Body
+	}
+	if f.Remediation != "" {
+		body += "\n\nRemediation: " + f.Remediation
+	}
+	return body
+}
+
+// reviewBody renders the summary, plus any findings that could not become
+// threads, under the heading the caller names.
+func reviewBody(ref, sha, summary, heading string, folded []Finding) string {
+	body := summary
+	if len(folded) > 0 {
+		body = strings.TrimRight(body, " \t\n") + "\n\n### " + heading + "\n"
+		for _, f := range folded {
+			body += "\n`" + codeSpan(location(f)) + "` — " + findingBody(f) + "\n"
+		}
+	}
+	return reviewMarker + "\n\n" + metadata(ref, sha) + "\n\n" + truncateOutput(body)
+}
+
+func location(f Finding) string {
+	at := f.Path + ":" + strconv.Itoa(f.Line)
+	if f.EndLine > f.Line {
+		at += "-" + strconv.Itoa(f.EndLine)
+	}
+	return at
+}
+
+// truncateOutput bounds what reaches GitHub. A review body has a hard limit
+// there, and a truncated review is better than a rejected one.
+func truncateOutput(output string) string {
 	text := []rune(output)
 	if len(text) > 60000 {
 		text = append(text[:60000], []rune("\n\n[Review truncated]")...)
 	}
-	return g.postComment(ctx, repo, number, token, reviewMarker+"\n\n"+metadata(ref, sha)+"\n\n"+string(text))
+	return string(text)
 }
 
 // postFailure tells the pull request that a review died. The hosted path is

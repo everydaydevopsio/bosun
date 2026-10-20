@@ -138,18 +138,39 @@ kubectl -n bosun patch secret bosun-github --type=json \
 
 ## What Bosun publishes
 
-Every hosted review with a pull-request number ends in exactly one comment: a
-review, or a failure. Both open with a marker line and a metadata line naming
-the reviewed ref and commit, so a consumer can correlate output to a specific
-push rather than to a timestamp.
+Every hosted review with a pull-request number ends in exactly one publication:
+a review, or a failure comment. Both open with a marker line and a metadata
+line naming the reviewed ref and commit, so a consumer can correlate output to
+a specific push rather than to a timestamp.
+
+Findings are published as a pull-request review (`event: COMMENT`) with one
+inline comment per finding, so the standard reply and resolve machinery works
+against them. The review body carries the marker, the metadata line, and the
+summary:
 
 ```markdown
 ## Bosun code review
 
 <sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
 
-<findings>
+<summary>
 ```
+
+Each inline comment opens with its severity: `**high** — <title>`, then the
+failure it causes and a remediation.
+
+Two cases fall back to a conversation comment under the same marker, because a
+published review beats a lost one:
+
+- the reviewer emitted no machine-readable findings block, so nothing can be
+  anchored;
+- GitHub rejected the review with HTTP 422, which it does for the whole review
+  when any single comment position is invalid. Bosun retries once with every
+  finding folded into the body under a `### Findings` heading.
+
+Findings on files the pull request does not touch are never sent as inline
+comments; they are folded into the body under `### Findings outside the diff`,
+keeping `path:line` in the text.
 
 ```markdown
 ## Bosun code review failed
@@ -166,11 +187,11 @@ agents select Bosun's comments by them.
 
 ## What this does not do yet
 
-Findings are prose inside the comment, not inline review threads with
-resolvable anchors (#53). Installation tokens request only `contents: read`
-and `pull_requests: write`; no Checks permission is requested. Branch-only
-reviews, and failures that happen before a token is obtained, remain in Job
-logs.
+Installation tokens request only `contents: read` and `pull_requests: write`;
+no Checks permission is requested, so a review is not a status check. Branch-
+only reviews, and failures that happen before a token is obtained, remain in
+Job logs. Repeated reviews are independent: Bosun does not resolve or supersede
+the threads an earlier pass opened (#42).
 
 ## Notes
 

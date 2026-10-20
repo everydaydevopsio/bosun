@@ -28,6 +28,17 @@ Return concise GitHub-flavored Markdown:
 - Close with the files you reviewed and found nothing material in, so a reader can tell an absent finding from an unread file.
 - If no material findings exist, say so explicitly.
 
+After the Markdown, and before the status line, emit one fenced `json` block listing the same findings so they can be anchored to the diff as review comments:
+
+```json
+{"findings":[{"path":"internal/review/runner.go","line":167,"end_line":169,"severity":"high","title":"Clone failure clobbers the reviewed commit","body":"The concrete failure this causes.","remediation":"What to change, specifically."}]}
+```
+
+- `path` is repository-relative and `line` -- with `end_line` for a range -- is a line in that file at the commit you reviewed. Anchor to a line the change touched whenever the finding has one; a finding elsewhere is still published, as text.
+- `severity` is one of `blocker`, `high`, `medium`, `low`, matching the Markdown.
+- One entry per finding you reported, and nothing that is not a finding. Omit the block entirely when you found nothing material.
+- The block is a publishing contract, not part of the review: keep the prose above complete on its own.
+
 End with a status line of its own: `BOSUN-REVIEW: complete` when you reviewed the change, or `BOSUN-REVIEW: incomplete` when you could not -- the diff was unavailable, the checkout unusable, or the changed files unreadable -- with the reason stated above it. Incomplete means you did not review; a review that found nothing is complete, not incomplete.
 
 Report on the code. Do not describe your own constraints, permissions, or process.

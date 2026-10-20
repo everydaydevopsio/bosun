@@ -217,11 +217,11 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		published = true
 	}
 	if reporter != nil {
-		reporter.Emit("result", output)
+		reporter.Emit("result", humanReview(output))
 		reporter.Emit("completed", "Review completed")
 		return nil
 	}
-	_, err = fmt.Fprintln(w.Output, output)
+	_, err = fmt.Fprintln(w.Output, humanReview(output))
 	return err
 }
 

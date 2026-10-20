@@ -119,7 +119,7 @@ kubectl -n bosun get jobs
 kubectl -n bosun logs job/REVIEW_JOB_NAME
 ```
 
-Open a test PR and leave `@bridgectl review`. The resulting review appears as a PR conversation comment headed **Bosun code review**.
+Open a test PR and leave `@bridgectl review`. The resulting review appears as a pull-request review headed **Bosun code review**, with one inline comment per finding anchored to the diff. A review whose findings cannot be anchored arrives as a conversation comment under the same heading, and a failed review as one headed **Bosun code review failed**.
 
 Branch-created reviews have no PR thread to post to, so their initial output is retained in the Job log. A production follow-up should publish these as GitHub Checks and attach the full review there.
 

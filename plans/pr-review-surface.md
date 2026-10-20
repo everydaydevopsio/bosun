@@ -1,6 +1,6 @@
 # Publish Bosun findings as a real GitHub pull-request review
 
-Status: in progress (Phases 1 and 4 landed on `issue-28-failure-comment`)
+Status: in progress (Phases 1 and 4 landed in #54; Phases 2, 3 and 5 on `issue-53-pull-request-review`)
 Created: 2026-09-30
 Observed branch: `codex/go-migration-foundation` (f43d54e)
 Consumer: `everydaydevopsio/ballast` skill `github-pr-copilot-cycle`
@@ -152,31 +152,31 @@ this; only the real-PR smoke test depends on it.
 
 ### Phase 2 — Structured findings
 
-- [ ] Extend `prompts/code-review.md`: keep the Markdown summary, and require a
+- [x] Extend `prompts/code-review.md`: keep the Markdown summary, and require a
       trailing fenced ` ```json ` block, `{"findings": [...]}`, each finding
       `{path, line, end_line?, severity, title, body, remediation}` with
       severity in `blocker|high|medium|low`
-- [ ] Add `internal/review/findings.go`: extract the last fenced JSON block,
+- [x] Add `internal/review/findings.go`: extract the last fenced JSON block,
       unmarshal, validate, drop invalid entries with a logged reason, and
       return the summary with the block stripped
-- [ ] Absence of the block is **not** an error: return zero findings and the
+- [x] Absence of the block is **not** an error: return zero findings and the
       full output as summary, so Phase 3 falls back to a conversation comment
-- [ ] Bound the parse: cap finding count and per-field length before anything
+- [x] Bound the parse: cap finding count and per-field length before anything
       reaches the GitHub API
 
 ### Phase 3 — Publish a review
 
-- [ ] Add `postReview` against `POST /repos/{repo}/pulls/{n}/reviews`,
+- [x] Add `postReview` against `POST /repos/{repo}/pulls/{n}/reviews`,
       `event: "COMMENT"`, body + `comments[]`
-- [ ] Add `prFiles` (`GET /repos/{repo}/pulls/{n}/files`) and filter findings to
+- [x] Add `prFiles` (`GET /repos/{repo}/pulls/{n}/files`) and filter findings to
       paths present in the diff before the first attempt
-- [ ] On HTTP 422, retry once with `comments: []` and every finding folded into
+- [x] On HTTP 422, retry once with `comments: []` and every finding folded into
       the body. GitHub rejects the *entire* review if any single comment
       position is invalid, so an unconditional fallback is required — this is
       the most likely production failure and must not lose the review
-- [ ] Zero findings, or no parsable block: publish a conversation comment as
+- [x] Zero findings, or no parsable block: publish a conversation comment as
       today, preserving the existing 60000-rune truncation
-- [ ] Keep output redaction on every path (`redact(output, token)` already runs
+- [x] Keep output redaction on every path (`redact(output, token)` already runs
       before publication; do not bypass it when building comment bodies)
 
 ### Phase 4 — Failure visibility
@@ -194,11 +194,11 @@ this; only the real-PR smoke test depends on it.
 
 ### Phase 5 — Docs
 
-- [ ] `docs/github-app.md`: delete "What this does not do yet"; state that
+- [x] `docs/github-app.md`: delete "What this does not do yet"; state that
       reviews are published as PR reviews with inline comments
-- [ ] `README.md`: rewrite the "Current scope" paragraph
-- [ ] `docs/setup.md`: document the output contract and the bot login
-- [ ] `PRD.md`: add the review-surface and failure-visibility requirements with
+- [x] `README.md`: rewrite the "Current scope" paragraph
+- [~] `docs/setup.md`: output contract documented; the bot login waits on Phase 0
+- [x] `PRD.md`: add the review-surface and failure-visibility requirements with
       acceptance criteria, per this repo's existing PRD convention
 
 ## Verification

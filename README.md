@@ -227,7 +227,7 @@ See [docs/setup.md](docs/setup.md) for exact commands, permissions, Helm values,
 
 ## Current scope
 
-PR reviews are posted as conversation comments. GitHub App installation tokens are supported, with a PAT fallback. Branch-created reviews remain in Job logs; Checks API output is not implemented yet.
+PR reviews are published as pull-request reviews with inline comments, falling back to a conversation comment when no finding can be anchored to the diff. A failed review publishes a failure comment rather than nothing. GitHub App installation tokens are supported, with a PAT fallback. Branch-created reviews remain in Job logs; Checks API output is not implemented yet.
 
 ## Releasing
 
