@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -23,6 +24,11 @@ var severities = map[string]int{"blocker": 0, "high": 1, "medium": 2, "low": 3}
 // Finding is one anchorable claim about the change. It is the machine-readable
 // half of the review; the Markdown summary carries the same findings as prose.
 type Finding struct {
+	// ID is stable within one review and is what a person or an agent quotes
+	// when saying which finding they acted on. It is assigned here, after
+	// ordering, rather than taken from the model: a model-chosen identifier
+	// would not be stable and could collide.
+	ID          string `json:"id,omitempty"`
 	Path        string `json:"path"`
 	Line        int    `json:"line"`
 	EndLine     int    `json:"end_line,omitempty"`
@@ -30,6 +36,11 @@ type Finding struct {
 	Title       string `json:"title"`
 	Body        string `json:"body,omitempty"`
 	Remediation string `json:"remediation,omitempty"`
+	// Confidence and Uncertainty carry the reviewer's own hedging. A finding
+	// read out of code without running it is a claim, and dropping the hedge
+	// would present every claim as a verdict.
+	Confidence  string `json:"confidence,omitempty"`
+	Uncertainty string `json:"uncertainty,omitempty"`
 }
 
 // parseFindings splits a review into its human summary and its findings.
@@ -39,22 +50,42 @@ type Finding struct {
 // publishing improvement for a lost review. The caller falls back to
 // publishing the whole output as a conversation comment.
 func parseFindings(output string) (string, []Finding) {
+	summary, findings, _, _ := parseReview(output)
+	return summary, findings
+}
+
+// parseReview splits a review into its human summary and its findings, and
+// reports whether the reviewer honoured the output contract at all.
+//
+// reported distinguishes the two zero-finding cases, which mean opposite
+// things: a review that emitted the contract block and found nothing is a
+// clean review, while one that emitted no block may have found plenty and
+// said so only in prose. note carries a diagnostic for the second kind, so a
+// reader is told the Markdown is authoritative rather than shown an empty
+// findings list.
+func parseReview(output string) (string, []Finding, bool, string) {
 	start, end, inner := lastJSONBlock(output)
 	if inner == "" {
-		return output, nil
+		return output, nil, false, ""
 	}
 	var parsed struct {
 		Findings []Finding `json:"findings"`
 	}
-	if err := json.Unmarshal([]byte(inner), &parsed); err != nil || parsed.Findings == nil {
-		// Unparsable, or a JSON block that is not the contract: leave it in the
-		// summary, where a human can still read whatever the model meant by it.
-		return output, nil
+	if err := json.Unmarshal([]byte(inner), &parsed); err != nil {
+		return output, nil, false, "the reviewer emitted a findings block that is not valid JSON; the Markdown report is authoritative"
+	}
+	if parsed.Findings == nil {
+		// A JSON block that is not the contract: leave it in the summary,
+		// where a human can still read whatever the model meant by it.
+		return output, nil, false, ""
 	}
 	var findings []Finding
+	dropped := 0
 	for _, f := range parsed.Findings {
 		if f, ok := normalize(f); ok {
 			findings = append(findings, f)
+		} else {
+			dropped++
 		}
 		if len(findings) == findingLimit {
 			break
@@ -63,11 +94,48 @@ func parseFindings(output string) (string, []Finding) {
 	sort.SliceStable(findings, func(i, j int) bool {
 		return severities[findings[i].Severity] < severities[findings[j].Severity]
 	})
+	for i := range findings {
+		findings[i].ID = "F" + strconv.Itoa(i+1)
+	}
+	note := ""
+	if dropped > 0 {
+		note = "dropped " + strconv.Itoa(dropped) + " finding(s) that could not be anchored; the Markdown report still carries them"
+	}
 	summary := strings.TrimRight(output[:start], " \t\n")
 	if rest := strings.TrimSpace(output[end:]); rest != "" {
 		summary += "\n\n" + rest
 	}
-	return summary, findings
+	return summary, findings, true, note
+}
+
+// Result is the structured half of a completed review, carried on the event
+// stream so a caller does not have to parse prose, and so the findings survive
+// in durable local state after the Job and its logs are gone.
+type Result struct {
+	SchemaVersion int       `json:"schema_version"`
+	Findings      []Finding `json:"findings"`
+	Note          string    `json:"note,omitempty"`
+}
+
+// ResultSchemaVersion is bumped when the shape above changes incompatibly.
+const ResultSchemaVersion = 1
+
+// StructuredResult renders a review's findings for the event stream. It
+// returns "" when the reviewer emitted no contract block: there is nothing
+// structured to report, and an empty findings list would claim a clean review.
+func StructuredResult(output string) string {
+	_, findings, reported, note := parseReview(output)
+	if !reported {
+		return ""
+	}
+	if findings == nil {
+		findings = []Finding{}
+	}
+	payload, err := json.Marshal(Result{SchemaVersion: ResultSchemaVersion, Findings: findings, Note: note})
+	if err != nil {
+		return ""
+	}
+	return string(payload)
 }
 
 // normalize reports whether a finding can be published, and trims it to the
@@ -79,6 +147,10 @@ func normalize(f Finding) (Finding, bool) {
 	f.Title = truncate(strings.TrimSpace(f.Title), titleLimit)
 	f.Body = truncate(strings.TrimSpace(f.Body), fieldLimit)
 	f.Remediation = truncate(strings.TrimSpace(f.Remediation), fieldLimit)
+	f.Confidence = truncate(strings.TrimSpace(f.Confidence), titleLimit)
+	f.Uncertainty = truncate(strings.TrimSpace(f.Uncertainty), fieldLimit)
+	// An ID from the model is not trusted: it is assigned after ordering.
+	f.ID = ""
 	if f.Path == "" || len(f.Path) > pathLimit || f.Title == "" {
 		return f, false
 	}

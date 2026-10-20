@@ -33,6 +33,8 @@ type options struct {
 	cluster                                    string
 	timeout                                    time.Duration
 	json, detach, follow                       bool
+	summary                                    bool
+	againstRef                                 string
 	owner                                      bool
 	localCredentials, noBootstrap              bool
 	keepSnapshots                              bool
@@ -47,6 +49,17 @@ type record struct {
 	TypicalLow, TypicalHigh                                                time.Duration
 	Changes                                                                int
 	Result, Outcome                                                        string
+	// Revision provenance, recorded at submit time. A branch moves, so a
+	// result read later cannot be trusted to describe the current checkout
+	// unless it names what it reviewed. Records written before these existed
+	// report "unknown" rather than a SHA parsed out of prose.
+	Branch, ReviewedSHA, BaseSHA, MergeBase string
+	// Committed records whether the review saw only committed content. A
+	// matching SHA does not mean matching content when it did not.
+	Committed bool
+	// Structured is the reviewer's findings payload, verbatim. Stored as the
+	// worker emitted it so a schema change does not silently rewrite history.
+	Structured string
 	// Failure carries why a run ended badly, so a later reconnect explains
 	// itself instead of reporting a stored result that does not exist.
 	Failure string
@@ -158,6 +171,9 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 	case "down":
 		f.StringVar(&o.cluster, "cluster", defaultCluster, "Kind cluster name")
 		f.BoolVar(&o.keepSnapshots, "keep-snapshots", false, "Keep the snapshot directory on the host")
+	case "review-result":
+		f.BoolVar(&o.summary, "summary", false, "Show the header and finding titles only")
+		f.StringVar(&o.againstRef, "against-ref", "", "Compare the reviewed commit with a ref in this checkout (for example HEAD)")
 	default:
 		f.BoolVar(&o.follow, "follow", false, "Follow until completion")
 	}
@@ -209,6 +225,13 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		return runReset(ctx, o, out, errout)
 	case "doctor":
 		return runDoctor(ctx, o, out, errout)
+	}
+	if command == "review-result" {
+		if len(pos) != 1 {
+			fmt.Fprintln(errout, "usage: bosun review-result JOB [--json] [--summary] [--against-ref REF]")
+			return 2
+		}
+		return runResult(ctx, pos[0], o, out, errout)
 	}
 	if command == "review-status" {
 		if len(pos) != 1 {
@@ -360,7 +383,7 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 	cfg.ReviewTimeoutSeconds = int64(o.timeout.Seconds())
 	cfg.ReviewImage = image
 	expectedJob := jobs.Name(filepath.Base(s.Repo), s.Branch, filepath.Base(s.Path))
-	r := record{Job: expectedJob, Context: o.context, Namespace: o.namespace, Snapshot: s.Path, SnapshotRoot: filepath.Dir(s.Path), Repo: s.Repo, Provider: o.provider, Image: cfg.ReviewImage, Started: started, Changes: s.Changes}
+	r := record{Job: expectedJob, Context: o.context, Namespace: o.namespace, Snapshot: s.Path, SnapshotRoot: filepath.Dir(s.Path), Repo: s.Repo, Provider: o.provider, Image: cfg.ReviewImage, Started: started, Changes: s.Changes, Branch: s.Branch, ReviewedSHA: s.Head, BaseSHA: s.Base, MergeBase: s.MergeBase, Committed: s.Committed}
 	if e = save(&r); e != nil {
 		fmt.Fprintln(errout, "Cannot save reconnect metadata:", e)
 		return 1

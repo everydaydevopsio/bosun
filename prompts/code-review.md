@@ -31,12 +31,13 @@ Return concise GitHub-flavored Markdown:
 After the Markdown, and before the status line, emit one fenced `json` block listing the same findings so they can be anchored to the diff as review comments:
 
 ```json
-{"findings":[{"path":"internal/review/runner.go","line":167,"end_line":169,"severity":"high","title":"Clone failure clobbers the reviewed commit","body":"The concrete failure this causes.","remediation":"What to change, specifically."}]}
+{"findings":[{"path":"internal/review/runner.go","line":167,"end_line":169,"severity":"high","title":"Clone failure clobbers the reviewed commit","body":"The concrete failure this causes.","remediation":"What to change, specifically.","confidence":"high","uncertainty":"What you could not confirm by reading."}]}
 ```
 
 - `path` is repository-relative and `line` -- with `end_line` for a range -- is a line in that file at the commit you reviewed. Anchor to a line the change touched whenever the finding has one; a finding elsewhere is still published, as text.
 - `severity` is one of `blocker`, `high`, `medium`, `low`, matching the Markdown.
-- One entry per finding you reported, and nothing that is not a finding. Omit the block entirely when you found nothing material.
+- `confidence` and `uncertainty` repeat the hedge you stated in the Markdown. A finding read out of code without running it is a claim, and a reader who only sees the structured form must see the hedge too.
+- One entry per finding you reported, and nothing that is not a finding. When you found nothing material, emit `{"findings":[]}` rather than omitting the block: an absent block cannot be told apart from a reviewer that ignored this contract, so omitting it turns a clean review into an unreadable one.
 - The block is a publishing contract, not part of the review: keep the prose above complete on its own.
 
 End with a status line of its own: `BOSUN-REVIEW: complete` when you reviewed the change, or `BOSUN-REVIEW: incomplete` when you could not -- the diff was unavailable, the checkout unusable, or the changed files unreadable -- with the reason stated above it. Incomplete means you did not review; a review that found nothing is complete, not incomplete.

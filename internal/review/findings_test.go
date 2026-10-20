@@ -3,12 +3,15 @@ package review
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
+	"github.com/everydaydevopsio/bosun/internal/progress"
 )
 
 func TestParseFindings(t *testing.T) {
@@ -142,5 +145,154 @@ func TestLocalOutputRendersFindingsAsText(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output lost %q: %q", want, out.String())
 		}
+	}
+}
+
+// A finding needs a name a person can quote back. The model does not choose
+// it: an identifier it invented would not be stable across passes.
+func TestFindingIDsAreAssignedInSeverityOrder(t *testing.T) {
+	_, findings := parseFindings("S.\n\n```json\n" +
+		`{"findings":[{"id":"model-chosen","path":"a.go","line":1,"severity":"low","title":"L"},` +
+		`{"path":"a.go","line":2,"severity":"blocker","title":"X","confidence":"high","uncertainty":"Not run."}]}` + "\n```")
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings", len(findings))
+	}
+	if findings[0].ID != "F1" || findings[0].Severity != "blocker" {
+		t.Fatalf("first finding = %+v", findings[0])
+	}
+	if findings[1].ID != "F2" {
+		t.Fatalf("model-chosen id survived: %+v", findings[1])
+	}
+	if findings[0].Confidence != "high" || findings[0].Uncertainty != "Not run." {
+		t.Fatalf("hedge dropped: %+v", findings[0])
+	}
+}
+
+// The structured half must reach the event stream, because that is what the
+// local CLI stores and what survives after the Job and its logs are gone.
+func TestEventStreamCarriesStructuredFindings(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(t.TempDir(), "prompt.md")
+	writeTestFile(t, prompt, "review this")
+	t.Setenv("BOSUN_EVENTS", "1")
+	t.Setenv("BOSUN_RUN_ID", "run")
+	t.Setenv("BOSUN_LOCAL_PATH", repo)
+	t.Setenv("BOSUN_REPO", "everydaydevopsio/bosun")
+	t.Setenv("BOSUN_REF", "refs/heads/main")
+
+	var events, out bytes.Buffer
+	w := Worker{PromptPath: prompt, Events: &events, Output: &out, Agent: func(context.Context, string, string, string, time.Duration) (string, error) {
+		return "Summary.\n\n```json\n" +
+			`{"findings":[{"path":"a.go","line":3,"severity":"high","title":"T","confidence":"high"}]}` +
+			"\n```", nil
+	}}
+	if err := w.Run(context.Background(), config.Config{ReviewProvider: "codex-bosun", ReviewTimeoutSeconds: 60}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var structured, result string
+	decoder := json.NewDecoder(&events)
+	for decoder.More() {
+		var e progress.Event
+		if err := decoder.Decode(&e); err != nil {
+			t.Fatal(err)
+		}
+		switch e.Type {
+		case "findings":
+			structured = e.Message
+		case "result":
+			result = e.Message
+		}
+	}
+	if structured == "" {
+		t.Fatal("no findings event emitted")
+	}
+	var parsed Result
+	if err := json.Unmarshal([]byte(structured), &parsed); err != nil {
+		t.Fatalf("findings event is not the structured result: %v", err)
+	}
+	if parsed.SchemaVersion != ResultSchemaVersion || len(parsed.Findings) != 1 || parsed.Findings[0].ID != "F1" {
+		t.Fatalf("payload = %+v", parsed)
+	}
+	if strings.Contains(result, "```json") {
+		t.Fatalf("contract block duplicated into the human result: %q", result)
+	}
+}
+
+// A clean review has to survive the whole path -- prompt contract, worker,
+// event stream -- as a clean review. If the empty block is lost anywhere, it
+// arrives as "the reviewer reported nothing readable", which is a different
+// claim about a different review.
+func TestEventStreamReportsACleanReviewAsClean(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(t.TempDir(), "prompt.md")
+	writeTestFile(t, prompt, "review this")
+	t.Setenv("BOSUN_EVENTS", "1")
+	t.Setenv("BOSUN_RUN_ID", "run")
+	t.Setenv("BOSUN_LOCAL_PATH", repo)
+	t.Setenv("BOSUN_REPO", "everydaydevopsio/bosun")
+	t.Setenv("BOSUN_REF", "refs/heads/main")
+
+	var events, out bytes.Buffer
+	w := Worker{PromptPath: prompt, Events: &events, Output: &out, Agent: func(context.Context, string, string, string, time.Duration) (string, error) {
+		return "No material findings.\n\n```json\n{\"findings\":[]}\n```", nil
+	}}
+	if err := w.Run(context.Background(), config.Config{ReviewProvider: "codex-bosun", ReviewTimeoutSeconds: 60}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	found := false
+	decoder := json.NewDecoder(&events)
+	for decoder.More() {
+		var e progress.Event
+		if err := decoder.Decode(&e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Type != "findings" {
+			continue
+		}
+		found = true
+		var parsed Result
+		if err := json.Unmarshal([]byte(e.Message), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if len(parsed.Findings) != 0 {
+			t.Fatalf("clean review carried findings: %+v", parsed)
+		}
+	}
+	if !found {
+		t.Fatal("a clean review emitted no findings event, so it cannot be told apart from an unreported one")
+	}
+}
+
+// The prompt is half of the contract: if it tells the reviewer to omit the
+// block when it finds nothing, every clean review arrives unreadable.
+func TestPromptRequiresAnEmptyBlockForACleanReview(t *testing.T) {
+	prompt, err := os.ReadFile(filepath.Join("..", "..", "prompts", "code-review.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prompt), `{"findings":[]}`) {
+		t.Fatal("the prompt does not require an empty findings block for a clean review")
+	}
+}
+
+// A review that honoured the contract and found nothing is not the same as one
+// that ignored it, and the event stream has to preserve the difference.
+func TestStructuredResultDistinguishesCleanFromUnreported(t *testing.T) {
+	if got := StructuredResult("Summary.\n\n```json\n{\"findings\":[]}\n```"); got == "" {
+		t.Fatal("a clean review reported nothing structured")
+	} else if !strings.Contains(got, `"findings":[]`) {
+		t.Fatalf("payload = %q", got)
+	}
+	if got := StructuredResult("Summary with no contract block."); got != "" {
+		t.Fatalf("invented a clean review: %q", got)
+	}
+	if got := StructuredResult("S.\n\n```json\n{not json\n```"); got != "" {
+		t.Fatalf("invented a clean review from a malformed block: %q", got)
 	}
 }

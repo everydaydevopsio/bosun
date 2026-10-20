@@ -844,3 +844,68 @@ image, which reads like a Bosun release number and ages the same way.
 - Follow-up: ballast's `github-pr-review-cycle` polls `issues/comments` to
   decide a review has settled and must also poll `pulls/{n}/reviews`, or it
   will time out against the new surface. Not tracked yet.
+
+# Task: Make a completed review structured and revision-aware
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-21
+- Mode: Autonomous
+- Requirement IDs: [issue #37](https://github.com/everydaydevopsio/bosun/issues/37)
+
+## Scope
+- In scope: durable structured findings, revision provenance, the
+  `review-result` command, `--against-ref` comparison, skill and CLI docs.
+- Out of scope: the compact polling interface (#36) this should eventually feed,
+  cross-pass campaigns (#42), and fork base resolution (#34).
+
+## Acceptance Criteria
+- AC1: A completed review is retrievable as one JSON document with outcome,
+  reviewed head, merge base, structured findings, and the original Markdown,
+  after Kubernetes logs expire. ✅
+- AC2: A finding has a stable ID, severity, path, line range, remediation,
+  confidence, and stated uncertainty; no-findings and not-reported are
+  distinct. ✅
+- AC3: Human output leads with a header and retains the full report. ✅
+- AC4: Comparing against a local ref warns when it differs, without claiming a
+  finding was fixed or re-running anything. ✅
+- AC5: Unreadable structured output falls back to the Markdown with a
+  diagnostic. ✅
+
+## Constraints
+- Records written before provenance existed must report `unknown`, never a SHA
+  parsed out of the report text.
+- The structured payload is stored verbatim, so a later schema change cannot
+  silently rewrite history.
+
+## Risks and Tradeoffs
+- Tradeoff: findings travel as a new `findings` event rather than inside the
+  result text, so the human result stays readable and the structured half stays
+  machine-readable. Cost is one more event type for consumers to ignore.
+
+## Execution Checklist
+- [x] Stable finding IDs, confidence, and uncertainty in the contract.
+- [x] `StructuredResult` plus the `findings` event; monitor persists it.
+- [x] Revision provenance recorded at submit time.
+- [x] `bosun review-result` with `--json`, `--summary`, `--against-ref`.
+- [x] Skill bumped to version 2 with triage guidance; CLI docs updated.
+
+## Test Strategy
+- Unit: parser IDs and hedge fields; `StructuredResult` across its three cases.
+- Integration: event stream carries the payload; `review-result` over stored
+  records for findings, clean, unstructured, unreadable, and failed reviews.
+- Failure-path tests: moved branch, unresolvable ref, reviewed commit absent,
+  records predating provenance, dirty-review caveat.
+- Requirement-to-test mapping: `internal/localreview/result_test.go`,
+  `internal/review/findings_test.go`.
+
+## Rollback Strategy
+- Trigger: the new event or command misreports a review.
+- Rollback steps: revert the branch; stored records remain readable because the
+  added fields are optional.
+- Validation after rollback: `make test`.
+
+## Outcome
+- Result: delivery steps 1 and 2 of the issue complete. Step 3, feeding the
+  structured result into the compact status interface, waits on #36.
+- Evidence links/commands: `make test`, `make lint`.

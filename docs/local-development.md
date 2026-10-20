@@ -309,6 +309,8 @@ bosun review "$PWD" --provider codex-bosun --timeout 20m
 bosun review "$PWD" --json
 bosun review "$PWD" --detach
 bosun review-status <job-name> --follow
+bosun review-result <job-name> --json
+bosun review-result <job-name> --summary --against-ref HEAD
 ```
 
 Without `--branch`, the snapshot includes the current commit and staged,
@@ -385,7 +387,23 @@ Run metadata and completed results are stored privately in
 `$XDG_STATE_HOME/bosun` (default `~/.local/state/bosun`), overridable with
 `BOSUN_STATE_DIR`. Worker event journals beside snapshots preserve detached-run
 results even after Kubernetes logs expire. Invoke `review-status` to collect a
-detached result. Snapshots are removed only after pod termination is confirmed;
+detached result, and `review-result` to read a completed one.
+
+`review-result` prints a header naming the outcome, the reviewed commit, the
+base and merge base, and whether the review read uncommitted changes, followed
+by each finding with a stable ID, and then the full report. `--summary` keeps
+the header and finding titles and drops the report; `--json` emits a versioned
+document for an agent to triage without parsing prose. `findings_reported:
+false` distinguishes a reviewer that emitted no machine-readable findings from
+one that found none — they have the same empty list and mean opposite things.
+
+`--against-ref REF` compares the reviewed commit with a ref in this checkout
+and says plainly when they differ: "This review covers 0ac3791; HEAD is
+1df570c. Changes after 0ac3791 were not reviewed." It never claims a finding
+was fixed, and never fetches or re-runs anything. When either commit is not
+available locally it declines to compare rather than guessing. Reviews
+submitted before Bosun recorded provenance report `unknown` instead of a commit
+parsed out of the report text. Snapshots are removed only after pod termination is confirmed;
 if cleanup cannot be confirmed, the path is retained for inspection.
 
 Ctrl-C in `bosun review` cancels its job and waits for pod termination before
