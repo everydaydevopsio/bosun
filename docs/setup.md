@@ -121,6 +121,33 @@ kubectl -n bosun logs job/REVIEW_JOB_NAME
 
 Open a test PR and leave `@bridgectl review`. The resulting review appears as a pull-request review headed **Bosun code review**, with one inline comment per finding anchored to the diff. A review whose findings cannot be anchored arrives as a conversation comment under the same heading, and a failed review as one headed **Bosun code review failed**.
 
+### Identify Bosun's output
+
+Bosun publishes under the identity it authenticated with: a GitHub App
+installation publishes as `<app-slug>[bot]` -- `bosun-reviewer[bot]` for an App
+slugged `bosun-reviewer` -- while the `GITHUB_TOKEN` fallback publishes as that
+token's user. The slug is chosen when the App is registered, so the login
+differs per installation and is not a constant any consumer can hardcode.
+
+Read the exact login from a review this installation has already published:
+
+```bash
+OWNER_REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+gh api "repos/$OWNER_REPO/pulls/$PR_NUMBER/reviews" \
+  --jq '.[] | select(.body | startswith("## Bosun code review")) | .user.login'
+gh api "repos/$OWNER_REPO/issues/$PR_NUMBER/comments" \
+  --jq '.[] | select(.body | startswith("## Bosun code review")) | .user.login'
+```
+
+Both surfaces are worth querying: findings publish as a review, while a review
+with nothing anchorable to the diff and every failure publish as a conversation
+comment.
+
+Select Bosun's output by the marker lines -- `## Bosun code review` and
+`## Bosun code review failed` -- which are stable across installations. Use the
+login to tell Bosun apart from other bots on a busy pull request, not as the
+primary filter.
+
 Branch-created reviews have no PR thread to post to, so their initial output is retained in the Job log. A production follow-up should publish these as GitHub Checks and attach the full review there.
 
 ## Security notes

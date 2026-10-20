@@ -197,7 +197,7 @@ this; only the real-PR smoke test depends on it.
 - [x] `docs/github-app.md`: delete "What this does not do yet"; state that
       reviews are published as PR reviews with inline comments
 - [x] `README.md`: rewrite the "Current scope" paragraph
-- [~] `docs/setup.md`: output contract documented; the bot login waits on Phase 0
+- [x] `docs/setup.md`: document the output contract and the bot login
 - [x] `PRD.md`: add the review-surface and failure-visibility requirements with
       acceptance criteria, per this repo's existing PRD convention
 
