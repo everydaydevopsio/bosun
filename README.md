@@ -9,25 +9,28 @@ Bosun is an event-driven AI code-review controller built on [orchael/bridgectl](
 
 It replaces the hosted-reviewer shape with infrastructure you control:
 
-```text
-developer / AI agent
-        |
-        | push branch or "@bridgectl review"
-        v
-      GitHub
-        |
-        | signed webhook
-        v
-  Bosun webhook service
-        |
-        | create Kubernetes Job
-        v
- disposable reviewer pod
-   | clone exact ref/SHA
-   | bridgectl run --no-tty
-   | configured AI provider
-   v
- GitHub PR review comment
+```mermaid
+flowchart TD
+    dev["developer / AI agent"]
+
+    subgraph gh["GitHub"]
+        repo["repository"]
+        review["PR review comment"]
+    end
+
+    subgraph k8s["your Kubernetes cluster"]
+        hook["Bosun webhook service"]
+
+        subgraph pod["disposable reviewer pod"]
+            direction TB
+            clone["clone the exact ref/SHA"] --> run["bridgectl run<br/>--no-tty"] --> ai["configured AI provider"]
+        end
+    end
+
+    dev -->|"push branch or @bridgectl review"| repo
+    repo -->|"signed webhook"| hook
+    hook -->|"create Kubernetes Job"| clone
+    ai -->|"post findings"| review
 ```
 
 ## Triggers
@@ -57,6 +60,31 @@ machine's provider sign-in into the cluster's `bosun-ai` Secret, and runs the
 review. Later runs reuse all of it. `bosun down` removes the cluster and its
 snapshots; `bosun up --local-credentials` prepares a cluster ahead of time or
 refreshes credentials after you re-authenticate.
+
+What that one command does, end to end:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor you as you
+    participant cli as bosun CLI
+    participant kind as Kind cluster
+    participant pod as reviewer pod
+
+    you->>cli: bosun review ~/src/project --local-credentials
+    Note over cli,kind: first run only — create the cluster, the bosun<br/>namespace, and the host snapshot mount at /repos
+    cli->>kind: copy this machine's provider sign-in into the bosun-ai Secret
+    cli->>kind: write a Git snapshot of the checkout into the mounted /repos
+    Note right of cli: commits, staged, unstaged and<br/>untracked files, excluding .env
+    cli->>kind: create a one-shot reviewer Job
+    kind->>pod: start the pod with that snapshot mounted
+    pod->>pod: bridgectl run --no-tty
+    pod-->>cli: review on stdout, progress on stderr
+    cli-->>you: print the review, then remove the snapshot
+```
+
+Nothing leaves your machine except the prompt and diff your chosen AI provider
+receives. The reviewed repository never needs to exist on GitHub.
 
 `--local-credentials` looks for an already-exported variable
 (`OPENAI_API_KEY`, `CODEX_AUTH`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
@@ -114,14 +142,62 @@ make cli    # ./bin/bosun, version-stamped from git describe
 make install
 ```
 
+### Update the CLI (macOS and Linux)
+
+Bosun is distributed as a Homebrew cask, so the same two commands update it on
+either platform:
+
+```bash
+brew update                   # refresh the everydaydevopsio/bosun tap
+brew upgrade --cask bosun
+bosun version                 # confirm the new version
+```
+
+`brew update` is the step that matters. `brew upgrade` compares the installed
+version against the tap clone on your machine, so a stale clone reports nothing
+to do even when a newer release exists — which is what you see if
+`HOMEBREW_NO_AUTO_UPDATE=1` is set in your environment. Check what your clone
+currently offers with:
+
+```bash
+brew info everydaydevopsio/bosun/bosun
+```
+
+If that version trails the
+[latest release](https://github.com/everydaydevopsio/bosun/releases), run
+`brew update` and try again.
+
+After upgrading, reinstall the review skill so your coding agents pick up the
+instructions that shipped with the new binary:
+
+```bash
+bosun init --force
+```
+
+Plain `bosun init` leaves an existing skill alone when it differs from the one
+the binary ships, on the assumption the difference is a local edit, so an
+upgrade needs `--force` to take effect.
+
+Installs from a release archive or `make install` are not managed by Homebrew;
+re-download or rebuild those. The controller is versioned and upgraded
+separately — see [Controller (Kubernetes)](#controller-kubernetes).
+
 ### Controller (Kubernetes)
 
 ```bash
 helm install bosun oci://ghcr.io/everydaydevopsio/charts/bosun --version <version>
 ```
 
+Upgrade an existing install the same way, with the new chart version:
+
+```bash
+helm upgrade bosun oci://ghcr.io/everydaydevopsio/charts/bosun --version <version>
+```
+
 The chart's `image.tag` defaults to its `appVersion`, so it always pulls the image
 it was released with. No `latest` tag is published — pin a version or a digest.
+The CLI and the chart are released from the same tag but upgrade independently;
+updating one does not update the other.
 
 For an end-to-end path from nothing to reviews on your pull requests, including
 what it costs each month:
