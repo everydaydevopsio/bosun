@@ -9,25 +9,28 @@ Bosun is an event-driven AI code-review controller built on [orchael/bridgectl](
 
 It replaces the hosted-reviewer shape with infrastructure you control:
 
-```text
-developer / AI agent
-        |
-        | push branch or "@bridgectl review"
-        v
-      GitHub
-        |
-        | signed webhook
-        v
-  Bosun webhook service
-        |
-        | create Kubernetes Job
-        v
- disposable reviewer pod
-   | clone exact ref/SHA
-   | bridgectl run --no-tty
-   | configured AI provider
-   v
- GitHub PR review comment
+```mermaid
+flowchart TD
+    dev["developer / AI agent"]
+
+    subgraph gh["GitHub"]
+        repo["repository"]
+        review["PR review comment"]
+    end
+
+    subgraph k8s["your Kubernetes cluster"]
+        hook["Bosun webhook service"]
+
+        subgraph pod["disposable reviewer pod"]
+            direction TB
+            clone["clone the exact ref/SHA"] --> run["bridgectl run<br/>--no-tty"] --> ai["configured AI provider"]
+        end
+    end
+
+    dev -->|"push branch or @bridgectl review"| repo
+    repo -->|"signed webhook"| hook
+    hook -->|"create Kubernetes Job"| clone
+    ai -->|"post findings"| review
 ```
 
 ## Triggers
@@ -57,6 +60,31 @@ machine's provider sign-in into the cluster's `bosun-ai` Secret, and runs the
 review. Later runs reuse all of it. `bosun down` removes the cluster and its
 snapshots; `bosun up --local-credentials` prepares a cluster ahead of time or
 refreshes credentials after you re-authenticate.
+
+What that one command does, end to end:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor you as you
+    participant cli as bosun CLI
+    participant kind as Kind cluster
+    participant pod as reviewer pod
+
+    you->>cli: bosun review ~/src/project --local-credentials
+    Note over cli,kind: first run only — create the cluster, the bosun<br/>namespace, and the host snapshot mount at /repos
+    cli->>kind: copy this machine's provider sign-in into the bosun-ai Secret
+    cli->>kind: write a Git snapshot of the checkout into the mounted /repos
+    Note right of cli: commits, staged, unstaged and<br/>untracked files, excluding .env
+    cli->>kind: create a one-shot reviewer Job
+    kind->>pod: start the pod with that snapshot mounted
+    pod->>pod: bridgectl run --no-tty
+    pod-->>cli: review on stdout, progress on stderr
+    cli-->>you: print the review, then remove the snapshot
+```
+
+Nothing leaves your machine except the prompt and diff your chosen AI provider
+receives. The reviewed repository never needs to exist on GitHub.
 
 `--local-credentials` looks for an already-exported variable
 (`OPENAI_API_KEY`, `CODEX_AUTH`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
