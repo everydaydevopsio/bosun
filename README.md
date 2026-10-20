@@ -114,14 +114,62 @@ make cli    # ./bin/bosun, version-stamped from git describe
 make install
 ```
 
+### Update the CLI (macOS and Linux)
+
+Bosun is distributed as a Homebrew cask, so the same two commands update it on
+either platform:
+
+```bash
+brew update                   # refresh the everydaydevopsio/bosun tap
+brew upgrade --cask bosun
+bosun version                 # confirm the new version
+```
+
+`brew update` is the step that matters. `brew upgrade` compares the installed
+version against the tap clone on your machine, so a stale clone reports nothing
+to do even when a newer release exists — which is what you see if
+`HOMEBREW_NO_AUTO_UPDATE=1` is set in your environment. Check what your clone
+currently offers with:
+
+```bash
+brew info everydaydevopsio/bosun/bosun
+```
+
+If that version trails the
+[latest release](https://github.com/everydaydevopsio/bosun/releases), run
+`brew update` and try again.
+
+After upgrading, reinstall the review skill so your coding agents pick up the
+instructions that shipped with the new binary:
+
+```bash
+bosun init --force
+```
+
+Plain `bosun init` leaves an existing skill alone when it differs from the one
+the binary ships, on the assumption the difference is a local edit, so an
+upgrade needs `--force` to take effect.
+
+Installs from a release archive or `make install` are not managed by Homebrew;
+re-download or rebuild those. The controller is versioned and upgraded
+separately — see [Controller (Kubernetes)](#controller-kubernetes).
+
 ### Controller (Kubernetes)
 
 ```bash
 helm install bosun oci://ghcr.io/everydaydevopsio/charts/bosun --version <version>
 ```
 
+Upgrade an existing install the same way, with the new chart version:
+
+```bash
+helm upgrade bosun oci://ghcr.io/everydaydevopsio/charts/bosun --version <version>
+```
+
 The chart's `image.tag` defaults to its `appVersion`, so it always pulls the image
 it was released with. No `latest` tag is published — pin a version or a digest.
+The CLI and the chart are released from the same tag but upgrade independently;
+updating one does not update the other.
 
 For an end-to-end path from nothing to reviews on your pull requests, including
 what it costs each month:
