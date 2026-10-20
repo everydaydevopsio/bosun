@@ -1,6 +1,6 @@
 # Publish Bosun findings as a real GitHub pull-request review
 
-Status: proposed
+Status: in progress (Phases 1 and 4 landed on `issue-28-failure-comment`)
 Created: 2026-09-30
 Observed branch: `codex/go-migration-foundation` (f43d54e)
 Consumer: `everydaydevopsio/ballast` skill `github-pr-copilot-cycle`
@@ -143,11 +143,11 @@ this; only the real-PR smoke test depends on it.
 
 ### Phase 1 — Commit correlation (small, independently useful)
 
-- [ ] Change `postReview` to take the reviewed ref and SHA and emit the
+- [x] Change `postReview` to take the reviewed ref and SHA and emit the
       `<sub>` metadata line
-- [ ] Thread `req.Ref` / `req.SHA` from the `runner.go` call site — both are
+- [x] Thread `req.Ref` / `req.SHA` from the `runner.go` call site — both are
       already resolved there, after `cloneRepository` returns the concrete SHA
-- [ ] Test: published body contains the resolved SHA, not the empty-string or
+- [x] Test: published body contains the resolved SHA, not the empty-string or
       `pr-N` placeholder form
 
 ### Phase 2 — Structured findings
@@ -181,13 +181,12 @@ this; only the real-PR smoke test depends on it.
 
 ### Phase 4 — Failure visibility
 
-- [ ] On terminal error with `PRNumber > 0` and a usable token, publish the
+- [x] On terminal error with `PRNumber > 0` and a usable token, publish the
       failure comment from the redacted `safeError` text
-- [ ] Do not let a failed publish mask the original error; log and return the
+- [x] Do not let a failed publish mask the original error; log and return the
       review error
-- [ ] Test: provider failure produces exactly one failure comment, containing
-      no credential material (extend the existing
-      `TestGitHubFailureDoesNotEchoResponseSecrets` pattern)
+- [x] Test: clone failure produces exactly one failure comment, containing no
+      credential material (`TestHostedFailurePublishesExactlyOneFailureComment`)
 - [ ] Decide whether capacity rejection (503 at
       `BOSUN_MAX_CONCURRENT_REVIEWS`) should also surface on the PR. It is
       raised in the controller, before any Job exists, so it is a separate code

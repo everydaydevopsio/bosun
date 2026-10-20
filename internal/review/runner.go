@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -121,6 +122,27 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	workspace := os.Getenv("BOSUN_LOCAL_PATH")
 	local := workspace != ""
 	var token string
+	published := false
+	// Registered before the redaction defer so it runs after it: defers unwind
+	// in reverse, and this comment must carry the sanitized text rather than
+	// the raw error, which can quote credentials.
+	defer func() {
+		// published guards the one-terminal-publication invariant: a review
+		// that landed must not be contradicted by a failure comment when a
+		// later step, such as writing the output stream, fails.
+		if result == nil || published || local || req.PRNumber <= 0 || token == "" {
+			return
+		}
+		// A timed-out review has an already-cancelled context, and that is
+		// exactly the failure a consumer most needs to see, so the comment
+		// gets its own deadline.
+		publish, stop := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer stop()
+		if err := github.postFailure(publish, req.Repo, req.PRNumber, token, req.Ref, req.SHA, result.Error()); err != nil {
+			// Never mask the review failure with the failure of reporting it.
+			slog.Warn("publish review failure comment", "repo", req.Repo, "pr", req.PRNumber, "error", sanitize(redact(err.Error(), token)))
+		}
+	}()
 	defer func() {
 		if result != nil {
 			result = safeError{text: sanitize(redact(result.Error(), token)), cause: result}
@@ -146,10 +168,14 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 			return fail(StageSetup, err)
 		}
 		defer os.RemoveAll(workspace)
-		req.SHA, err = cloneRepository(ctx, w.CloneBaseURL, workspace, req, token)
+		// Assign only on success: a failed clone returns an empty SHA, and
+		// overwriting the commit the webhook supplied would leave the failure
+		// comment unable to name what it tried to review.
+		cloned, err := cloneRepository(ctx, w.CloneBaseURL, workspace, req, token)
 		if err != nil {
 			return fail(StageClone, err)
 		}
+		req.SHA = cloned
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
 		return failf(StageSetup, "review path is not a git repository: %w", err)
@@ -185,9 +211,10 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	output = withoutMarker(output)
 	if !local && req.PRNumber > 0 {
 		reporter.Emit("stage", "publishing")
-		if err := github.postReview(ctx, req.Repo, req.PRNumber, token, output); err != nil {
+		if err := github.postReview(ctx, req.Repo, req.PRNumber, token, req.Ref, req.SHA, output); err != nil {
 			return failf(StagePublish, "publish review: %w", err)
 		}
+		published = true
 	}
 	if reporter != nil {
 		reporter.Emit("result", output)
