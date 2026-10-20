@@ -217,6 +217,11 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		published = true
 	}
 	if reporter != nil {
+		// The structured half goes out before the result so a consumer that
+		// stops at the first terminal event still has the findings.
+		if structured := StructuredResult(output); structured != "" {
+			reporter.Emit("findings", structured)
+		}
 		reporter.Emit("result", humanReview(output))
 		reporter.Emit("completed", "Review completed")
 		return nil

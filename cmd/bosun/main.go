@@ -26,6 +26,7 @@ import (
 
 const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]
        bosun review-status JOB [--follow]
+       bosun review-result JOB [--json] [--summary] [--against-ref REF]
        bosun init [--target claude,codex] [--force] [--print]
        bosun up [--local-credentials] [--cluster NAME]
        bosun down [--keep-snapshots] [--cluster NAME]
@@ -147,7 +148,7 @@ func main() {
 		switch os.Args[1] {
 		case "init":
 			os.Exit(runInit(os.Args[2:], os.Stdout, os.Stderr))
-		case "review", "review-status", "up", "down", "reset", "doctor":
+		case "review", "review-status", "review-result", "up", "down", "reset", "doctor":
 			os.Exit(localreview.Run(ctx, os.Args[1], os.Args[2:], os.Stdout, os.Stderr))
 		case "serve", "reviewer":
 			if len(os.Args) > 2 {

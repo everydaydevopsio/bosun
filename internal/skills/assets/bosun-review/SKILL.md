@@ -11,7 +11,7 @@ description: >
 
 # Bosun code review
 
-<!-- bosun-skill-version: 1 -->
+<!-- bosun-skill-version: 2 -->
 
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
@@ -240,6 +240,31 @@ When it completes, read the review:
 ```bash
 bosun review-status "$JOB"
 ```
+
+To triage it, read the structured result rather than parsing the report:
+
+```bash
+bosun review-result "$JOB" --json
+```
+
+It names the commit and merge base that were reviewed, and carries one entry
+per finding with a stable `id`, `severity`, `path`, `line`/`end_line`,
+`remediation`, and the reviewer's own `confidence` and `uncertainty`. Quote the
+`id` when you say which finding you acted on.
+
+`findings_reported: false` means the reviewer did not emit machine-readable
+findings — not that it found nothing. The Markdown report is authoritative
+there, and an empty `findings` list in that case proves nothing.
+
+Before reusing a result from an earlier session, check that it still describes
+this checkout:
+
+```bash
+bosun review-result "$JOB" --against-ref HEAD
+```
+
+A branch that has moved is reported plainly, naming both commits. It never
+claims a finding was fixed; only reading the code tells you that.
 
 ## What the reviewer is
 
