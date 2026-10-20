@@ -789,3 +789,58 @@ image, which reads like a Bosun release number and ages the same way.
   comment); both were reproduced with tests and fixed.
 - Evidence links/commands: `make test`, `make lint`;
   job `review-bosun-issue-28-failure-comment-67498b0536`.
+
+# Task: Publish findings as a real pull-request review
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-10-21
+- Mode: Autonomous
+- Requirement IDs: [issue #53](https://github.com/everydaydevopsio/bosun/issues/53), PRD GO-4
+- Plan: `plans/pr-review-surface.md` (Phases 2, 3 and 5)
+
+## Scope
+- In scope: the findings output contract, its parser, publishing a review with
+  inline comments, the diff filter, the 422 fallback, docs and PRD.
+- Out of scope: linking repeated passes into one campaign (#42), capacity
+  rejections raised before a Job exists, Checks API output, registering the
+  GitHub App (Phase 0).
+
+## Acceptance Criteria
+- Anchorable findings become inline review comments on the reviewed commit. ✅
+- A finding that cannot be anchored is published as text, never dropped. ✅
+- A review rejected for an invalid position republishes body-only. ✅
+- Output with no findings block still publishes. ✅
+
+## Execution Checklist
+- [x] Output contract in `prompts/code-review.md`, before the status line.
+- [x] `parseFindings`: last fenced block, validation, bounds, severity order,
+      absence tolerated.
+- [x] Reviews API publication with `commit_id`, `prFiles` filtering, folded
+      findings, and the 422 retry.
+- [x] Render findings as text for the terminal and progress events.
+- [x] Docs: `README.md`, `docs/setup.md`, `docs/github-app.md`, `PRD.md`.
+
+## Test Strategy
+- Unit: parser table tests (well-formed, absent, malformed, unrelated block,
+  invalid entries, bounds, ordering).
+- Integration: review payload shape, outside-the-diff folding, 422 fallback,
+  repeated rejection, comment fallback, unavailable file list, local rendering.
+- Failure-path tests: five of the seven publication tests are failure paths.
+- Requirement-to-test mapping: `internal/review/findings_test.go`,
+  `internal/review/review_publication_test.go`.
+
+## Rollback Strategy
+- Trigger: reviews are rejected in production, or anchors land on wrong lines.
+- Rollback steps: revert the branch; published reviews are inert history.
+- Validation after rollback: `make test` plus one real pull-request review.
+
+## Outcome
+- Result: complete. Bosun 0.1.6 reviewed the change and found one high-severity
+  defect -- a missing `commit_id` letting a mid-review push reanchor findings;
+  reproduced with assertions on both payloads, then fixed.
+- Evidence links/commands: `make test`, `make lint`;
+  job `review-bosun-issue-53-pull-request-review-4d09f1fd78`.
+- Follow-up: ballast's `github-pr-review-cycle` polls `issues/comments` to
+  decide a review has settled and must also poll `pulls/{n}/reviews`, or it
+  will time out against the new surface. Not tracked yet.

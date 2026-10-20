@@ -26,6 +26,25 @@ When `bosun up` checks a local review provider, it must inspect the selected
 credential in the Kind Secret. With `--local-credentials`, it must confirm a
 headless provider request succeeds before copying the local credential.
 
+## GO-4: Publish findings where they can be acted on
+
+A hosted review with a pull-request number must end in exactly one terminal
+publication: a review, or a failure comment. Never both, never neither.
+
+Findings must be published as a pull-request review with one inline comment per
+finding anchored to the diff, so replies and thread resolution work without a
+consumer reconstructing state from prose. Findings that cannot be anchored --
+no machine-readable findings block, a path outside the diff, or a position
+GitHub rejects -- must still be published as text rather than lost.
+
+Every publication must name the ref and commit it reviewed, so a consumer can
+correlate output to a push rather than to a timestamp.
+
+A terminal failure must be published to the pull request with a redacted
+reason naming the stage that failed, and must be distinguishable from a review
+by its marker line. Marker lines are a public interface; changing one is a
+breaking change for consuming agents.
+
 ## GO-3: Replace the Python runtime
 
 The production image, controller, reviewer, protobuf bindings, and automated
@@ -45,3 +64,6 @@ review` remain the supported operator interface.
    build or runtime image.
 5. A rollback consists of deploying the preceding image/chart revision; the
    public configuration and Kubernetes object names are unchanged.
+6. A pull-request review publishes inline comments for anchorable findings,
+   falls back to a body-only publication when GitHub rejects a position, and
+   publishes a failure comment when the review does not complete.
