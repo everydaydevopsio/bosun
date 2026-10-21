@@ -13,6 +13,27 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.0] - 2026-10-21
+
+This release improves how Bosun reports review results, publishes findings, and communicates failures.
+
+### Highlights
+
+- **Structured, revision-aware results:** Completed reviews now use a structured format and track the revision reviewed. (#57)
+- **Native pull-request reviews:** Bosun now publishes findings as a GitHub pull-request review. (#55)
+
+### Fixes
+
+- **Visible review failures:** Bosun now comments on the pull request when a review fails, making unsuccessful runs easier to spot. (#54)
+
+### Changes
+
+- Clarified which identity Bosun uses when publishing to GitHub. (#56)
+- Added instructions for updating the Bosun CLI through Homebrew. (#49)
+- Replaced the ASCII architecture diagram with Mermaid and added a diagram of the local-run workflow. (#49)
+
+**Full changelog:** `v0.1.6...v0.2.0`
+
 ## [0.1.6] - 2026-10-19
 
 ### Highlights
