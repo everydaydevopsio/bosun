@@ -20,6 +20,22 @@ allowed_paths:
   - /repos
   - /tmp/bosun-review
 
+# `--sandbox danger-full-access` is deliberate, and only safe because of where
+# this runs. Codex's read-only sandbox is bubblewrap, which needs to create a
+# mount namespace; the reviewer Job drops every capability, forbids privilege
+# escalation, and runs as UID 1001, so bwrap fails at startup with
+# "Failed to make / slave: Permission denied" and no files are ever read.
+#
+# The Job is the sandbox. It is disposable, holds a token scoped to the single
+# repository under review that expires within the hour, reaches the network
+# only through the chart's NetworkPolicy (DNS and outbound 443, nothing inside
+# the cluster), and has no Kubernetes API access. Running bwrap inside that is
+# a boundary within a boundary; the outer one is the one that holds.
+#
+# This applies to the hosted path only. internal/localreview/provider_probe.go
+# keeps --sandbox read-only because it runs on a developer's own machine, where
+# bwrap works and the surrounding isolation does not exist.
+
 providers:
   codex-bosun:
     binary: "sh"
@@ -27,7 +43,7 @@ providers:
       - "-c"
       # Codex reads piped stdin even with a positional prompt. bridgectl keeps
       # its input pipe open, so use /dev/null for this argument-only provider.
-      - 'CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}" exec node /app/node_modules/@openai/codex/bin/codex.js exec --skip-git-repo-check --color never --sandbox read-only "$@" </dev/null'
+      - 'CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}" exec node /app/node_modules/@openai/codex/bin/codex.js exec --skip-git-repo-check --color never --sandbox danger-full-access "$@" </dev/null'
       - "codex-bosun"
     startup_timeout: "120s"
     validate_startup: false
