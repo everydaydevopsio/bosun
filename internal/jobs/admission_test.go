@@ -94,7 +94,10 @@ func TestRepositoryLabelIsBoundedAndUnique(t *testing.T) {
 	cfg := config.Config{ReviewTimeoutSeconds: 60}
 	a := "Org/" + strings.Repeat("Long_Repository.", 20)
 	b := a + "different"
-	job := build(cfg, review.Request{Repo: a, Ref: "feature"}, "test")
+	job, err := build(cfg, review.Request{Repo: a, Ref: "feature"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	label := job.Spec.Template.Labels["bosun/repository"]
 	if errs := validation.IsValidLabelValue(label); len(errs) > 0 {
 		t.Fatal(errs)

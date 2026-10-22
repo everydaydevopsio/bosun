@@ -65,7 +65,10 @@ func SubmitAuthenticated(ctx context.Context, client kubernetes.Interface, cfg c
 		}
 
 		secretName := name + "-github"
-		job := build(cfg, req, name)
+		job, err := build(cfg, req, name)
+		if err != nil {
+			return "", err
+		}
 		useJobToken(job, secretName)
 		job.Spec.Suspend = ptr(true)
 		created, err := client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})

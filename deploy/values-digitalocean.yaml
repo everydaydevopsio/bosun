@@ -18,10 +18,20 @@ replicaCount: 1
 
 review:
   provider: codex-bosun
-  # One at a time. The reviewer Job has no resource limits of its own yet, and
-  # on a single node a second concurrent review competes with the controller
-  # for the same memory. Raise this only after moving to a larger node.
+  # One at a time, as a spend control rather than a safety one. Reviewer Jobs
+  # now carry requests, so the scheduler will only place a second review where
+  # it actually fits; what this bounds is how much model budget a busy
+  # repository can spend at once.
   maxConcurrent: 1
+  # Inherited from the chart unless you have measured otherwise. See
+  # docs/self-hosted-digitalocean.md for how the defaults were derived.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
   timeoutSeconds: 1800
   ttlSecondsAfterFinished: 3600
   # Who may spend model credits with "@bridgectl review".

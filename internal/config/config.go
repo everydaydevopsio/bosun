@@ -19,6 +19,17 @@ type Config struct {
 	ReviewCommand        string
 	AllowedAssociations  map[string]bool
 	WebhookSecret        string
+	// ReviewResources is the resources block given to reviewer Jobs. An empty
+	// quantity string omits that entry, so an operator can drop a limit
+	// without having to drop the request with it.
+	ReviewResources ReviewResources
+}
+
+// ReviewResources carries the reviewer Job's requests and limits as the
+// quantity strings the chart renders, parsed at Job build time so a malformed
+// value fails the submission it belongs to rather than controller startup.
+type ReviewResources struct {
+	CPURequest, MemoryRequest, CPULimit, MemoryLimit string
 }
 
 func Load() Config {
@@ -29,6 +40,12 @@ func Load() Config {
 		MaxConcurrentReviews: envInt("BOSUN_MAX_CONCURRENT_REVIEWS", 3), RunAsUser: int64(envInt("BOSUN_RUN_AS_USER", 1001)),
 		ReviewCommand: strings.ToLower(env("BOSUN_REVIEW_COMMAND", "@bridgectl review")), AllowedAssociations: associations(env("BOSUN_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER,COLLABORATOR")),
 		WebhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET"),
+		ReviewResources: ReviewResources{
+			CPURequest:    os.Getenv("BOSUN_REVIEW_CPU_REQUEST"),
+			MemoryRequest: os.Getenv("BOSUN_REVIEW_MEMORY_REQUEST"),
+			CPULimit:      os.Getenv("BOSUN_REVIEW_CPU_LIMIT"),
+			MemoryLimit:   os.Getenv("BOSUN_REVIEW_MEMORY_LIMIT"),
+		},
 	}
 }
 

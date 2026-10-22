@@ -29,10 +29,10 @@ repository may cost less per month than the cluster; a busy one will cost more.
 Nothing in this guide caps it — `review.maxConcurrent` limits concurrency, not
 spend.
 
-A `s-1vcpu-2gb` node at $12 halves the cluster bill and is a false economy: the
-reviewer image unpacks to well over a gigabyte, the agent is a Node process, and
-reviewer Jobs have no memory limits of their own yet. On 2 GB the reviewer and
-the controller compete, and the controller is what loses.
+A `s-1vcpu-2gb` node at $12 halves the cluster bill and is a false economy. The
+reviewer image unpacks to well over a gigabyte of disk, and a measured review
+asks for 512Mi of memory by default. Add the controller and the node's own
+system pods and 2 GB leaves no room for the burst a larger diff brings.
 
 Prices: [DigitalOcean Kubernetes pricing](https://www.digitalocean.com/pricing/kubernetes).
 
@@ -214,6 +214,35 @@ repository owner, member, or collaborator:
 kubectl -n bosun get jobs,pods -w
 ```
 
+## Reviewer resources
+
+Reviewer Jobs carry requests and limits from `review.resources`:
+
+```yaml
+review:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+```
+
+The requests are what the scheduler reads. They are the reason a second
+concurrent review is placed only where it fits, rather than landing on a node
+that cannot hold it.
+
+The defaults come from a measured review, not a guess: a 14-file diff on a
+DOKS node peaked at **217m CPU and 223Mi**, sampled at metrics-server's 15s
+interval. Memory is set to roughly twice that peak because the sampling
+interval can miss a short spike and larger diffs cost more. Measure your own
+worst case before changing them:
+
+```bash
+kubectl -n bosun top pod --containers | grep review-
+```
+
+`review.maxConcurrent` now bounds spend rather than protecting the node, since
+the scheduler can see what a reviewer needs. Raising it above 1 is a question
+of model budget and node capacity, not of whether the controller survives.
+
 ## Operating it
 
 - **Logs**: `kubectl -n bosun logs deployment/bosun-bosun`. Failures name which
@@ -243,10 +272,9 @@ choice for anything beyond a personal experiment.
 
 ## Known limits
 
-- **Reviewer Jobs have no CPU or memory limits.** On a single node a runaway
-  review can starve the controller. `review.maxConcurrent: 1` in the supplied
-  values is the mitigation available today. Tracked in
-  [#29](https://github.com/everydaydevopsio/bosun/issues/29).
+- **A review that exceeds its memory limit is OOM-killed and reported as a
+  provider failure**, without saying memory was the cause. Raise
+  `review.resources.limits.memory` if reviews fail on large diffs.
 - **A failed review tells the pull request nothing** — the failure lands in the
   Job, not on GitHub. Tracked in
   [#28](https://github.com/everydaydevopsio/bosun/issues/28).
