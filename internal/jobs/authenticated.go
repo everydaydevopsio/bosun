@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -98,8 +99,11 @@ func SubmitAuthenticated(ctx context.Context, client kubernetes.Interface, cfg c
 			return release(fmt.Errorf("store repository token: %w", err))
 		}
 
-		created.Spec.Suspend = ptr(false)
-		if _, err := client.BatchV1().Jobs(cfg.Namespace).Update(ctx, created, metav1.UpdateOptions{}); err != nil {
+		// Patch rather than Update: the job controller writes
+		// status.conditions[Suspended] as soon as the suspended Job exists,
+		// which bumps its resourceVersion, so an Update carrying the object
+		// Create returned is already stale and conflicts every time.
+		if _, err := client.BatchV1().Jobs(cfg.Namespace).Patch(ctx, created.Name, types.StrategicMergePatchType, []byte(`{"spec":{"suspend":false}}`), metav1.PatchOptions{}); err != nil {
 			return release(fmt.Errorf("start review: %w", err))
 		}
 		return name, nil
