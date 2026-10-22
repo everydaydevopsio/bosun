@@ -8,10 +8,13 @@ rules:
     verbs: ["create", "get", "update"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    # update releases a Job that was created suspended, once its credential
-    # Secret exists; delete removes one whose credential could not be stored,
-    # so a failed submission does not hold a concurrency slot forever.
-    verbs: ["create", "get", "list", "watch", "update", "delete"]
+    # patch releases a Job that was created suspended, once its credential
+    # Secret exists. It is patch rather than update because the job controller
+    # writes status.conditions[Suspended] the moment the Job exists, so an
+    # update carrying the object Create returned is already stale. delete
+    # removes a Job whose credential could not be stored, so a failed
+    # submission does not hold a concurrency slot forever.
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
   - apiGroups: [""]
     resources: ["secrets"]
     # The controller creates one short-lived, repository-scoped token Secret per
