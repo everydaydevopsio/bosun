@@ -13,6 +13,23 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.3] - 2026-10-22
+
+### Highlights
+
+- Reviewer Jobs now support resource requests and limits, giving you control over their resource allocation. (#60)
+
+### Fixes
+
+- Review findings now use a transport-safe marker to prevent them from being lost during delivery. (#61)
+- Invalid resource quantities are now rejected rather than silently ignored. (#60)
+
+### Changes
+
+- Added tests to catch environment variable naming mismatches between the Helm chart and application configuration. (#60)
+
+**Full changelog:** [v0.2.2...v0.2.3](../../compare/v0.2.2...v0.2.3)
+
 ## [0.2.2] - 2026-10-22
 
 ### Highlights
