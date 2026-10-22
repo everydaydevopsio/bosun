@@ -13,6 +13,19 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.1] - 2026-10-22
+
+### Highlights
+- Fixed reviewer Job startup when the controller has already modified the Job.
+
+### Fixes
+- Resolved a conflict when unsuspending reviewer Jobs, allowing them to start after controller updates. (#58)
+
+### Changes
+- Added server test coverage for the response returned when a submission fails.
+
+**Full changelog:** `v0.2.0...v0.2.1`
+
 ## [0.2.0] - 2026-10-21
 
 This release improves how Bosun reports review results, publishes findings, and communicates failures.
