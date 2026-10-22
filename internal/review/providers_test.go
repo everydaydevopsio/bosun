@@ -103,3 +103,51 @@ func TestHostedWorkspaceUsesDedicatedRoot(t *testing.T) {
 		t.Fatalf("hosted workspace %q is outside %q", workspace, HostedWorkspaceRoot)
 	}
 }
+
+// Codex's read-only and workspace-write sandboxes are bubblewrap, which needs
+// to create a mount namespace. The reviewer Job drops every capability,
+// forbids privilege escalation and runs as UID 1001, so bwrap aborts at
+// startup and the review reads nothing at all:
+//
+//	bwrap: Failed to make / slave: Permission denied
+//
+// The isolation the hosted path relies on is the Job itself -- disposable, a
+// repository-scoped token that expires within the hour, egress limited to DNS
+// and 443 by the chart's NetworkPolicy, no Kubernetes API access. This test
+// exists so that reinstating a bwrap-backed mode is a deliberate act with a
+// failing test attached, rather than a plausible-looking hardening tweak.
+func TestHostedCodexProviderDoesNotRelyOnBubblewrap(t *testing.T) {
+	data, err := os.ReadFile("../../config/bridge-bosun.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Providers map[string]struct {
+			Args []string `json:"args"`
+		}
+	}
+	if err = yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	command := strings.Join(cfg.Providers["codex-bosun"].Args, " ")
+	for _, bwrapBacked := range []string{"--sandbox read-only", "--sandbox workspace-write"} {
+		if strings.Contains(command, bwrapBacked) {
+			t.Errorf("codex-bosun uses %q, which bubblewrap backs and the reviewer Job cannot run", bwrapBacked)
+		}
+	}
+	if !strings.Contains(command, "--sandbox danger-full-access") {
+		t.Error("codex-bosun must select a sandbox mode explicitly; the default is bwrap-backed")
+	}
+}
+
+// The local probe runs on a developer's own machine, where bwrap works and the
+// Job's isolation does not exist. It must keep its sandbox.
+func TestLocalProviderProbeKeepsItsSandbox(t *testing.T) {
+	data, err := os.ReadFile("../localreview/provider_probe.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"--sandbox", "read-only"`) {
+		t.Error("the local credential probe must stay sandboxed; only the hosted path drops bwrap")
+	}
+}
