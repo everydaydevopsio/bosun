@@ -1,16 +1,23 @@
 package jobs
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/review"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestWorkerReceivesItsImageReferenceForSetupDiagnostics(t *testing.T) {
 	image := "ghcr.io/everydaydevopsio/bosun@sha256:example"
-	job := build(config.Config{ReviewImage: image, ReviewTimeoutSeconds: 60}, review.Request{Repo: "acme/widget"}, "review-test")
+	job, err := build(config.Config{ReviewImage: image, ReviewTimeoutSeconds: 60}, review.Request{Repo: "acme/widget"}, "review-test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, variable := range job.Spec.Template.Spec.Containers[0].Env {
 		if variable.Name == "BOSUN_WORKER_IMAGE" {
 			if variable.Value != image {
@@ -41,8 +48,11 @@ func TestReviewerJobCarriesResources(t *testing.T) {
 			CPURequest: "250m", MemoryRequest: "512Mi", CPULimit: "1", MemoryLimit: "1Gi",
 		},
 	}
-	got := build(cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "job").
-		Spec.Template.Spec.Containers[0].Resources
+	job, err := build(cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := job.Spec.Template.Spec.Containers[0].Resources
 
 	for _, c := range []struct {
 		list corev1.ResourceList
@@ -72,8 +82,11 @@ func TestReviewerJobResourcesOmitEmptyEntries(t *testing.T) {
 		Namespace: "bosun", ReviewImage: "img", RunAsUser: 1001, ReviewTimeoutSeconds: 1800,
 		ReviewResources: config.ReviewResources{CPURequest: "100m", MemoryRequest: "256Mi"},
 	}
-	got := build(cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "job").
-		Spec.Template.Spec.Containers[0].Resources
+	job, err := build(cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := job.Spec.Template.Spec.Containers[0].Resources
 	if len(got.Requests) != 2 {
 		t.Errorf("requests = %v, want cpu and memory", got.Requests)
 	}
@@ -81,28 +94,60 @@ func TestReviewerJobResourcesOmitEmptyEntries(t *testing.T) {
 		t.Errorf("limits = %v, want none", got.Limits)
 	}
 
-	none := build(config.Config{Namespace: "bosun", ReviewImage: "img", RunAsUser: 1001, ReviewTimeoutSeconds: 1800},
-		review.Request{Repo: "owner/repo", Ref: "main"}, "job").
-		Spec.Template.Spec.Containers[0].Resources
+	unset, err := build(config.Config{Namespace: "bosun", ReviewImage: "img", RunAsUser: 1001, ReviewTimeoutSeconds: 1800},
+		review.Request{Repo: "owner/repo", Ref: "main"}, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	none := unset.Spec.Template.Spec.Containers[0].Resources
 	if len(none.Requests) != 0 || len(none.Limits) != 0 {
 		t.Errorf("unset config produced %v / %v, want an empty block", none.Requests, none.Limits)
 	}
 }
 
-// A misspelt quantity drops that one entry rather than failing the review.
-// Refusing to review because a limit has a typo trades a degraded review for
-// no review at all.
-func TestReviewerJobResourcesSkipUnparseableQuantities(t *testing.T) {
+// A misspelt quantity is refused rather than dropped. Dropping it would leave
+// a Job with no limit where the operator configured one -- the unbounded
+// reviewer this feature exists to prevent -- and do it silently, so the
+// protection reads as configured while being absent.
+func TestReviewerJobResourcesRejectUnparseableQuantities(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		res   config.ReviewResources
+		field string
+	}{
+		{"memory limit", config.ReviewResources{CPURequest: "250m", MemoryLimit: "1GiB"}, "review.resources.limits.memory"},
+		{"cpu request", config.ReviewResources{CPURequest: "half a core"}, "review.resources.requests.cpu"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Config{Namespace: "bosun", ReviewImage: "img", RunAsUser: 1001, ReviewTimeoutSeconds: 1800, ReviewResources: tc.res}
+			job, err := build(cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "job")
+			if err == nil {
+				t.Fatal("an unparseable quantity was accepted")
+			}
+			if job != nil {
+				t.Error("a Job was built despite the error")
+			}
+			// The operator has to know which value to fix.
+			if !strings.Contains(err.Error(), tc.field) {
+				t.Errorf("error %q does not name the field", err)
+			}
+		})
+	}
+}
+
+// A submission must not reach Kubernetes when the configuration is invalid.
+func TestSubmitRefusesInvalidResourceConfiguration(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
 	cfg := config.Config{
 		Namespace: "bosun", ReviewImage: "img", RunAsUser: 1001, ReviewTimeoutSeconds: 1800,
-		ReviewResources: config.ReviewResources{CPURequest: "250m", MemoryRequest: "512 megabytes"},
+		MaxConcurrentReviews: 3, ReviewResources: config.ReviewResources{MemoryRequest: "512 megabytes"},
 	}
-	got := build(cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "job").
-		Spec.Template.Spec.Containers[0].Resources
-	if _, ok := got.Requests[corev1.ResourceCPU]; !ok {
-		t.Error("a bad memory value discarded the valid cpu request")
+	if _, err := Submit(ctx, client, cfg, review.Request{Repo: "owner/repo", Ref: "main"}, "d"); err == nil {
+		t.Fatal("expected a refusal")
 	}
-	if _, ok := got.Requests[corev1.ResourceMemory]; ok {
-		t.Error("an unparseable memory value was accepted")
+	jobs, _ := client.BatchV1().Jobs("bosun").List(ctx, metav1.ListOptions{})
+	if len(jobs.Items) != 0 {
+		t.Errorf("a Job was created despite invalid resource configuration: %d", len(jobs.Items))
 	}
 }

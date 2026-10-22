@@ -93,7 +93,10 @@ func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.C
 	if n >= cfg.MaxConcurrentReviews {
 		return "", CapacityError{n, cfg.MaxConcurrentReviews}
 	}
-	job := build(cfg, req, name)
+	job, err := build(cfg, req, name)
+	if err != nil {
+		return "", err
+	}
 	_, err = client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		return "", ExistsError{name}
@@ -137,39 +140,45 @@ const startupAllowanceSeconds = 120
 // fits on the node and the kubelet has no basis to evict the reviewer ahead of
 // the controller that launched it.
 //
-// A value that does not parse is dropped rather than failing the submission.
-// The alternative is refusing to review because a limit is misspelt, which
-// trades a degraded review for no review at all; the Job still runs, just
-// without that one entry.
-func reviewResources(r config.ReviewResources) corev1.ResourceRequirements {
+// A non-empty value that does not parse is an error rather than a skip.
+// Dropping it would leave a Job with no limit where the operator configured
+// one -- the unbounded reviewer this exists to prevent -- and do it silently,
+// so the protection appears configured while being absent. An empty string
+// remains the explicit opt-out.
+func reviewResources(r config.ReviewResources) (corev1.ResourceRequirements, error) {
 	out := corev1.ResourceRequirements{}
 	for _, e := range []struct {
+		field string
 		value string
 		name  corev1.ResourceName
 		into  *corev1.ResourceList
 	}{
-		{r.CPURequest, corev1.ResourceCPU, &out.Requests},
-		{r.MemoryRequest, corev1.ResourceMemory, &out.Requests},
-		{r.CPULimit, corev1.ResourceCPU, &out.Limits},
-		{r.MemoryLimit, corev1.ResourceMemory, &out.Limits},
+		{"review.resources.requests.cpu", r.CPURequest, corev1.ResourceCPU, &out.Requests},
+		{"review.resources.requests.memory", r.MemoryRequest, corev1.ResourceMemory, &out.Requests},
+		{"review.resources.limits.cpu", r.CPULimit, corev1.ResourceCPU, &out.Limits},
+		{"review.resources.limits.memory", r.MemoryLimit, corev1.ResourceMemory, &out.Limits},
 	} {
 		if e.value == "" {
 			continue
 		}
 		quantity, err := resource.ParseQuantity(e.value)
 		if err != nil {
-			continue
+			return corev1.ResourceRequirements{}, fmt.Errorf("%s is not a valid Kubernetes quantity: %q", e.field, e.value)
 		}
 		if *e.into == nil {
 			*e.into = corev1.ResourceList{}
 		}
 		(*e.into)[e.name] = quantity
 	}
-	return out
+	return out, nil
 }
 
-func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
+func build(cfg config.Config, req review.Request, name string) (*batchv1.Job, error) {
 	deadline := cfg.ReviewTimeoutSeconds + startupAllowanceSeconds
+	resources, err := reviewResources(cfg.ReviewResources)
+	if err != nil {
+		return nil, err
+	}
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"app.kubernetes.io/managed-by": "bosun"}, Annotations: map[string]string{"bosun/repository": req.Repo}},
 		Spec: batchv1.JobSpec{
@@ -179,11 +188,11 @@ func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
 				Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: ptr(false), Containers: []corev1.Container{{
 					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: append(env(cfg, req), corev1.EnvVar{Name: "BOSUN_WORKER_IMAGE", Value: cfg.ReviewImage}),
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), RunAsNonRoot: ptr(true), RunAsUser: &cfg.RunAsUser, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
-					Resources:       reviewResources(cfg.ReviewResources),
+					Resources:       resources,
 				}}},
 			},
 		},
-	}
+	}, nil
 }
 
 // SubmitLocal shares admission and credential construction with hosted reviews.
@@ -197,7 +206,10 @@ func SubmitLocal(ctx context.Context, client kubernetes.Interface, cfg config.Co
 			return "", CapacityError{n, cfg.MaxConcurrentReviews}
 		}
 		name := Name(req.Repo, req.Ref, snapshot)
-		job := build(cfg, req, name)
+		job, err := build(cfg, req, name)
+		if err != nil {
+			return "", err
+		}
 		job.Labels["bosun/local"] = "true"
 		job.Annotations["bosun/snapshot"] = snapshot
 		pod := &job.Spec.Template.Spec
