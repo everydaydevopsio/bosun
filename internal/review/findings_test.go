@@ -296,3 +296,65 @@ func TestStructuredResultDistinguishesCleanFromUnreported(t *testing.T) {
 		t.Fatalf("invented a clean review from a malformed block: %q", got)
 	}
 }
+
+// The transport between the provider and the publisher consumes any output
+// line that parses as JSON, so the contract payload travels behind a marker.
+// Measured against the shipped image: a provider printing BEFORE, then
+// {"findings":[]}, then AFTER delivers "BEFOREAFTER".
+func TestParseReviewReadsTheMarkerLine(t *testing.T) {
+	output := strings.Join([]string{
+		"Reviewed commit `abc` against merge base `def`.",
+		"- **High — Something** (`a.go:1`). It breaks.",
+		`BOSUN-FINDINGS {"findings":[{"path":"a.go","line":1,"severity":"high","title":"Something","body":"It breaks."}]}`,
+		"BOSUN-REVIEW: complete",
+	}, "\n")
+
+	summary, findings, reported, _ := parseReview(output)
+	if !reported {
+		t.Fatal("the marker line was not recognised as the contract payload")
+	}
+	if len(findings) != 1 || findings[0].Path != "a.go" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	if strings.Contains(summary, "BOSUN-FINDINGS") {
+		t.Errorf("the payload leaked into the human summary:\n%s", summary)
+	}
+	if !strings.Contains(summary, "It breaks.") || !strings.Contains(summary, "BOSUN-REVIEW: complete") {
+		t.Errorf("summary lost prose around the payload:\n%s", summary)
+	}
+}
+
+// An empty findings list from the marker is a clean review, and must stay
+// distinguishable from a reviewer that emitted no payload at all.
+func TestParseReviewMarkerDistinguishesCleanFromSilent(t *testing.T) {
+	_, findings, reported, _ := parseReview("All good.\n" + `BOSUN-FINDINGS {"findings":[]}`)
+	if !reported {
+		t.Error("an explicit empty payload should count as reporting")
+	}
+	if len(findings) != 0 {
+		t.Errorf("findings = %+v", findings)
+	}
+
+	if _, _, silent, _ := parseReview("All good, trust me."); silent {
+		t.Error("prose with no payload must not count as reporting")
+	}
+}
+
+// The word appearing mid-sentence -- a reviewer quoting the contract back, or
+// this repository's own prompt being reviewed -- is not the payload.
+func TestParseReviewIgnoresTheMarkerInsideProse(t *testing.T) {
+	output := "The prompt tells the model to emit BOSUN-FINDINGS {\"findings\":[]} on its own line."
+	if _, _, reported, _ := parseReview(output); reported {
+		t.Error("a mid-line mention was treated as the contract payload")
+	}
+}
+
+// Transcripts and adapters that never passed through the line filter still
+// carry a fenced block, and must keep parsing.
+func TestParseReviewStillAcceptsTheFencedBlock(t *testing.T) {
+	output := "Summary.\n\n```json\n{\"findings\":[{\"path\":\"b.go\",\"line\":2,\"severity\":\"low\",\"title\":\"T\",\"body\":\"B\"}]}\n```\n"
+	_, findings, reported, _ := parseReview(output)
+	if !reported || len(findings) != 1 || findings[0].Path != "b.go" {
+		t.Fatalf("fenced fallback broke: reported=%v findings=%+v", reported, findings)
+	}
+}

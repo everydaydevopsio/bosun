@@ -64,7 +64,7 @@ func parseFindings(output string) (string, []Finding) {
 // reader is told the Markdown is authoritative rather than shown an empty
 // findings list.
 func parseReview(output string) (string, []Finding, bool, string) {
-	start, end, inner := lastJSONBlock(output)
+	start, end, inner := findingsPayload(output)
 	if inner == "" {
 		return output, nil, false, ""
 	}
@@ -180,6 +180,57 @@ func truncate(text string, limit int) string {
 // lastJSONBlock locates the final fenced json block, which is where the output
 // contract puts the findings. Taking the last one lets a review quote JSON in
 // its prose without the quote being mistaken for the contract.
+// FindingsMarker introduces the contract payload. It exists because a fenced
+// block alone does not survive the trip.
+//
+// bridgectl providers with stream_json: true are read a line at a time, and
+// any line that parses as JSON is consumed as a stream event rather than
+// forwarded as output. The fences reach us; the one line between them does
+// not. Measured against the shipped image: a provider printing
+//
+//	BEFORE / {"findings":[]} / AFTER
+//
+// delivers "BEFOREAFTER". Indenting does not help -- the line is trimmed
+// before the check -- so the payload has to begin with something that is not
+// JSON. A reviewer that found nothing therefore looked identical to one that
+// ignored the contract, and every review published as a conversation comment
+// because no finding could be anchored.
+const FindingsMarker = "BOSUN-FINDINGS"
+
+// findingsPayload locates the contract payload and the span to cut from the
+// summary. The marker form is what providers emit today; the fenced form is
+// still accepted because an adapter that does not go through the line filter
+// has no reason to have changed, and an old transcript should still parse.
+func findingsPayload(output string) (int, int, string) {
+	if start, end, inner := markerLine(output); inner != "" {
+		return start, end, inner
+	}
+	return lastJSONBlock(output)
+}
+
+func markerLine(output string) (int, int, string) {
+	start := strings.LastIndex(output, FindingsMarker)
+	if start < 0 {
+		return 0, 0, ""
+	}
+	// Only at the start of a line, so the word appearing in prose -- or in
+	// this file's own documentation, quoted back by a reviewer -- is not
+	// mistaken for the payload.
+	if start > 0 && output[start-1] != '\n' {
+		return 0, 0, ""
+	}
+	rest := output[start+len(FindingsMarker):]
+	end := strings.IndexByte(rest, '\n')
+	if end < 0 {
+		end = len(rest)
+	}
+	inner := strings.TrimSpace(rest[:end])
+	if inner == "" {
+		return 0, 0, ""
+	}
+	return start, start + len(FindingsMarker) + end, inner
+}
+
 func lastJSONBlock(output string) (int, int, string) {
 	const fence = "```json"
 	start := strings.LastIndex(output, fence)
