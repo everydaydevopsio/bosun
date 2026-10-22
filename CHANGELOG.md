@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.2] - 2026-10-22
+
+### Highlights
+- Completed the hosted review workflow by addressing job-patching permissions and Codex sandbox support. (#59)
+
+### Fixes
+- Corrected RBAC permissions to allow hosted review jobs to be patched.
+
+### Changes
+- Updated Codex sandbox handling to support the complete hosted review path.
+
 ## [0.2.1] - 2026-10-22
 
 ### Highlights
