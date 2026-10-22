@@ -19,6 +19,25 @@ review:
   maxConcurrent: 3
   # How long one review may run. The Job deadline is derived from this.
   timeoutSeconds: 1800
+  # Resources for the reviewer Job. Requests are the half that matters: with
+  # none, the reviewer is BestEffort, the scheduler cannot tell whether a
+  # second concurrent review fits, and maxConcurrent is the only thing between
+  # a busy repository and an overcommitted node.
+  #
+  # Measured on a 14-file diff against a DOKS node: 217m CPU and 223Mi peak,
+  # sampled at the 15s metrics-server interval. The defaults below carry
+  # roughly 2x headroom on memory for larger diffs, and a CPU limit that lets
+  # a review burst without starving the controller that launched it. Measure
+  # your own worst case before raising them.
+  #
+  # Set any entry to "" to omit it.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 logging:
   # text (slog-style key=value) or json

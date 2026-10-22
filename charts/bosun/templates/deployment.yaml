@@ -39,6 +39,14 @@ spec:
               value: {{ .Values.review.ttlSecondsAfterFinished | quote }}
             - name: BOSUN_RUN_AS_USER
               value: {{ .Values.securityContext.runAsUser | quote }}
+            - name: BOSUN_REVIEW_CPU_REQUEST
+              value: {{ .Values.review.resources.requests.cpu | default "" | quote }}
+            - name: BOSUN_REVIEW_MEMORY_REQUEST
+              value: {{ .Values.review.resources.requests.memory | default "" | quote }}
+            - name: BOSUN_REVIEW_CPU_LIMIT
+              value: {{ .Values.review.resources.limits.cpu | default "" | quote }}
+            - name: BOSUN_REVIEW_MEMORY_LIMIT
+              value: {{ .Values.review.resources.limits.memory | default "" | quote }}
             - name: BOSUN_ALLOWED_ASSOCIATIONS
               value: {{ .Values.review.allowedAssociations | quote }}
             - name: BOSUN_MAX_CONCURRENT_REVIEWS

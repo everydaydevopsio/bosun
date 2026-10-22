@@ -14,6 +14,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -130,6 +131,43 @@ func env(cfg config.Config, req review.Request) []corev1.EnvVar {
 // credential has to outlive the whole window, not just the review.
 const startupAllowanceSeconds = 120
 
+// reviewResources turns the chart's quantity strings into the Job's resources
+// block. Requests are the half that matters: without them the reviewer is
+// BestEffort, so the scheduler cannot tell whether a second concurrent review
+// fits on the node and the kubelet has no basis to evict the reviewer ahead of
+// the controller that launched it.
+//
+// A value that does not parse is dropped rather than failing the submission.
+// The alternative is refusing to review because a limit is misspelt, which
+// trades a degraded review for no review at all; the Job still runs, just
+// without that one entry.
+func reviewResources(r config.ReviewResources) corev1.ResourceRequirements {
+	out := corev1.ResourceRequirements{}
+	for _, e := range []struct {
+		value string
+		name  corev1.ResourceName
+		into  *corev1.ResourceList
+	}{
+		{r.CPURequest, corev1.ResourceCPU, &out.Requests},
+		{r.MemoryRequest, corev1.ResourceMemory, &out.Requests},
+		{r.CPULimit, corev1.ResourceCPU, &out.Limits},
+		{r.MemoryLimit, corev1.ResourceMemory, &out.Limits},
+	} {
+		if e.value == "" {
+			continue
+		}
+		quantity, err := resource.ParseQuantity(e.value)
+		if err != nil {
+			continue
+		}
+		if *e.into == nil {
+			*e.into = corev1.ResourceList{}
+		}
+		(*e.into)[e.name] = quantity
+	}
+	return out
+}
+
 func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
 	deadline := cfg.ReviewTimeoutSeconds + startupAllowanceSeconds
 	return &batchv1.Job{
@@ -141,6 +179,7 @@ func build(cfg config.Config, req review.Request, name string) *batchv1.Job {
 				Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: ptr(false), Containers: []corev1.Container{{
 					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: append(env(cfg, req), corev1.EnvVar{Name: "BOSUN_WORKER_IMAGE", Value: cfg.ReviewImage}),
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), RunAsNonRoot: ptr(true), RunAsUser: &cfg.RunAsUser, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
+					Resources:       reviewResources(cfg.ReviewResources),
 				}}},
 			},
 		},
