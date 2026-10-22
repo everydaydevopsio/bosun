@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
@@ -60,6 +61,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				jsonResponse(w, http.StatusOK, map[string]any{"accepted": true, "duplicate": true})
 				return
 			}
+			// The response stays generic so a webhook caller learns nothing
+			// about the cluster, but the operator needs the actual reason:
+			// without this every submission failure looks identical in the
+			// logs, whatever caused it.
+			slog.Error("could not create review job", "logger", "bosun.server",
+				"repo", req.Repo, "ref", req.Ref, "trigger", req.Trigger, "error", err)
 			http.Error(w, "could not create review job", http.StatusInternalServerError)
 		}
 		return

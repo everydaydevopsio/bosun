@@ -9,8 +9,13 @@ import (
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/review"
+	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func authConfig() config.Config {
@@ -141,5 +146,61 @@ func TestSubmitStillUsesTheSharedSecret(t *testing.T) {
 	}
 	if !found {
 		t.Error("the shared-secret path changed")
+	}
+}
+
+// The Job is created suspended so the Secret can own it, then unsuspended.
+// Between those two calls the real job controller writes
+// status.conditions[Suspended], which bumps the object's resourceVersion --
+// so an Update carrying the object returned by Create is stale and conflicts.
+//
+// fake.NewSimpleClientset runs no controller and does not enforce
+// resourceVersion on update, which is why this went unnoticed: in the hosted
+// path it is not a race that is sometimes lost, it is lost every time.
+func TestSubmitAuthenticatedStartsAJobTheControllerHasAlreadyTouched(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	cfg := authConfig()
+
+	// Hand the caller the Create-time resourceVersion while the stored object
+	// moves on, exactly as the job controller's status write does.
+	client.PrependReactor("create", "jobs", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		returned := a.(k8stesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		returned.ResourceVersion = "1"
+		stored := returned.DeepCopy()
+		stored.Namespace = a.GetNamespace()
+		stored.ResourceVersion = "2"
+		stored.Status.Conditions = []batchv1.JobCondition{{Type: "Suspended", Status: "True", Reason: "JobSuspended"}}
+		if err := client.Tracker().Add(stored); err != nil {
+			return true, nil, err
+		}
+		return true, returned, nil
+	})
+	client.PrependReactor("update", "jobs", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		in := a.(k8stesting.UpdateAction).GetObject().(*batchv1.Job)
+		current, err := client.Tracker().Get(batchv1.SchemeGroupVersion.WithResource("jobs"), cfg.Namespace, in.Name)
+		if err != nil {
+			return true, nil, err
+		}
+		if in.ResourceVersion != current.(*batchv1.Job).ResourceVersion {
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "batch", Resource: "jobs"}, in.Name,
+				errors.New("the object has been modified; please apply your changes to the latest version and try again"))
+		}
+		return false, nil, nil
+	})
+
+	req := review.Request{Repo: "owner/repo", Ref: "refs/heads/main", SHA: "a", PRNumber: 7}
+	name, err := SubmitAuthenticated(ctx, client, cfg, req, "delivery-conflict", issuer("ghs_scoped", time.Hour))
+	if err != nil {
+		t.Fatalf("submission failed against a Job the controller had touched: %v", err)
+	}
+
+	job, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("the Job was deleted instead of started: %v", err)
+	}
+	if job.Spec.Suspend != nil && *job.Spec.Suspend {
+		t.Error("the Job was left suspended; it would never run")
 	}
 }
