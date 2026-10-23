@@ -113,7 +113,7 @@ kubectl -n bosun logs -l app.kubernetes.io/name=bosun-review --tail=50
 A working App logs the mint before the clone:
 
 ```
-level=INFO msg="minted installation token" logger=bosun.githubapp repo="acme/widget" installation=4242 expires="..."
+level=INFO msg="minted installation token" repo=acme/widget installation=4242 expires_at=...
 ```
 
 If the App is not installed on the repository you get a clear error rather than
@@ -126,7 +126,7 @@ the GitHub App is not installed on acme/widget
 And if the PAT fallback is still present, Bosun says so instead of failing:
 
 ```
-level=WARNING msg="falling back to GITHUB_TOKEN" logger=bosun.githubapp repo="acme/widget" reason="..."
+level=WARN msg="GitHub App authentication failed; falling back to GITHUB_TOKEN" repo=acme/widget reason=...
 ```
 
 Once reviews post cleanly, delete the `token` key to complete the migration:

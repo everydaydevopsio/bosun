@@ -131,13 +131,40 @@ func (g githubClient) token(ctx context.Context, repo string) (string, error) {
 		if fallback == "" {
 			return "", err
 		}
-		slog.Warn("GitHub App authentication failed; falling back to GITHUB_TOKEN")
+		slog.Warn("GitHub App authentication failed; falling back to GITHUB_TOKEN", "repo", repo, "reason", err)
 	}
 	if fallback == "" {
 		return "", fmt.Errorf("GitHub reviews require GITHUB_TOKEN or GitHub App credentials")
 	}
 	return fallback, nil
 }
+
+// lookupInstallation resolves the installation covering repo.
+//
+// A 404 here means one specific thing: the App authenticated, and is not
+// installed on that repository. It is the most common way a correctly
+// configured deployment still fails, and returning the transport error
+// unchanged makes it indistinguishable from any other 404 -- a wrong owner, a
+// renamed repository, a revoked key. Observed on a real deployment: the
+// webhook returned HTTP 500 and diagnosing it meant minting an App JWT by
+// hand to replay this one call.
+func (g githubClient) lookupInstallation(ctx context.Context, repo, bearer string) (int64, error) {
+	var installation struct {
+		ID int64 `json:"id"`
+	}
+	if err := g.request(ctx, "GET", "/repos/"+repo+"/installation", bearer, nil, &installation); err != nil {
+		var status httpError
+		if errors.As(err, &status) && status.status == http.StatusNotFound {
+			return 0, fmt.Errorf("the GitHub App is not installed on %s", repo)
+		}
+		return 0, err
+	}
+	if installation.ID <= 0 {
+		return 0, fmt.Errorf("GitHub returned an invalid installation ID")
+	}
+	return installation.ID, nil
+}
+
 func (g githubClient) installationToken(ctx context.Context, repo, id, key string) (string, error) {
 	if id == "" || key == "" {
 		return "", fmt.Errorf("GitHub App ID and private key are both required")
@@ -146,27 +173,22 @@ func (g githubClient) installationToken(ctx context.Context, repo, id, key strin
 	if err != nil {
 		return "", err
 	}
-	var installation struct {
-		ID int64 `json:"id"`
-	}
-	if err = g.request(ctx, "GET", "/repos/"+repo+"/installation", bearer, nil, &installation); err != nil {
+	installationID, err := g.lookupInstallation(ctx, repo, bearer)
+	if err != nil {
 		return "", err
-	}
-	if installation.ID <= 0 {
-		return "", fmt.Errorf("GitHub returned an invalid installation ID")
 	}
 	var response struct {
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
 	body := map[string]any{"repositories": []string{strings.Split(repo, "/")[1]}, "permissions": map[string]string{"contents": "read", "pull_requests": "write"}}
-	if err = g.request(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", installation.ID), bearer, body, &response); err != nil {
+	if err = g.request(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", installationID), bearer, body, &response); err != nil {
 		return "", err
 	}
 	if response.Token == "" {
 		return "", fmt.Errorf("GitHub returned an empty installation token")
 	}
-	slog.Info("minted installation token", "repo", repo, "installation", installation.ID, "expires_at", response.ExpiresAt)
+	slog.Info("minted installation token", "repo", repo, "installation", installationID, "expires_at", response.ExpiresAt)
 	return response.Token, nil
 }
 
@@ -199,21 +221,16 @@ func IssueRepositoryToken(ctx context.Context, apiBaseURL string, client *http.C
 	if err != nil {
 		return RepositoryToken{}, err
 	}
-	var installation struct {
-		ID int64 `json:"id"`
-	}
-	if err = g.request(ctx, "GET", "/repos/"+repo+"/installation", bearer, nil, &installation); err != nil {
+	installationID, err := g.lookupInstallation(ctx, repo, bearer)
+	if err != nil {
 		return RepositoryToken{}, err
-	}
-	if installation.ID <= 0 {
-		return RepositoryToken{}, fmt.Errorf("GitHub returned an invalid installation ID")
 	}
 	var response struct {
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
 	body := map[string]any{"repositories": []string{strings.Split(repo, "/")[1]}, "permissions": map[string]string{"contents": "read", "pull_requests": "write"}}
-	if err = g.request(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", installation.ID), bearer, body, &response); err != nil {
+	if err = g.request(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", installationID), bearer, body, &response); err != nil {
 		return RepositoryToken{}, err
 	}
 	if response.Token == "" {
