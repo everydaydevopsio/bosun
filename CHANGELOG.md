@@ -13,6 +13,20 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.4] - 2026-10-24
+
+### Highlights
+This release improves review handling for draft pull requests and clarifies feedback when a required GitHub App is not installed.
+
+### Fixes
+- Skip draft pull requests during review processing. (#67)
+- Identify the missing GitHub App when reporting that it is not installed. (#64)
+
+### Changes
+- Align documentation with the app-installation behavior. (#64)
+
+**Full changelog:** [v0.2.3...v0.2.4](../../compare/v0.2.3...v0.2.4)
+
 ## [0.2.3] - 2026-10-22
 
 ### Highlights
