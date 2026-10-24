@@ -37,6 +37,8 @@ flowchart TD
 
 Bosun accepts branch creation, selected pull-request lifecycle events, and `@bridgectl review` comments on pull requests. A human, CI automation, or another AI agent can request a review without receiving the model credential.
 
+Draft pull requests do not trigger automatic reviews; marking one ready for review does. An explicit `@bridgectl review` comment still works on a draft.
+
 Comment triggers are restricted to the author associations in `review.allowedAssociations` (`OWNER,MEMBER,COLLABORATOR` by default), and comments from bots are ignored so a review cannot trigger itself.
 
 ## Why bridgectl
