@@ -19,7 +19,8 @@ func FromWebhook(event string, payload json.RawMessage, command string, allowed 
 			FullName string `json:"full_name"`
 		} `json:"repository"`
 		PullRequest struct {
-			Number int `json:"number"`
+			Number int  `json:"number"`
+			Draft  bool `json:"draft"`
 			Head   struct {
 				Ref string `json:"ref"`
 				SHA string `json:"sha"`
@@ -44,6 +45,15 @@ func FromWebhook(event string, payload json.RawMessage, command string, allowed 
 		return Request{Repo: p.Repository.FullName, Ref: p.Ref, Trigger: "branch-created"}, true
 	}
 	if event == "pull_request" && (p.Action == "opened" || p.Action == "reopened" || p.Action == "synchronize" || p.Action == "ready_for_review") {
+		// A draft is work the author has not offered up yet, so reviewing it
+		// burns a run on every push and then burns another once they mark it
+		// ready. ready_for_review is the moment the PR stops being a draft, so
+		// it reviews regardless of what the payload's flag still says. An
+		// explicit review comment is handled below and still works on drafts:
+		// only the automatic triggers are gated.
+		if p.PullRequest.Draft && p.Action != "ready_for_review" {
+			return Request{}, false
+		}
 		return Request{Repo: p.Repository.FullName, Ref: p.PullRequest.Head.Ref, SHA: p.PullRequest.Head.SHA, PRNumber: p.PullRequest.Number, Trigger: "pull-request-" + p.Action}, true
 	}
 	if (event == "issue_comment" || event == "pull_request_review_comment") && p.Action == "created" {

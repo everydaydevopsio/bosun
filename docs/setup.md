@@ -97,6 +97,10 @@ A review starts when:
 - a PR is opened, reopened, synchronized, or marked ready for review; or
 - an owner, member, or collaborator comments `@bridgectl review` on a pull request.
 
+Draft pull requests are skipped. A draft that is opened or pushed to does not
+start a review; marking it ready for review does. Commenting `@bridgectl
+review` still reviews a draft, because that is someone asking for it directly.
+
 Comment-triggered reviews resolve the current PR head at execution time.
 
 Comments from bots are ignored, and comments on plain issues are ignored. Widen
