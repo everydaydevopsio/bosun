@@ -1,5 +1,6 @@
 ---
 name: bosun-review
+allowed-tools: Bash(bosun help) Bash(bosun review *) Bash(bosun review-status *) Bash(bosun review-result *)
 description: >
   Run an independent AI code review of the current repository with Bosun, then
   triage the findings. Use this skill when the user asks to: review my changes,
@@ -11,10 +12,40 @@ description: >
 
 # Bosun code review
 
-<!-- bosun-skill-version: 2 -->
+<!-- bosun-skill-version: 3 -->
 
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
+
+## Authorization and command permissions
+
+Treat an explicit Bosun skill invocation, or a review required by the user's
+repository instructions, as authorization to submit the review, poll it, and
+read its results. Do not ask conversational permission for each of these steps.
+Respect host permission prompts and managed policy; the skill cannot override them.
+
+Claude Code uses the scoped `allowed-tools` above during skill invocation.
+Re-invoke the skill on a later turn if those permissions have expired.
+Codex users can opt in once with `bosun init --permissions --target codex`;
+this installs command rules in `$CODEX_HOME/rules/bosun-review.rules` (default
+`~/.codex/rules/bosun-review.rules`). Restart Codex afterward. These rules
+apply across sessions, not only while this skill is active.
+
+Run Bosun as a standalone command with literal, resolved arguments. Set the
+shell tool's working directory separately. Avoid shell wrappers, assignments,
+command substitutions, loops, environment prefixes, and pipes around Bosun:
+they can prevent command permissions from matching. The snippets below show
+argument resolution; when executing, substitute the resolved values directly
+and capture stdout from the tool result instead of `JOB="$(...)"`.
+For example, run `bosun review /path/to/repo --branch feature/example --base
+<verified-sha> --detach --local-credentials --provider claude-bosun`, then
+`bosun review-status <returned-job> --json` as separate tool calls.
+
+Only review submission, polling, results, and help are pre-approved. Cluster
+reset, credential changes, installation, and unrelated commands keep their
+normal permissions. Submission can create a local Kind cluster and use model
+credits; do not submit duplicate reviews. Managed deny/ask rules, network
+restrictions, and workspace trust can still require approval.
 
 ## Before running
 
@@ -194,9 +225,10 @@ This is the only launch command in this skill. Run it once, with the variables
 resolved above:
 
 ```bash
-JOB="$(bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "$BASE"} --detach --local-credentials --provider "$PROVIDER")" || JOB=""
-echo "JOB=$JOB"
+bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "$BASE"} --detach --local-credentials --provider "$PROVIDER"
 ```
+
+Capture the returned job name as `JOB` in your agent context.
 
 **Check it actually submitted before polling.** An empty `JOB` means submission
 failed -- the message is on stderr and names which part failed. Report that and

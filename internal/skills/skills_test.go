@@ -245,8 +245,8 @@ func TestSkillHasOneCompleteLaunchCommand(t *testing.T) {
 	var launches []string
 	for _, line := range strings.Split(out.String(), "\n") {
 		// The working-tree alternative is prose, not a launch; a real launch
-		// captures the job name.
-		if strings.Contains(line, "$(bosun review ") {
+		// starts with the Bosun command.
+		if strings.HasPrefix(line, `bosun review "$PWD"`) {
 			launches = append(launches, line)
 		}
 	}
@@ -445,5 +445,42 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("skill does not guard polling: missing %q", want)
 		}
+	}
+}
+
+func TestInstallPermissions(t *testing.T) {
+	target := Target{Name: "codex", Dir: t.TempDir()}
+	results, err := InstallPermissions([]Target{target}, false)
+	if err != nil || len(results) != 1 || results[0].Action != Installed {
+		t.Fatalf("install: %+v, %v", results, err)
+	}
+	path := results[0].Path
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"help", "review", "review-status", "review-result"} {
+		if !strings.Contains(string(body), `pattern = ["bosun", "`+command+`"]`) {
+			t.Errorf("missing %s rule", command)
+		}
+	}
+	results, err = InstallPermissions([]Target{target}, false)
+	if err != nil || results[0].Action != Unchanged {
+		t.Fatalf("repeat: %+v, %v", results, err)
+	}
+	if err := os.WriteFile(path, []byte("custom"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	results, err = InstallPermissions([]Target{target}, false)
+	if err != nil || results[0].Action != Kept {
+		t.Fatalf("preserve: %+v, %v", results, err)
+	}
+	results, err = InstallPermissions([]Target{target}, true)
+	if err != nil || results[0].Action != Replaced {
+		t.Fatalf("force: %+v, %v", results, err)
+	}
+	results, err = InstallPermissions([]Target{{Name: "claude", Dir: t.TempDir()}}, false)
+	if err != nil || len(results) != 0 {
+		t.Fatalf("Claude needs no rules file: %+v, %v", results, err)
 	}
 }

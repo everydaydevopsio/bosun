@@ -909,3 +909,20 @@ image, which reads like a Bosun release number and ages the same way.
 - Result: delivery steps 1 and 2 of the issue complete. Step 3, feeding the
   structured result into the compact status interface, waits on #36.
 - Evidence links/commands: `make test`, `make lint`.
+
+
+# Task: Review command permissions
+
+## Acceptance Criteria
+- Claude grants cover review commands only; Codex rules require explicit setup.
+- Repeat installation preserves local edits and honors CODEX_HOME via targets.
+
+## Execution Checklist
+- [x] Implement grants, installer, and documentation.
+- [x] Add installer tests for repeated setup, preservation, and forced replacement.
+- [x] Run targeted Go tests and record unavailable independent Bosun review.
+
+## Outcome
+Implementation complete. Targeted Go tests and `git diff --check` passed.
+Independent Bosun review blocked: no installed Bosun binary or configured
+distinct reviewer in this environment.
