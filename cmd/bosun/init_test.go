@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,4 +134,29 @@ func TestRunInit(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestInitPermissionsOptIn(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CODEX_HOME", filepath.Join(home, "relocated-codex"))
+			args := []string{"--target", "codex"}
+			if enabled {
+				args = append(args, "--permissions")
+			}
+			var out, errout bytes.Buffer
+			if code := runInit(args, &out, &errout); code != 0 {
+				t.Fatalf("exit %d: %s", code, errout.String())
+			}
+			_, err := os.Stat(filepath.Join(home, "relocated-codex", "rules", "bosun-review.rules"))
+			if enabled && err != nil {
+				t.Fatal(err)
+			}
+			if !enabled && !os.IsNotExist(err) {
+				t.Fatalf("rules installed without opt-in: %v", err)
+			}
+		})
+	}
 }

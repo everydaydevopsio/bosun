@@ -28,7 +28,7 @@ const (
 	assetPath = "assets/" + skillName + "/SKILL.md"
 	// Version is the revision of the embedded review instructions. It changes
 	// independently of the CLI release version.
-	Version = "2"
+	Version = "3"
 )
 
 var versionPattern = regexp.MustCompile(`<!-- bosun-skill-version: ([^ ]+) -->`)
