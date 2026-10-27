@@ -909,3 +909,53 @@ image, which reads like a Bosun release number and ages the same way.
 - Result: delivery steps 1 and 2 of the issue complete. Step 3, feeding the
   structured result into the compact status interface, waits on #36.
 - Evidence links/commands: `make test`, `make lint`.
+
+
+# Task: Measure review usage for cost comparison
+
+## Context
+- Date: 2026-10-27
+- Mode: Autonomous
+- Request: compare Bosun with Copilot and capture usage for metrics.
+- Plan: `plans/plan-review-usage.md`.
+
+## Scope
+- In scope: numeric provider usage, outcome/timing logs, durable local records,
+  correlation, failure handling, and a source-linked cost-comparison guide.
+- Out of scope: production deployment, automatic repricing, billing credentials,
+  dashboards, and paid benchmark runs.
+
+## Acceptance Criteria
+- AC1: Each handled worker exit emits one structured measurement summary.
+- AC2: Provider usage is separate from review prose, secrets, and tool payloads.
+- AC3: Missing and partial usage never imply zero spend; estimates are not invoices.
+- AC4: Local usage survives log expiry and is exposed through `review-result --json`.
+- AC5: Pricing and a matched-commit quality benchmark are documented.
+
+## Execution Checklist
+- [x] Verify official pricing and inspect current usage paths.
+- [x] Reproduce missing summaries, missing durable usage, and missing Job identity with failing tests.
+- [x] Capture Codex/Claude usage and handle malformed, failed, duplicate, and zeroed crash results.
+- [x] Emit structured summaries and retain them in local result records.
+- [x] Add sourced comparison and operational instructions.
+- [x] Run offline regression checks; record the unavailable live-review gate below.
+
+## Test Strategy
+- Go: full tests with coverage; worker outcome/redaction, bridge replay/failure,
+  Job metadata, local monitoring/storage, and old-record compatibility.
+- Node: 24 adapter cases, including multi-turn counts, Claude helper totals,
+  unknown pricing, zeroed crashes, malformed streams, and reserved-marker escaping.
+- TDD: new regressions failed before implementation, then passed.
+
+## Rollback Strategy
+- Revert this PR and restore the preceding worker image. Added local record fields
+  are optional and older readers ignore them.
+
+## Outcome
+- Passed: `env -u CODEX_HOME /tmp/go/bin/go test ./... -cover -count=1`,
+  `node --test scripts/claude-review-adapter.test.js scripts/codex-review-adapter.test.js`,
+  `go vet ./...`, a CLI build and JSON-log smoke check, formatting, and `git diff --check`.
+- No actual model request or Kubernetes deployment was performed.
+- Merge gate: AGENTS.md requires a Bosun review using a distinct provider. Docker,
+  Kubernetes tooling, and a configured distinct reviewer are unavailable here.
+  Keep the PR draft and run that review on its exact committed head before merge.

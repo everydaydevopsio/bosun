@@ -186,7 +186,11 @@ func build(cfg config.Config, req review.Request, name string) (*batchv1.Job, er
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app.kubernetes.io/name": "bosun-review", "bosun/repository": repositoryLabel(req.Repo)}, Annotations: map[string]string{"bosun/repository": req.Repo}},
 				Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: ptr(false), Containers: []corev1.Container{{
-					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: append(env(cfg, req), corev1.EnvVar{Name: "BOSUN_WORKER_IMAGE", Value: cfg.ReviewImage}),
+					Name: "reviewer", Image: cfg.ReviewImage, Command: []string{"/usr/local/bin/bosun", "reviewer"}, Env: append(env(cfg, req),
+						corev1.EnvVar{Name: "BOSUN_WORKER_IMAGE", Value: cfg.ReviewImage},
+						corev1.EnvVar{Name: "BOSUN_RUN_ID", Value: name},
+						corev1.EnvVar{Name: "BOSUN_LOG_FORMAT", Value: "json"},
+						corev1.EnvVar{Name: "BOSUN_POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.uid"}}}),
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), RunAsNonRoot: ptr(true), RunAsUser: &cfg.RunAsUser, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 					Resources:       resources,
 				}}},
@@ -226,7 +230,7 @@ func SubmitLocal(ctx context.Context, client kubernetes.Interface, cfg config.Co
 		c.Env = filtered
 		c.VolumeMounts = []corev1.VolumeMount{{Name: "repos", MountPath: cluster.ContainerRepos}}
 		path := cluster.ContainerRepos + "/" + snapshot
-		c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_LOCAL_PATH", Value: path}, corev1.EnvVar{Name: "BOSUN_EVENTS", Value: "1"}, corev1.EnvVar{Name: "BOSUN_RUN_ID", Value: name}, corev1.EnvVar{Name: "BOSUN_EVENT_FILE", Value: path + ".events"}, corev1.EnvVar{Name: "BOSUN_BASE_SHA", Value: base}, corev1.EnvVar{Name: "GIT_CONFIG_COUNT", Value: "1"}, corev1.EnvVar{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"}, corev1.EnvVar{Name: "GIT_CONFIG_VALUE_0", Value: path})
+		c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_LOCAL_PATH", Value: path}, corev1.EnvVar{Name: "BOSUN_EVENTS", Value: "1"}, corev1.EnvVar{Name: "BOSUN_EVENT_FILE", Value: path + ".events"}, corev1.EnvVar{Name: "BOSUN_BASE_SHA", Value: base}, corev1.EnvVar{Name: "GIT_CONFIG_COUNT", Value: "1"}, corev1.EnvVar{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"}, corev1.EnvVar{Name: "GIT_CONFIG_VALUE_0", Value: path})
 		if committed {
 			c.Env = append(c.Env, corev1.EnvVar{Name: "BOSUN_COMMITTED_ONLY", Value: "1"})
 		}

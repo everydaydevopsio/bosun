@@ -295,8 +295,9 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 			sent = true
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
 			reporter.Emit("activity", "Provider output received")
-			out.Write(event.Payload)
-			if argumentProvider(provider) && !strings.HasSuffix(string(event.Payload), "\n") {
+			payload := usageFrom(ctx).filter(string(event.Payload))
+			out.WriteString(payload)
+			if payload != "" && argumentProvider(provider) && !strings.HasSuffix(payload, "\n") {
 				out.WriteByte('\n')
 			}
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT:

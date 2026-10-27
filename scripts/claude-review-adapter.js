@@ -5,6 +5,7 @@
 
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
+const { claudeUsage, safeReview, usageLine, zeroedExecutionFailure } = require('./provider-usage');
 
 const claude = '/app/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
 const allowed = [
@@ -67,28 +68,33 @@ function createCollector() {
   let finalResult;
   let denials = [];
   let error = '';
+  let resultEvent;
+  let damagedStream = false;
   const tools = new Map();
   const deniedResults = [];
   return {
     accept(line) {
+      if (line.length > 2 * 1024 * 1024) { damagedStream = true; return; }
       let event;
-      try { event = JSON.parse(line); } catch { return; }
+      try { event = JSON.parse(line); } catch { if (line.trim()) damagedStream = true; return; }
+      if (!event || typeof event !== 'object') return;
       if (event.type === 'assistant') {
-        for (const item of event.message?.content || []) {
-          if (item.type === 'tool_use' && item.id && tools.size < 100) {
+        for (const item of Array.isArray(event.message?.content) ? event.message.content : []) {
+          if (item?.type === 'tool_use' && item.id && tools.size < 100) {
             tools.set(item.id, { tool_name: item.name, tool_input: item.input });
           }
         }
       }
       if (event.type === 'user') {
-        for (const item of event.message?.content || []) {
-          if (item.type === 'tool_result' && item.is_error && tools.has(item.tool_use_id)
+        for (const item of Array.isArray(event.message?.content) ? event.message.content : []) {
+          if (item?.type === 'tool_result' && item.is_error && tools.has(item.tool_use_id)
               && /permission|denied|not allowed/i.test(String(item.content).slice(0, 2000))) {
             deniedResults.push(tools.get(item.tool_use_id));
           }
         }
       }
       if (event.type === 'result') {
+        if (!zeroedExecutionFailure(event)) resultEvent = event;
         if (typeof event.result === 'string') finalResult = event.result;
         if (Array.isArray(event.permission_denials)) denials = event.permission_denials;
         if (event.is_error) error = String(event.subtype || 'provider error').slice(0, 80);
@@ -100,8 +106,9 @@ function createCollector() {
         ? denialSummary(denials.length ? denials : deniedResults, denials.length > 0)
         : '';
       // Bosun bounds incomplete-review reasons to their first 500 characters.
-      return [summary, finalResult || ''].filter(Boolean).join('\n\n');
+      return safeReview([summary, finalResult || ''].filter(Boolean).join('\n\n'));
     },
+    usage(incomplete = false) { return claudeUsage(resultEvent, incomplete || Boolean(error) || damagedStream); },
     failed() { return Boolean(error || !finalResult); },
     error() { return error; },
   };
@@ -122,11 +129,12 @@ if (require.main === module) {
     process.on(signal, () => child.kill(signal));
   }
   const lines = readline.createInterface({ input: child.stdout });
-  lines.on('line', line => {
-    if (line.length <= 2 * 1024 * 1024) collector.accept(line);
-  });
-  child.on('error', () => { process.stdout.write('Claude executable could not start\n'); process.exitCode = 1; });
+  lines.on('line', line => collector.accept(line));
+  let startFailed = false;
+  child.on('error', () => { startFailed = true; });
   child.on('close', code => {
+    process.stdout.write(usageLine(collector.usage(code !== 0 || collector.failed())));
+    if (startFailed) process.stdout.write('Claude executable could not start\n');
     const output = collector.output();
     if (output) process.stdout.write(output + '\n');
     if (collector.failed() || code !== 0) {
