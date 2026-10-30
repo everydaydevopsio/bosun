@@ -447,3 +447,23 @@ func TestSkillMatchesTheCLIContract(t *testing.T) {
 		}
 	}
 }
+
+func TestSkillExplainsBoundedCredentialRecovery(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join(strings.Fields(out.String()), " ")
+	for _, want := range []string{
+		"cannot live-check CODEX_AUTH",
+		"env -u CODEX_AUTH",
+		"bosun up --local-credentials --provider",
+		"AUTH_REJECTED",
+		"AUTH_REVOKED",
+		"Do not run `bosun down` or `bosun reset` for a credential error",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill lacks credential recovery guidance %q", want)
+		}
+	}
+}
