@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.5] - 2026-10-31
+
+### Highlights
+- Improved credential recovery guidance for the Bosun skill.
+
+### Fixes
+- Clarified how the Bosun skill should recover from credential issues. (#70)
+
+### Changes
+- Included the Bosun skill authentication recovery fix in v0.2.5.
+
 ## [0.2.4] - 2026-10-24
 
 ### Highlights
