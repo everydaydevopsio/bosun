@@ -16,6 +16,8 @@ import (
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/progress"
+	"github.com/everydaydevopsio/bosun/internal/version"
+	"github.com/google/uuid"
 )
 
 // Worker dependencies are replaceable for offline end-to-end tests. Production
@@ -44,6 +46,48 @@ func makeHostedWorkspace() (string, error) {
 func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	sanitize := diagnosticRedactor()
 	var reporter *progress.Reporter
+	started := time.Now()
+	runID := os.Getenv("BOSUN_RUN_ID")
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	req := Request{Repo: os.Getenv("BOSUN_REPO"), Ref: os.Getenv("BOSUN_REF"), SHA: os.Getenv("BOSUN_SHA"), Trigger: os.Getenv("BOSUN_TRIGGER")}
+	meter := newUsageRecorder(cfg.ReviewProvider)
+	ctx = context.WithValue(ctx, usageKey{}, meter)
+	credential := credentialMode(cfg.ReviewProvider)
+	providerStarted, metricsEmitted := false, false
+	var providerSeconds float64
+	emitUsage := func() {
+		if metricsEmitted {
+			return
+		}
+		metricsEmitted = true
+		now := time.Now()
+		summary := UsageSummary{
+			SchemaVersion: 1, RunID: sanitize(runID), PodUID: sanitize(os.Getenv("BOSUN_POD_UID")),
+			Repo: sanitize(req.Repo), Ref: sanitize(req.Ref), HeadSHA: sanitize(req.SHA),
+			BaseSHA: sanitize(os.Getenv("BOSUN_BASE_SHA")), PRNumber: req.PRNumber, Trigger: sanitize(req.Trigger),
+			Provider: sanitize(cfg.ReviewProvider), WorkerVersion: version.Version,
+			WorkerImage: sanitize(os.Getenv("BOSUN_WORKER_IMAGE")), CredentialMode: credential,
+			Outcome: reviewOutcome(result), StartedAt: started.UTC(), FinishedAt: now.UTC(),
+			WorkerSeconds: now.Sub(started).Seconds(), ProviderSeconds: providerSeconds,
+			ProviderStarted: providerStarted, CostStatus: "unavailable", Usage: sanitizedUsage(meter.usage, sanitize),
+		}
+		var failure *Failure
+		if errors.As(result, &failure) {
+			summary.FailureStage = failure.Stage
+		}
+		if summary.FailureStage == StageProvider && summary.Usage.Status != "missing" {
+			summary.Usage.Status = "partial"
+		}
+		if summary.Usage.ProviderReportedCostUSD != nil {
+			summary.CostStatus = "provider_reported_estimate"
+		}
+		slog.Info("review usage", "event", "bosun.review.usage", "metrics", summary)
+		encoded, _ := json.Marshal(summary)
+		reporter.Emit("usage", string(encoded))
+	}
+	defer emitUsage()
 	if os.Getenv("BOSUN_EVENTS") == "1" {
 		events := w.Events
 		if events == nil {
@@ -57,7 +101,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 			defer file.Close()
 			events = io.MultiWriter(events, file)
 		}
-		reporter = progress.New(events, os.Getenv("BOSUN_RUN_ID"))
+		reporter = progress.New(events, runID)
 		ctx = progress.With(ctx, reporter)
 		heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 		heartbeatDone := make(chan struct{})
@@ -67,6 +111,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	reporter.Emit("stage", "preparing repository")
 	defer func() {
 		if result != nil {
+			emitUsage()
 			kind := "failed"
 			if errors.Is(result, context.DeadlineExceeded) {
 				kind = "timed_out"
@@ -83,7 +128,6 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, max)
 	defer cancel()
-	req := Request{Repo: os.Getenv("BOSUN_REPO"), Ref: os.Getenv("BOSUN_REF"), SHA: os.Getenv("BOSUN_SHA"), Trigger: os.Getenv("BOSUN_TRIGGER")}
 	if req.Repo == "" || req.Ref == "" {
 		return failf(StageSetup, "BOSUN_REPO and BOSUN_REF are required")
 	}
@@ -195,7 +239,11 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		prompt += "Include staged, unstaged, and untracked working-tree changes in this local review.\n"
 	}
 	reporter.Emit("stage", "starting provider")
+	providerStarted = true
+	providerStart := time.Now()
 	output, err := w.Agent(ctx, workspace, cfg.ReviewProvider, prompt, max)
+	providerSeconds = time.Since(providerStart).Seconds()
+	output = meter.filter(output)
 	if err != nil {
 		return fail(agentFailureStage(err), err)
 	}
@@ -217,6 +265,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		published = true
 	}
 	if reporter != nil {
+		emitUsage()
 		// The structured half goes out before the result so a consumer that
 		// stops at the first terminal event still has the findings.
 		if structured := StructuredResult(output); structured != "" {

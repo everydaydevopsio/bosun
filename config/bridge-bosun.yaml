@@ -3,13 +3,13 @@
 #
 # The packaged `codex` provider runs the interactive Codex TUI under a PTY, so
 # its output stream is screen repaints rather than an answer. `codex exec` is
-# Codex's non-interactive mode: it takes the prompt as an argument, writes plain
-# text to stdout, and exits when it is done.
+# Codex's non-interactive mode. The Bosun adapter reads its JSON internally,
+# forwarding only the final review and one allowlisted usage record.
 #
 # `stream_json: true` opts the provider out of PTY allocation. The supervisor
 # then reads stdout line by line and forwards any line that is not an
-# Anthropic-shaped stream event as a raw output chunk — which is exactly what
-# `codex exec` produces.
+# Anthropic-shaped stream event as a raw output chunk. Both adapters emit plain
+# review text and a BOSUN_USAGE_V1 line; raw provider events stay private.
 #
 # Auth comes from $CODEX_HOME/auth.json, which internal/review/credentials.go writes from
 # the CODEX_AUTH secret, so no provider-specific auth handling is needed.
@@ -43,7 +43,7 @@ providers:
       - "-c"
       # Codex reads piped stdin even with a positional prompt. bridgectl keeps
       # its input pipe open, so use /dev/null for this argument-only provider.
-      - 'CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}" exec node /app/node_modules/@openai/codex/bin/codex.js exec --skip-git-repo-check --color never --sandbox danger-full-access "$@" </dev/null'
+      - 'CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}" exec node /app/bosun/scripts/codex-review-adapter.js "$@" </dev/null'
       - "codex-bosun"
     startup_timeout: "120s"
     validate_startup: false

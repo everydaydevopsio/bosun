@@ -245,6 +245,8 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 			var logs bytes.Buffer
 			reporter := progress.New(&logs, "job")
 			reporter.Emit("stage", "reviewing")
+			usage := `{"schema_version":1,"run_id":"job","actual_cost_usd":null,"usage":{"source":"codex","status":"partial","input_tokens":123}}`
+			reporter.Emit("usage", usage)
 			if failed {
 				reporter.Emit("failed", "authentication failed")
 			} else {
@@ -280,6 +282,13 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			code := monitor(ctx, client, &record, options{follow: true}, &out, &diag)
+			stored, err := load("job")
+			if err != nil || stored.Usage != usage || document(stored).Usage == nil {
+				t.Fatalf("usage did not survive monitoring: %+v %v", stored, err)
+			}
+			if strings.Contains(out.String(), "input_tokens") || strings.Contains(diag.String(), "input_tokens") {
+				t.Fatal("raw usage printed in human output")
+			}
 			if failed {
 				if code != 1 || out.Len() != 0 || !strings.Contains(diag.String(), "authentication failed") {
 					t.Fatalf("code %d out %s diag %s", code, &out, &diag)

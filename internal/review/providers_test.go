@@ -45,7 +45,7 @@ func TestBosunProviderWrappersPreservePromptAndCloseInput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			binary := "node /app/node_modules/@openai/codex/bin/codex.js"
+			binary := "node /app/bosun/scripts/codex-review-adapter.js"
 			if name == "claude-bosun" {
 				binary = "node /app/bosun/scripts/claude-review-adapter.js"
 				if !strings.Contains(command, `git config --global --add safe.directory "$PWD"`) {
@@ -130,12 +130,20 @@ func TestHostedCodexProviderDoesNotRelyOnBubblewrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := strings.Join(cfg.Providers["codex-bosun"].Args, " ")
-	for _, bwrapBacked := range []string{"--sandbox read-only", "--sandbox workspace-write"} {
+	if !strings.Contains(command, "scripts/codex-review-adapter.js") {
+		t.Fatal("codex-bosun must use the usage-preserving adapter")
+	}
+	adapter, err := os.ReadFile("../../scripts/codex-review-adapter.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command = string(adapter)
+	for _, bwrapBacked := range []string{"'--sandbox', 'read-only'", "'--sandbox', 'workspace-write'"} {
 		if strings.Contains(command, bwrapBacked) {
 			t.Errorf("codex-bosun uses %q, which bubblewrap backs and the reviewer Job cannot run", bwrapBacked)
 		}
 	}
-	if !strings.Contains(command, "--sandbox danger-full-access") {
+	if !strings.Contains(command, "'--sandbox', 'danger-full-access'") {
 		t.Error("codex-bosun must select a sandbox mode explicitly; the default is bwrap-backed")
 	}
 }

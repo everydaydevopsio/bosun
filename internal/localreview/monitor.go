@@ -123,10 +123,14 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 		if event.Elapsed < 0 {
 			event.Elapsed = 0
 		}
-		if event.Type == "findings" {
+		if event.Type == "findings" || event.Type == "usage" {
 			// The structured payload is durable state for `review-result`,
 			// not something to print at a terminal mid-review.
-			r.Structured = event.Message
+			if event.Type == "findings" {
+				r.Structured = event.Message
+			} else {
+				r.Usage = event.Message
+			}
 			r.LastSeq = seq
 			if !o.json {
 				return
