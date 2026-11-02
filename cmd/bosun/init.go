@@ -19,9 +19,10 @@ func runInit(args []string, out, errout io.Writer) int {
 	f := pflag.NewFlagSet("init", pflag.ContinueOnError)
 	f.SetOutput(errout)
 	var (
-		targets = f.StringSlice("target", nil, "Agents to install for (claude, codex); default is whichever are configured")
-		force   = f.Bool("force", false, "Replace a skill that differs from the one this binary ships")
-		print   = f.Bool("print", false, "Write the skill to stdout without installing it")
+		targets     = f.StringSlice("target", nil, "Agents to install for (claude, codex); default is whichever are configured")
+		force       = f.Bool("force", false, "Replace a skill that differs from the one this binary ships")
+		permissions = f.Bool("permissions", false, "Pre-approve Bosun review commands for Codex across sessions")
+		print       = f.Bool("print", false, "Write the skill to stdout without installing it")
 	)
 	if err := f.Parse(args); err != nil {
 		if err == pflag.ErrHelp {
@@ -58,10 +59,15 @@ func runInit(args []string, out, errout io.Writer) int {
 	}
 
 	results, err := skills.Install(home, chosen, *force)
+	if err == nil && *permissions {
+		permissionResults, permissionErr := skills.InstallPermissions(chosen, *force)
+		results = append(results, permissionResults...)
+		err = permissionErr
+	}
 	for _, r := range results {
 		switch r.Action {
 		case skills.Kept:
-			fmt.Fprintf(errout, "%s: %s differs from the skill this bosun ships; left alone. Use --force to replace it.\n", r.Target.Name, r.Path)
+			fmt.Fprintf(errout, "%s: %s differs from the file this bosun ships; left alone. Use --force to replace it.\n", r.Target.Name, r.Path)
 		default:
 			fmt.Fprintf(out, "%s: %s %s\n", r.Target.Name, r.Action, r.Path)
 		}
