@@ -13,6 +13,24 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.6] - 2026-11-02
+
+### Highlights
+
+- **Review summaries alongside findings** — Reviews with findings now include a separate summary comment with a link to the review and severity ordering aligned with the shared triage rank. (#71)
+- **Review usage metrics** — Capture usage data to support cost and quality tracking, including pricing for the Claude provider. (#69)
+
+### Fixes
+
+- Prevent an unreadable response from marking an already-created review as failed.
+- Handle both complete and split usage records reliably, while keeping usage logs and buffered fragments out of human-readable output.
+- Correct Bosun skill command permissions to reduce repeated approval prompts and ensure review commands match their grants. (#68)
+- Restore the skill’s base and version checks.
+
+### Changes
+
+- Align review summary severity ordering with the shared triage logic for consistent prioritization.
+
 ## [0.2.5] - 2026-10-31
 
 ### Highlights
