@@ -29,6 +29,24 @@ func TestWorkerReceivesItsImageReferenceForSetupDiagnostics(t *testing.T) {
 	t.Fatal("worker image reference absent from reviewer environment")
 }
 
+func TestWorkerUsageHasRunIdentityAndJSONLogs(t *testing.T) {
+	job, err := build(config.Config{ReviewTimeoutSeconds: 60}, review.Request{Repo: "acme/widget"}, "review-usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]corev1.EnvVar{}
+	for _, v := range job.Spec.Template.Spec.Containers[0].Env {
+		env[v.Name] = v
+	}
+	if env["BOSUN_RUN_ID"].Value != "review-usage" || env["BOSUN_LOG_FORMAT"].Value != "json" {
+		t.Fatal("worker metrics lack correlation or structured logs")
+	}
+	pod := env["BOSUN_POD_UID"].ValueFrom
+	if pod == nil || pod.FieldRef == nil || pod.FieldRef.FieldPath != "metadata.uid" {
+		t.Fatal("pod attempt identity missing")
+	}
+}
+
 func TestNameIsStableSafeAndUnique(t *testing.T) {
 	a := Name("Acme/Widget", "Feature/Some_Branch", "delivery")
 	b := Name("Acme/Widget", "Feature/Some_Branch", "delivery")

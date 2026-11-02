@@ -48,12 +48,14 @@ type resultDocument struct {
 	// FindingsReported separates "the reviewer found nothing" from "the
 	// reviewer did not report findings in a form this can read". Both have an
 	// empty findings list and they mean opposite things.
-	FindingsReported bool             `json:"findings_reported"`
-	Findings         []review.Finding `json:"findings"`
-	Note             string           `json:"note,omitempty"`
-	Failure          string           `json:"failure,omitempty"`
-	Markdown         string           `json:"markdown,omitempty"`
-	Revision         *revision        `json:"revision,omitempty"`
+	FindingsReported bool                 `json:"findings_reported"`
+	Findings         []review.Finding     `json:"findings"`
+	Note             string               `json:"note,omitempty"`
+	Failure          string               `json:"failure,omitempty"`
+	Markdown         string               `json:"markdown,omitempty"`
+	Revision         *revision            `json:"revision,omitempty"`
+	Usage            *review.UsageSummary `json:"usage"`
+	UsageNote        string               `json:"usage_note,omitempty"`
 }
 
 func document(r record) resultDocument {
@@ -76,6 +78,14 @@ func document(r record) resultDocument {
 	}
 	if d.Outcome == "" {
 		d.Outcome = "running"
+	}
+	if r.Usage != "" {
+		var usage review.UsageSummary
+		if err := json.Unmarshal([]byte(r.Usage), &usage); err == nil && usage.SchemaVersion == 1 {
+			d.Usage = &usage
+		} else {
+			d.UsageNote = "stored usage is unreadable or uses an unsupported schema; cost remains unknown"
+		}
 	}
 	if !r.Finished.IsZero() && !r.Started.IsZero() {
 		d.ElapsedSeconds = r.Finished.Sub(r.Started).Seconds()

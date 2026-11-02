@@ -60,6 +60,8 @@ type record struct {
 	// Structured is the reviewer's findings payload, verbatim. Stored as the
 	// worker emitted it so a schema change does not silently rewrite history.
 	Structured string
+	// Usage retains the worker's measurement envelope without repricing it.
+	Usage string
 	// Failure carries why a run ended badly, so a later reconnect explains
 	// itself instead of reporting a stored result that does not exist.
 	Failure string

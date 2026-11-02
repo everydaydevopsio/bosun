@@ -911,6 +911,69 @@ image, which reads like a Bosun release number and ages the same way.
 - Evidence links/commands: `make test`, `make lint`.
 
 
+# Task: Measure review usage for cost comparison
+
+## Context
+- Date: 2026-10-27
+- Mode: Autonomous
+- Request: compare Bosun with Copilot and capture usage for metrics.
+- Plan: `plans/plan-review-usage.md`.
+
+## Scope
+- In scope: numeric provider usage, outcome/timing logs, durable local records,
+  correlation, failure handling, and a source-linked cost-comparison guide.
+- Out of scope: production deployment, automatic repricing, billing credentials,
+  dashboards, and paid benchmark runs.
+
+## Acceptance Criteria
+- AC1: Each handled worker exit emits one structured measurement summary.
+- AC2: Provider usage is separate from review prose, secrets, and tool payloads.
+- AC3: Missing and partial usage never imply zero spend; estimates are not invoices.
+- AC4: Local usage survives log expiry and is exposed through `review-result --json`.
+- AC5: Pricing and a matched-commit quality benchmark are documented.
+
+## Execution Checklist
+- [x] Verify official pricing and inspect current usage paths.
+- [x] Reproduce missing summaries, missing durable usage, and missing Job identity with failing tests.
+- [x] Capture Codex/Claude usage and handle malformed, failed, duplicate, and zeroed crash results.
+- [x] Emit structured summaries and retain them in local result records.
+- [x] Add sourced comparison and operational instructions.
+- [x] Run offline regression checks; record the unavailable live-review gate below.
+
+## Test Strategy
+- Go: full tests with coverage; worker outcome/redaction, bridge replay/failure,
+  Job metadata, local monitoring/storage, and old-record compatibility.
+- Node: 24 adapter cases, including multi-turn counts, Claude helper totals,
+  unknown pricing, zeroed crashes, malformed streams, and reserved-marker escaping.
+- TDD: new regressions failed before implementation, then passed.
+
+## Rollback Strategy
+- Revert this PR and restore the preceding worker image. Added local record fields
+  are optional and older readers ignore them.
+
+## Outcome
+- Passed: `env -u CODEX_HOME /tmp/go/bin/go test ./... -cover -count=1`,
+  `node --test scripts/claude-review-adapter.test.js scripts/codex-review-adapter.test.js`,
+  `go vet ./...`, a CLI build and JSON-log smoke check, formatting, and `git diff --check`.
+- No actual model request or Kubernetes deployment was performed.
+- Merge gate: AGENTS.md requires a Bosun review using a distinct provider. Docker,
+  Kubernetes tooling, and a configured distinct reviewer are unavailable here.
+  Keep the PR draft and run that review on its exact committed head before merge.
+
+Follow-up (2026-11-03), from reviewing this branch against the merged main:
+- `usageRecorder.filter` judged each payload independently, so a usage record
+  split across two bridge payloads lost its first half to a failed parse and
+  published the second half as review prose -- provider JSON in the review, usage
+  reported missing. The bridge's own newline injection made the split permanent.
+  A trailing fragment that could still become the marker now waits for the rest
+  of its line; `flushPartial` judges it at end of stream, and the whole-output
+  pass holds nothing back so the two passes cannot leak into each other.
+- Anthropic list prices were absent even though `claude-bosun` is the provider
+  whose per-model usage is captured in most detail. Added, verified 2026-11-03,
+  with the non-uniform cache-read multiplier (0.025x / 0.05x / 0.10x) called out.
+- The four OpenAI model names and every rate in that table were re-verified
+  against the live pricing page and are correct as published.
+
 # Task: Review command permissions
 
 ## Acceptance Criteria
@@ -947,3 +1010,27 @@ tests first:
 Live verification: `bosun help`, `bosun review`, and `bosun review-status` all
 ran unprompted under the installed v3 skill. Bosun review of afa8c129 with
 `--provider codex-bosun` completed with no material findings.
+
+Bosun review of 16323c1 (`--provider codex-bosun`) returned one high finding,
+confirmed against the code and fixed:
+- Buffering an unterminated fragment that merely looked like the marker was
+  wrong, because bridgectl strips newlines (measured and documented in
+  `internal/review/findings.go`). Both adapters emit the record first, so the
+  record was buffered, the review was concatenated onto it and buffered too, and
+  the combined text failed to decode at exit -- `runSession` reported "agent
+  session produced no output" and the whole review was lost. `scan` now consumes
+  a complete record on sight via a JSON decoder, keeps any text that followed it
+  on the same payload, and buffers only a genuinely truncated record. The
+  reviewer's suggested `runSession` regression with newline-free payloads is
+  added and failed first for both providers.
+
+Bosun review pass 2 (7c44105) returned two findings, both confirmed and fixed:
+- Medium: `settled()` flushes the held fragment destructively, and `runSession`
+  called it once for the emptiness check and again for the return value, so the
+  fragment never reached the published review. Taken once and reused.
+- Low: the worker logs the usage summary to stderr as well as emitting the
+  progress event. That log is not a progress event, so the monitor printed the
+  whole telemetry envelope through its diagnostic fallback -- the existing test
+  fed only progress events and missed it. The monitor now suppresses logs whose
+  `event` is `review.UsageLogEvent`, a constant now shared by producer and
+  consumer so the two cannot drift. The monitor test feeds both representations.

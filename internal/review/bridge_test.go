@@ -277,3 +277,63 @@ func TestDaemonRestartDoesNotRerunReview(t *testing.T) {
 		t.Fatalf("err %v attaches %d writes %d", err, f.attaches, f.writes)
 	}
 }
+
+// Found by Bosun review of this branch. bridgectl strips newlines from provider
+// output (see findings.go), so both adapters deliver their usage record as a
+// payload with no terminator, followed by the review as further payloads.
+// Buffering an unterminated fragment that merely *looks* like the marker swallowed
+// the record, then swallowed the review concatenated onto it, and the combined
+// text failed to decode at exit -- turning a good review into "agent session
+// produced no output". A complete record must be consumed on sight.
+func TestNewlineFreePayloadsKeepUsageOutOfTheReview(t *testing.T) {
+	for _, provider := range []string{"codex-bosun", "claude-bosun"} {
+		t.Run(provider, func(t *testing.T) {
+			source := "codex"
+			if provider == "claude-bosun" {
+				source = "claude"
+			}
+			f := &fakeBridge{events: []*pb.AttachSessionEvent{
+				{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte(
+					`BOSUN_USAGE_V1 {"source":"` + source + `","status":"available","input_tokens":50,"output_tokens":9}`)},
+				{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("The review body.")},
+				{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("BOSUN-FINDINGS {\"findings\":[]}")},
+				{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT},
+			}}
+			meter := newUsageRecorder(provider)
+			ctx := context.WithValue(context.Background(), usageKey{}, meter)
+			out, err := runSession(ctx, f, "/repo", provider, "review")
+			if err != nil {
+				t.Fatalf("review lost: %v", err)
+			}
+			if !strings.Contains(out, "The review body.") {
+				t.Fatalf("review body missing from %q", out)
+			}
+			if strings.Contains(out, "BOSUN_USAGE_V1") || strings.Contains(out, `"input_tokens"`) {
+				t.Fatalf("usage record published as review prose: %q", out)
+			}
+			if !meter.seen || meter.usage.InputTokens == nil || *meter.usage.InputTokens != 50 {
+				t.Fatalf("usage not captured: %+v", meter.usage)
+			}
+		})
+	}
+}
+
+// Found by Bosun review. settled() destructively flushes the held fragment, so
+// calling it for the emptiness check and again for the return value dropped
+// that fragment from the published review.
+func TestTrailingHeldFragmentSurvivesSessionExit(t *testing.T) {
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("The review body. ")},
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("BOSUN_US")},
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT},
+	}}
+	meter := newUsageRecorder("codex-bosun")
+	ctx := context.WithValue(context.Background(), usageKey{}, meter)
+	out, err := runSession(ctx, f, "/repo", "codex-bosun", "review")
+	if err != nil {
+		t.Fatalf("review lost: %v", err)
+	}
+	if !strings.Contains(out, "BOSUN_US") {
+		t.Fatalf("held fragment dropped from the review: %q", out)
+	}
+}
