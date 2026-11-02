@@ -529,7 +529,9 @@ func TestSkillGrantsUseClaudePermissionSyntax(t *testing.T) {
 
 // The grants cover Bosun only. A pipeline or `||` fallback around a Bosun
 // command puts grep, echo and the shell itself in the same invocation, so the
-// host asks anyway -- the failure these grants exist to remove.
+// host asks anyway -- the failure these grants exist to remove. The bounded
+// `env -u CODEX_AUTH` recovery is prose, not a launch line, and is documented
+// as the one prefixed exception.
 func TestSkillRunsBosunCommandsUnwrapped(t *testing.T) {
 	var out bytes.Buffer
 	if err := Print(&out); err != nil {
@@ -564,5 +566,25 @@ func TestSkillAcceptsABaseBranchThatMovedOn(t *testing.T) {
 	}
 	if !strings.Contains(body, `git merge-base --is-ancestor "$BASE_SHA" FETCH_HEAD`) {
 		t.Error("skill does not confirm the PR base is contained in the fetched upstream branch")
+	}
+}
+
+func TestSkillExplainsBoundedCredentialRecovery(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join(strings.Fields(out.String()), " ")
+	for _, want := range []string{
+		"cannot live-check CODEX_AUTH",
+		"env -u CODEX_AUTH",
+		"bosun up --local-credentials --provider",
+		"AUTH_REJECTED",
+		"AUTH_REVOKED",
+		"Do not run `bosun down` or `bosun reset` for a credential error",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill lacks credential recovery guidance %q", want)
+		}
 	}
 }

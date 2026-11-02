@@ -12,7 +12,7 @@ description: >
 
 # Bosun code review
 
-<!-- bosun-skill-version: 3 -->
+<!-- bosun-skill-version: 4 -->
 
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
@@ -238,7 +238,8 @@ before that, so **never run `bosun review` in the foreground and never use
 `review-status --follow`**. Start it detached and poll instead:
 
 This is the only launch command in this skill. Run it once, substituting the
-values resolved above for each placeholder:
+values resolved above for each placeholder. Keep its stderr visible: credential
+failures are reported there before a Job name is printed.
 
 ```bash
 bosun review <repo-path> --branch <branch> --base <base-sha> --detach --local-credentials --provider <provider>
@@ -258,6 +259,46 @@ progress goes to stderr, so read the returned job name out of the tool result
 and keep it in your agent context. No job name means submission failed — the
 message on stderr names which part. Report that and stop; do not poll, because
 there is nothing to poll for and no terminal event will ever arrive.
+
+### Recover from a credential failure
+
+`--local-credentials` checks the selected provider with a real headless request
+and refreshes the Kind Secret before submission. A Secret entry or `codex login
+status` alone does not prove the token works. Do not run `bosun down` or `bosun
+reset` for a credential error; they disturb the cluster without renewing a
+provider sign-in.
+
+If submission failed with `cannot live-check CODEX_AUTH`, an exported
+`CODEX_AUTH` is taking precedence over the Codex sign-in file. If
+`${CODEX_HOME:-$HOME/.codex}/auth.json` exists, retry the same launch command
+**once**, prefixing `bosun` with `env -u CODEX_AUTH`. This removes the exported
+value only for that child process, allowing Bosun to discover and live-check the
+file. Preserve the resolved branch, base, and provider. Do not print either
+credential. If the file is absent, stop and explain that the exported JSON
+cannot be verified by the host Codex CLI; the user must provide a usable CLI
+sign-in or API key.
+
+That `env` prefix is the one deliberate exception to running Bosun unwrapped.
+It will not match the review command grant, so expect an approval prompt for
+that single recovery attempt; do not adopt the prefix for ordinary submissions.
+
+For `AUTH_REJECTED` or `AUTH_REVOKED` during submission, the saved provider
+credential failed the live check. An agent cannot repair an interactive login
+by copying the same token again. Ask the user to renew the selected provider's
+sign-in (`codex login` or `claude auth login`), then run `bosun up
+--local-credentials --provider <provider>` to verify it and refresh the
+existing cluster Secret. Resume only after that command succeeds. Check
+`CODEX_HOME` if the Codex file Bosun names differs from the account the user
+renewed. An exported provider credential takes precedence over a saved file;
+do not silently discard an explicit export except for the one bounded
+`CODEX_AUTH` fallback above.
+
+If a Job was submitted and later fails at the provider stage with an auth
+diagnosis, run `bosun up --local-credentials --provider <provider>` once. If
+it succeeds, submit one new Job for the **same** head and base and poll it to a
+terminal event. If it fails, or the new Job also fails authentication, stop
+and report the diagnosis and both Job names. Never retry just to obtain a
+different review result.
 
 Then poll, substituting that job name and waiting between checks. Each poll
 returns immediately:
