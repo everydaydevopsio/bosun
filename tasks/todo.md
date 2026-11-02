@@ -926,3 +926,10 @@ image, which reads like a Bosun release number and ages the same way.
 Implementation complete. Targeted Go tests and `git diff --check` passed.
 Independent Bosun review blocked: no installed Bosun binary or configured
 distinct reviewer in this environment.
+
+Follow-up (2026-11-03): the first Claude grants used a space-separated list of
+`Bash(bosun review *)`, which is not the host's `Bash(<prefix>:*)` form and
+would have matched nothing, and the skill still launched through
+`${BASE:+--base "$BASE"}` and `bosun help | grep ... || echo ...`, which its own
+prose forbids. Both are fixed and covered by tests that failed first. Codex rule
+loading is now verified empirically against codex-cli 0.149.0.

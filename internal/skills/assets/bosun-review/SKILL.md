@@ -1,6 +1,6 @@
 ---
 name: bosun-review
-allowed-tools: Bash(bosun help) Bash(bosun review *) Bash(bosun review-status *) Bash(bosun review-result *)
+allowed-tools: Bash(bosun help:*), Bash(bosun review:*), Bash(bosun review-status:*), Bash(bosun review-result:*)
 description: >
   Run an independent AI code review of the current repository with Bosun, then
   triage the findings. Use this skill when the user asks to: review my changes,
@@ -54,11 +54,16 @@ existed fails with `unknown flag`, which looks like your mistake rather than a
 stale install:
 
 ```bash
-command -v bosun || echo "Bosun is not installed: see https://github.com/everydaydevopsio/bosun"
-bosun help | grep -q -- --local-credentials || echo "This bosun is too old; upgrade it"
+bosun help
 ```
 
-If either check fails, tell the user how to fix it and stop. Do not try to work
+Read the output yourself rather than piping it through `grep`: a pipeline puts
+other programs in the same invocation and the command grant stops matching.
+
+If the command is not found, Bosun is not installed — point the user at
+https://github.com/everydaydevopsio/bosun. If the help text does not list
+`--local-credentials`, this `bosun` predates the flags below and must be
+upgraded. Either way, tell the user how to fix it and stop. Do not try to work
 around a missing or old binary.
 
 ## Decide what to review
@@ -77,7 +82,7 @@ For a PR or branch review, use `--branch` as below. It snapshots only committed
 content at that ref, even if this checkout has unrelated modified or untracked
 files. It does not switch branches or change the source worktree. State that
 uncommitted changes were excluded. If the user wants those changes reviewed,
-use `bosun review "$PWD"` without `--branch`; that snapshots the working tree
+use `bosun review <repo-path>` without `--branch`; that snapshots the working tree
 and requires checking that its contents are the intended subject.
 
 **2. There is a branch to compare.**
@@ -152,6 +157,10 @@ if [ -z "$PROVIDER" ]; then
     PROVIDER=claude-bosun
   fi
 fi
+
+# Shell variables do not survive to the next tool call, so print the resolved
+# values and substitute them into the launch command yourself.
+printf 'BRANCH=%s\nBASE=%s\nPROVIDER=%s\n' "$BRANCH" "$BASE" "$PROVIDER"
 ```
 
 Tell the user which base was used. A review against the wrong base is worse than
@@ -221,29 +230,33 @@ A review can run for up to 30 minutes. Your shell tool will time out long
 before that, so **never run `bosun review` in the foreground and never use
 `review-status --follow`**. Start it detached and poll instead:
 
-This is the only launch command in this skill. Run it once, with the variables
-resolved above:
+This is the only launch command in this skill. Run it once, substituting the
+values resolved above for each placeholder:
 
 ```bash
-bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "$BASE"} --detach --local-credentials --provider "$PROVIDER"
+bosun review <repo-path> --branch <branch> --base <base-sha> --detach --local-credentials --provider <provider>
 ```
 
-Capture the returned job name as `JOB` in your agent context.
+`<repo-path>` is the absolute path of the checkout, and `<branch>`, `<base-sha>`
+and `<provider>` are `BRANCH`, `BASE` and `PROVIDER` from the block above. When
+`BASE` is empty — the offline checkout review — drop `--base <base-sha>` from
+the command entirely rather than passing an empty value.
 
-**Check it actually submitted before polling.** An empty `JOB` means submission
-failed -- the message is on stderr and names which part failed. Report that and
-stop; do not poll, because there is nothing to poll for and no terminal event
-will ever arrive:
+Write the whole command out literally. Do not reintroduce `$BRANCH`, `$(...)`,
+or `${BASE:+...}`: the host matches a command grant against the text you run,
+so an unexpanded variable turns a pre-approved review into another prompt.
+
+**Check it actually submitted before polling.** The job name goes to stdout and
+progress goes to stderr, so read the returned job name out of the tool result
+and keep it in your agent context. No job name means submission failed — the
+message on stderr names which part. Report that and stop; do not poll, because
+there is nothing to poll for and no terminal event will ever arrive.
+
+Then poll, substituting that job name and waiting between checks. Each poll
+returns immediately:
 
 ```bash
-[ -n "$JOB" ] || { echo "submission failed; not polling"; }
-```
-
-The job name goes to stdout; progress goes to stderr. Then poll, waiting
-between checks. Each poll returns immediately:
-
-```bash
-bosun review-status "$JOB" --json
+bosun review-status <job-name> --json
 ```
 
 Do not pipe that through `tail` or `head` when you need to know whether it
@@ -270,13 +283,13 @@ prepared.
 When it completes, read the review:
 
 ```bash
-bosun review-status "$JOB"
+bosun review-status <job-name>
 ```
 
 To triage it, read the structured result rather than parsing the report:
 
 ```bash
-bosun review-result "$JOB" --json
+bosun review-result <job-name> --json
 ```
 
 It names the commit and merge base that were reviewed, and carries one entry
@@ -292,7 +305,7 @@ Before reusing a result from an earlier session, check that it still describes
 this checkout:
 
 ```bash
-bosun review-result "$JOB" --against-ref HEAD
+bosun review-result <job-name> --against-ref HEAD
 ```
 
 A branch that has moved is reported plainly, naming both commits. It never

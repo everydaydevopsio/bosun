@@ -25,9 +25,14 @@ Use direct command calls so the host can match command prefixes.
 - [x] Record local validation limitations for CI.
 
 ## Verification
-Targeted tests passed: `env -u CODEX_HOME /tmp/go/bin/go test ./internal/skills ./cmd/bosun`.
+Targeted tests passed: `env -u CODEX_HOME go test ./internal/skills ./cmd/bosun`.
 `git diff --check` passed. Independent Bosun review is blocked because Bosun
 and a configured distinct reviewer are unavailable here.
+
+Codex rule loading verified against codex-cli 0.149.0: a throwaway `CODEX_HOME`
+containing only the shipped asset loads without a rules error, which confirms
+Codex scans every `.rules` file in the directory rather than `default.rules`
+alone. Claude's grant form is asserted by a skill test rather than observed.
 
 ## Alternatives Rejected
 Disable approvals globally: grants unrelated commands too much access.
@@ -40,3 +45,4 @@ None.
 | Date | Change |
 | --- | --- |
 | 2026-10-25 | Add review command permissions. |
+| 2026-11-03 | Correct Claude grants to comma-separated `Bash(<prefix>:*)`; remove shell expansions from the skill's Bosun commands so grants can match. |

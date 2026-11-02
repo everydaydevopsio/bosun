@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -246,7 +247,7 @@ func TestSkillHasOneCompleteLaunchCommand(t *testing.T) {
 	for _, line := range strings.Split(out.String(), "\n") {
 		// The working-tree alternative is prose, not a launch; a real launch
 		// starts with the Bosun command.
-		if strings.HasPrefix(line, `bosun review "$PWD"`) {
+		if strings.HasPrefix(line, "bosun review <repo-path>") {
 			launches = append(launches, line)
 		}
 	}
@@ -254,14 +255,22 @@ func TestSkillHasOneCompleteLaunchCommand(t *testing.T) {
 		t.Fatalf("found %d launch commands, want exactly 1:\n%s", len(launches), strings.Join(launches, "\n"))
 	}
 	for _, want := range []string{
-		`--branch "$BRANCH"`,      // or the branch is not reviewed at all
-		`${BASE:+--base "$BASE"}`, // or a verified PR base is discarded
-		"--detach",                // or it blocks past the agent's timeout
+		"--branch <branch>", // or the branch is not reviewed at all
+		"--base <base-sha>", // or a verified PR base is discarded
+		"--detach",          // or it blocks past the agent's timeout
 		"--local-credentials",
-		`--provider "$PROVIDER"`, // or a Claude-only machine cannot run it
+		"--provider <provider>", // or a Claude-only machine cannot run it
 	} {
 		if !strings.Contains(launches[0], want) {
 			t.Errorf("launch command is missing %s:\n%s", want, launches[0])
+		}
+	}
+	// A command grant matches a literal command prefix. Expansions,
+	// substitutions and pipelines are exactly what made every submission
+	// prompt for approval, so the launch must be substitutable as written.
+	for _, shell := range []string{"$", "`", "|", "&&", "(", ")"} {
+		if strings.Contains(launches[0], shell) {
+			t.Errorf("launch command uses shell %q, which defeats the command grant:\n%s", shell, launches[0])
 		}
 	}
 
@@ -482,5 +491,58 @@ func TestInstallPermissions(t *testing.T) {
 	results, err = InstallPermissions([]Target{{Name: "claude", Dir: t.TempDir()}}, false)
 	if err != nil || len(results) != 0 {
 		t.Fatalf("Claude needs no rules file: %+v, %v", results, err)
+	}
+}
+
+// Claude Code matches a Bash grant as `Bash(<command prefix>:*)` in a
+// comma-separated list. A space-separated list of `Bash(bosun review *)`
+// matches nothing, so the skill would keep prompting for every command it
+// claims to pre-approve, which is the whole point of the grants.
+func TestSkillGrantsUseClaudePermissionSyntax(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	var list string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if rest, ok := strings.CutPrefix(line, "allowed-tools:"); ok {
+			list = strings.TrimSpace(rest)
+			break
+		}
+	}
+	if list == "" {
+		t.Fatal("skill frontmatter grants no review commands")
+	}
+	var granted []string
+	for _, entry := range strings.Split(list, ",") {
+		inner, ok := strings.CutPrefix(strings.TrimSpace(entry), "Bash(")
+		if !ok || !strings.HasSuffix(inner, ":*)") {
+			t.Fatalf("grant %q is not Claude's Bash(<prefix>:*) form", strings.TrimSpace(entry))
+		}
+		granted = append(granted, strings.TrimSuffix(inner, ":*)"))
+	}
+	want := []string{"bosun help", "bosun review", "bosun review-status", "bosun review-result"}
+	if !slices.Equal(granted, want) {
+		t.Fatalf("grants %v, want %v", granted, want)
+	}
+}
+
+// The grants cover Bosun only. A pipeline or `||` fallback around a Bosun
+// command puts grep, echo and the shell itself in the same invocation, so the
+// host asks anyway -- the failure these grants exist to remove.
+func TestSkillRunsBosunCommandsUnwrapped(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if !strings.HasPrefix(line, "bosun ") {
+			continue
+		}
+		for _, shell := range []string{"$(", "${", "`", "|", "&&", "||"} {
+			if strings.Contains(line, shell) {
+				t.Errorf("Bosun command is wrapped in shell %q, so its grant cannot match:\n%s", shell, line)
+			}
+		}
 	}
 }
