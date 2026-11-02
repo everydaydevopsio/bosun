@@ -449,3 +449,35 @@ retry once; if it repeats, inspect the provider runtime and bridgectl logs.
 
 Set `BOSUN_QUIET_WARNING_AFTER=2m` to change when silent-provider updates are
 flagged as unconfirmed progress. A quiet warning never kills the review by itself.
+
+### Avoid repeated review command approvals
+
+After upgrading Bosun, refresh the installed skill:
+
+```bash
+bosun init --force
+# Optional: allow review commands across Codex sessions.
+bosun init --target codex --permissions
+```
+
+Restart the coding agent. Claude Code receives skill-scoped permissions for
+`bosun help`, `review`, `review-status`, and `review-result` when the skill is
+invoked, as `Bash(bosun review:*)`-style command-prefix grants. Re-invoke it on
+subsequent turns when needed. Codex's optional rules live in
+`${CODEX_HOME:-~/.codex}/rules/bosun-review.rules` and apply across sessions,
+including outside the skill. Remove that file to revoke the grants. Edited
+rules survive repeated setup unless `--force` is supplied. `--print` remains
+read-only and prints the shared skill, not the Codex rules.
+
+Codex loads every `.rules` file in that directory, so the Bosun file sits
+alongside `default.rules` rather than replacing it. One unparsable file there
+stops Codex from starting and names the offending file and line; if that
+happens after an edit, fix or remove the file rather than the whole directory.
+
+Grants match the literal command text, so run Bosun directly with resolved
+arguments and read its output from the shell tool result. Wrapping it in
+assignments, pipelines, `||` fallbacks, loops, or command substitutions puts
+other programs in the same invocation and still triggers prompts. These grants cover submission (including first-use
+Kind setup and model usage), polling, and result reads. They do not allow all
+Bosun subcommands, arbitrary shell execution, or override managed policies,
+network restrictions, explicit ask/deny rules, or workspace trust requirements.

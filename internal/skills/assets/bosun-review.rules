@@ -1,0 +1,5 @@
+# Opt-in Bosun review commands only. Loaded across Codex sessions.
+prefix_rule(pattern = ["bosun", "help"], decision = "allow")
+prefix_rule(pattern = ["bosun", "review"], decision = "allow")
+prefix_rule(pattern = ["bosun", "review-status"], decision = "allow")
+prefix_rule(pattern = ["bosun", "review-result"], decision = "allow")

@@ -959,3 +959,40 @@ image, which reads like a Bosun release number and ages the same way.
 - Merge gate: AGENTS.md requires a Bosun review using a distinct provider. Docker,
   Kubernetes tooling, and a configured distinct reviewer are unavailable here.
   Keep the PR draft and run that review on its exact committed head before merge.
+
+# Task: Review command permissions
+
+## Acceptance Criteria
+- Claude grants cover review commands only; Codex rules require explicit setup.
+- Repeat installation preserves local edits and honors CODEX_HOME via targets.
+
+## Execution Checklist
+- [x] Implement grants, installer, and documentation.
+- [x] Add installer tests for repeated setup, preservation, and forced replacement.
+- [x] Run targeted Go tests and record unavailable independent Bosun review.
+
+## Outcome
+Implementation complete. Targeted Go tests and `git diff --check` passed.
+Independent Bosun review blocked: no installed Bosun binary or configured
+distinct reviewer in this environment.
+
+Follow-up (2026-11-03): the first Claude grants used a space-separated list of
+`Bash(bosun review *)`, which is not the host's `Bash(<prefix>:*)` form and
+would have matched nothing, and the skill still launched through
+`${BASE:+--base "$BASE"}` and `bosun help | grep ... || echo ...`, which its own
+prose forbids. Both are fixed and covered by tests that failed first. Codex rule
+loading is now verified empirically against codex-cli 0.149.0.
+
+Running the skill end to end then surfaced two more, both fixed with failing
+tests first:
+- Base verification compared the fetched branch *tip* to `baseRefOid`, which is
+  the merge base and stays put as the base branch advances. It rejected this
+  repository's own PR. It now checks containment.
+- The version check told agents to look for `--local-credentials` in `bosun
+  help`, but only `bosun up` advertised it, so the check passed on any binary
+  with an `up` command. The review entry now lists `--detach` and
+  `--local-credentials`.
+
+Live verification: `bosun help`, `bosun review`, and `bosun review-status` all
+ran unprompted under the installed v3 skill. Bosun review of afa8c129 with
+`--provider codex-bosun` completed with no material findings.

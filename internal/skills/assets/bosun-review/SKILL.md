@@ -1,5 +1,6 @@
 ---
 name: bosun-review
+allowed-tools: Bash(bosun help:*), Bash(bosun review:*), Bash(bosun review-status:*), Bash(bosun review-result:*)
 description: >
   Run an independent AI code review of the current repository with Bosun, then
   triage the findings. Use this skill when the user asks to: review my changes,
@@ -11,10 +12,40 @@ description: >
 
 # Bosun code review
 
-<!-- bosun-skill-version: 2 -->
+<!-- bosun-skill-version: 4 -->
 
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
+
+## Authorization and command permissions
+
+Treat an explicit Bosun skill invocation, or a review required by the user's
+repository instructions, as authorization to submit the review, poll it, and
+read its results. Do not ask conversational permission for each of these steps.
+Respect host permission prompts and managed policy; the skill cannot override them.
+
+Claude Code uses the scoped `allowed-tools` above during skill invocation.
+Re-invoke the skill on a later turn if those permissions have expired.
+Codex users can opt in once with `bosun init --permissions --target codex`;
+this installs command rules in `$CODEX_HOME/rules/bosun-review.rules` (default
+`~/.codex/rules/bosun-review.rules`). Restart Codex afterward. These rules
+apply across sessions, not only while this skill is active.
+
+Run Bosun as a standalone command with literal, resolved arguments. Set the
+shell tool's working directory separately. Avoid shell wrappers, assignments,
+command substitutions, loops, environment prefixes, and pipes around Bosun:
+they can prevent command permissions from matching. The snippets below show
+argument resolution; when executing, substitute the resolved values directly
+and capture stdout from the tool result instead of `JOB="$(...)"`.
+For example, run `bosun review /path/to/repo --branch feature/example --base
+<verified-sha> --detach --local-credentials --provider claude-bosun`, then
+`bosun review-status <returned-job> --json` as separate tool calls.
+
+Only review submission, polling, results, and help are pre-approved. Cluster
+reset, credential changes, installation, and unrelated commands keep their
+normal permissions. Submission can create a local Kind cluster and use model
+credits; do not submit duplicate reviews. Managed deny/ask rules, network
+restrictions, and workspace trust can still require approval.
 
 ## Before running
 
@@ -23,11 +54,18 @@ existed fails with `unknown flag`, which looks like your mistake rather than a
 stale install:
 
 ```bash
-command -v bosun || echo "Bosun is not installed: see https://github.com/everydaydevopsio/bosun"
-bosun help | grep -q -- --local-credentials || echo "This bosun is too old; upgrade it"
+bosun help
 ```
 
-If either check fails, tell the user how to fix it and stop. Do not try to work
+Read the output yourself rather than piping it through `grep`: a pipeline puts
+other programs in the same invocation and the command grant stops matching.
+
+If the command is not found, Bosun is not installed — point the user at
+https://github.com/everydaydevopsio/bosun. If the `bosun review` entry does not
+list both `--detach` and `--local-credentials`, this `bosun` predates the flags
+below and must be upgraded. Read that entry specifically: the flags also appear
+under other commands, so finding the words somewhere in the help proves
+nothing. Either way, tell the user how to fix it and stop. Do not try to work
 around a missing or old binary.
 
 ## Decide what to review
@@ -46,7 +84,7 @@ For a PR or branch review, use `--branch` as below. It snapshots only committed
 content at that ref, even if this checkout has unrelated modified or untracked
 files. It does not switch branches or change the source worktree. State that
 uncommitted changes were excluded. If the user wants those changes reviewed,
-use `bosun review "$PWD"` without `--branch`; that snapshots the working tree
+use `bosun review <repo-path>` without `--branch`; that snapshots the working tree
 and requires checking that its contents are the intended subject.
 
 **2. There is a branch to compare.**
@@ -104,9 +142,11 @@ if [ -n "$PR_DATA" ]; then
     echo "Cannot fetch $UPSTREAM branch $BASE_BRANCH; stop." >&2
     exit 1
   }
-  FETCHED_SHA="$(git rev-parse 'FETCH_HEAD^{commit}')" || exit 1
-  if [ "$FETCHED_SHA" != "$BASE_SHA" ]; then
-    echo "The PR base moved during fetch ($BASE_SHA to $FETCHED_SHA); refresh and retry." >&2
+  # The base branch keeps moving after a PR is opened, so its tip will not
+  # equal the base commit. What must hold is that the fetched branch contains
+  # that commit: a fork's origin or the wrong upstream does not.
+  if ! git merge-base --is-ancestor "$BASE_SHA" FETCH_HEAD; then
+    echo "The PR base $BASE_SHA is not in $UPSTREAM $BASE_BRANCH; refresh and retry." >&2
     exit 1
   fi
   BASE="$BASE_SHA"
@@ -121,14 +161,21 @@ if [ -z "$PROVIDER" ]; then
     PROVIDER=claude-bosun
   fi
 fi
+
+# Shell variables do not survive to the next tool call, so print the resolved
+# values and substitute them into the launch command yourself.
+printf 'BRANCH=%s\nBASE=%s\nPROVIDER=%s\n' "$BRANCH" "$BASE" "$PROVIDER"
 ```
 
 Tell the user which base was used. A review against the wrong base is worse than
 no review, because the diff looks plausible.
 
 In a fork checkout `origin` is your fork, not the repository the pull request
-targets. The SHA check prevents a moved or incorrectly fetched upstream branch
-from becoming a plausible but wrong review. If GitHub lookup or fetch fails,
+targets. The containment check prevents an incorrectly fetched upstream branch
+from becoming a plausible but wrong review, while still allowing the ordinary
+case where the base branch gained commits after the PR was opened. `baseRefOid`
+is the commit the PR is measured from, so it is the base to review against even
+when the base branch has moved past it. If GitHub lookup or fetch fails,
 stop; never substitute a local base by name. For a branch without a PR, explicitly
 choose `BOSUN_REVIEW_OFFLINE=true` before resolving the arguments. Bosun prints
 the resolved base and merge base when it submits the review.
@@ -190,28 +237,74 @@ A review can run for up to 30 minutes. Your shell tool will time out long
 before that, so **never run `bosun review` in the foreground and never use
 `review-status --follow`**. Start it detached and poll instead:
 
-This is the only launch command in this skill. Run it once, with the variables
-resolved above:
+This is the only launch command in this skill. Run it once, substituting the
+values resolved above for each placeholder. Keep its stderr visible: credential
+failures are reported there before a Job name is printed.
 
 ```bash
-JOB="$(bosun review "$PWD" --branch "$BRANCH" ${BASE:+--base "$BASE"} --detach --local-credentials --provider "$PROVIDER")" || JOB=""
-echo "JOB=$JOB"
+bosun review <repo-path> --branch <branch> --base <base-sha> --detach --local-credentials --provider <provider>
 ```
 
-**Check it actually submitted before polling.** An empty `JOB` means submission
-failed -- the message is on stderr and names which part failed. Report that and
-stop; do not poll, because there is nothing to poll for and no terminal event
-will ever arrive:
+`<repo-path>` is the absolute path of the checkout, and `<branch>`, `<base-sha>`
+and `<provider>` are `BRANCH`, `BASE` and `PROVIDER` from the block above. When
+`BASE` is empty — the offline checkout review — drop `--base <base-sha>` from
+the command entirely rather than passing an empty value.
+
+Write the whole command out literally. Do not reintroduce `$BRANCH`, `$(...)`,
+or `${BASE:+...}`: the host matches a command grant against the text you run,
+so an unexpanded variable turns a pre-approved review into another prompt.
+
+**Check it actually submitted before polling.** The job name goes to stdout and
+progress goes to stderr, so read the returned job name out of the tool result
+and keep it in your agent context. No job name means submission failed — the
+message on stderr names which part. Report that and stop; do not poll, because
+there is nothing to poll for and no terminal event will ever arrive.
+
+### Recover from a credential failure
+
+`--local-credentials` checks the selected provider with a real headless request
+and refreshes the Kind Secret before submission. A Secret entry or `codex login
+status` alone does not prove the token works. Do not run `bosun down` or `bosun
+reset` for a credential error; they disturb the cluster without renewing a
+provider sign-in.
+
+If submission failed with `cannot live-check CODEX_AUTH`, an exported
+`CODEX_AUTH` is taking precedence over the Codex sign-in file. If
+`${CODEX_HOME:-$HOME/.codex}/auth.json` exists, retry the same launch command
+**once**, prefixing `bosun` with `env -u CODEX_AUTH`. This removes the exported
+value only for that child process, allowing Bosun to discover and live-check the
+file. Preserve the resolved branch, base, and provider. Do not print either
+credential. If the file is absent, stop and explain that the exported JSON
+cannot be verified by the host Codex CLI; the user must provide a usable CLI
+sign-in or API key.
+
+That `env` prefix is the one deliberate exception to running Bosun unwrapped.
+It will not match the review command grant, so expect an approval prompt for
+that single recovery attempt; do not adopt the prefix for ordinary submissions.
+
+For `AUTH_REJECTED` or `AUTH_REVOKED` during submission, the saved provider
+credential failed the live check. An agent cannot repair an interactive login
+by copying the same token again. Ask the user to renew the selected provider's
+sign-in (`codex login` or `claude auth login`), then run `bosun up
+--local-credentials --provider <provider>` to verify it and refresh the
+existing cluster Secret. Resume only after that command succeeds. Check
+`CODEX_HOME` if the Codex file Bosun names differs from the account the user
+renewed. An exported provider credential takes precedence over a saved file;
+do not silently discard an explicit export except for the one bounded
+`CODEX_AUTH` fallback above.
+
+If a Job was submitted and later fails at the provider stage with an auth
+diagnosis, run `bosun up --local-credentials --provider <provider>` once. If
+it succeeds, submit one new Job for the **same** head and base and poll it to a
+terminal event. If it fails, or the new Job also fails authentication, stop
+and report the diagnosis and both Job names. Never retry just to obtain a
+different review result.
+
+Then poll, substituting that job name and waiting between checks. Each poll
+returns immediately:
 
 ```bash
-[ -n "$JOB" ] || { echo "submission failed; not polling"; }
-```
-
-The job name goes to stdout; progress goes to stderr. Then poll, waiting
-between checks. Each poll returns immediately:
-
-```bash
-bosun review-status "$JOB" --json
+bosun review-status <job-name> --json
 ```
 
 Do not pipe that through `tail` or `head` when you need to know whether it
@@ -238,13 +331,13 @@ prepared.
 When it completes, read the review:
 
 ```bash
-bosun review-status "$JOB"
+bosun review-status <job-name>
 ```
 
 To triage it, read the structured result rather than parsing the report:
 
 ```bash
-bosun review-result "$JOB" --json
+bosun review-result <job-name> --json
 ```
 
 It names the commit and merge base that were reviewed, and carries one entry
@@ -260,7 +353,7 @@ Before reusing a result from an earlier session, check that it still describes
 this checkout:
 
 ```bash
-bosun review-result "$JOB" --against-ref HEAD
+bosun review-result <job-name> --against-ref HEAD
 ```
 
 A branch that has moved is reported plainly, naming both commits. It never
