@@ -1034,3 +1034,37 @@ Bosun review pass 2 (7c44105) returned two findings, both confirmed and fixed:
   fed only progress events and missed it. The monitor now suppresses logs whose
   `event` is `review.UsageLogEvent`, a constant now shared by producer and
   consumer so the two cannot drift. The monitor test feeds both representations.
+
+
+# Task: Summary comment beside a findings review
+
+## Context
+- Date: 2026-11-03
+- Mode: Autonomous
+- Plan: `plans/plan-review-summary-comment.md`.
+
+## Acceptance Criteria
+- AC1: A findings review posts exactly one summary comment; a no-findings review
+  still posts exactly one comment and no review.
+- AC2: The summary carries the review marker and the reviewed ref and commit.
+- AC3: The summary states the count and severities and does not repeat detail.
+- AC4: A failed summary does not fail a review that already published.
+
+## Execution Checklist
+- [x] Reproduce the gap with failing tests, including the 422 fallback path.
+- [x] Implement postSummary on both review paths; keep failure non-fatal.
+- [x] Record the terminal-vs-pointer distinction in PRD GO-4 and criterion 6.
+- [x] Document both surfaces and how to query them in docs/github-app.md.
+
+## Test Strategy
+- Go: summary content and discoverability, exactly-one on the 422 fallback,
+  non-fatal summary failure, and the unchanged no-findings path.
+- Requirement mapping: PRD GO-4 and acceptance criterion 6.
+
+## Rollback Strategy
+- Revert this PR. The summary is additive; removing it restores the previous
+  surfaces without touching stored state.
+
+## Outcome
+- Result: implemented; full suite, vet, lint, and diff checks pass.
+- Evidence: `env -u CODEX_HOME go test ./...`, `make lint`.

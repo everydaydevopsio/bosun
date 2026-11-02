@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -332,6 +333,9 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
 	var status httpError
 	if !errors.As(err, &status) || status.status != http.StatusUnprocessableEntity {
+		if err == nil {
+			g.postSummary(ctx, repo, number, token, ref, sha, findings)
+		}
 		return err
 	}
 	// GitHub rejects the whole review when any single comment position is
@@ -344,7 +348,82 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	// because the push that removed it has already triggered its own review.
 	body["comments"] = []any{}
 	body["body"] = reviewBody(ref, sha, summary, "Findings", findings)
-	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
+	if err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil); err != nil {
+		return err
+	}
+	g.postSummary(ctx, repo, number, token, ref, sha, findings)
+	return nil
+}
+
+// postSummary puts a short pointer to a findings review where a plain comment
+// listing will find it.
+//
+// A review and its threads live under /pulls/N/reviews; issue comments live
+// under /issues/N/comments, and the common checks -- `gh pr view --json
+// comments` among them -- read only the latter. A review with no findings
+// already publishes there, so polling comments alone reports a clean review and
+// stays silent about one that found something: the answer is inverted exactly
+// when it matters. This comment closes that gap without becoming a second copy
+// of the review.
+//
+// Failure is deliberately not returned. The review is the artifact and it has
+// already reached the pull request; failing here would report a failed review
+// that is visibly published, and re-running it would spend model credits to
+// produce findings that are already there.
+func (g githubClient) postSummary(ctx context.Context, repo string, number int, token, ref, sha string, findings []Finding) {
+	body := reviewMarker + "\n\n" + metadata(ref, sha) + "\n\n" +
+		findingCount(findings) + " published as review threads" + severityBreakdown(findings) + ".\n\n" +
+		"Each finding is its own thread on the Files changed tab. This comment is a pointer; the detail is in the threads."
+	if err := g.postComment(ctx, repo, number, token, body); err != nil {
+		slog.Warn("publish review summary comment", "repo", repo, "pr", number, "error", redact(err.Error(), token))
+	}
+}
+
+// findingCount keeps the singular readable: "1 finding", not "1 findings".
+func findingCount(findings []Finding) string {
+	if len(findings) == 1 {
+		return "**1 finding**"
+	}
+	return "**" + strconv.Itoa(len(findings)) + " findings**"
+}
+
+// severityBreakdown orders by how much a reader should care, not
+// alphabetically, and keeps unrecognized severities rather than dropping a
+// finding from the count a reader checks against the threads.
+func severityBreakdown(findings []Finding) string {
+	counts := map[string]int{}
+	var order []string
+	for _, f := range findings {
+		severity := strings.ToLower(strings.TrimSpace(f.Severity))
+		if severity == "" {
+			severity = "unspecified"
+		}
+		if counts[severity] == 0 {
+			order = append(order, severity)
+		}
+		counts[severity]++
+	}
+	rank := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "unspecified": 5}
+	known := func(s string) int {
+		if r, ok := rank[s]; ok {
+			return r
+		}
+		return len(rank)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		if a, b := known(order[i]), known(order[j]); a != b {
+			return a < b
+		}
+		return order[i] < order[j]
+	})
+	parts := make([]string, 0, len(order))
+	for _, severity := range order {
+		parts = append(parts, strconv.Itoa(counts[severity])+" "+codeSpan(severity))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " — " + strings.Join(parts, ", ")
 }
 
 // prFiles lists the paths the pull request touches.
