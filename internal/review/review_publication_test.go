@@ -350,3 +350,63 @@ func TestSummaryOrdersSeveritiesByTriageRank(t *testing.T) {
 		t.Fatalf("severities are not in triage order: %q", comments[0])
 	}
 }
+
+// Found by Bosun review. Asking request to decode the response made a
+// successful publication depend on reading its body: a truncated body or a
+// read timeout after a 2xx turned a review that GitHub had created into a
+// returned error. Worker.Run would then leave published false and post a
+// failure comment contradicting the review on the pull request -- both
+// publications, which GO-4 forbids. The URL is a nicety; the review is not.
+func TestUnreadableResponseDoesNotFailAPublishedReview(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reject bool
+	}{
+		{"direct", false},
+		{"422 fallback", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var comments []string
+			reviews := 0
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls/7/files"):
+					fmt.Fprint(w, `[{"filename":"a.go"}]`)
+				case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/pulls/7/reviews"):
+					reviews++
+					if tc.reject && reviews == 1 {
+						http.Error(w, "unprocessable", 422)
+						return
+					}
+					// Status says the review exists; the body is cut short.
+					w.WriteHeader(200)
+					fmt.Fprint(w, `{"html_url": "https://github.`)
+				case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/7/comments"):
+					var posted struct {
+						Body string `json:"body"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+						t.Error(err)
+					}
+					comments = append(comments, posted.Body)
+					w.WriteHeader(201)
+					fmt.Fprint(w, `{}`)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer api.Close()
+			output := withFindings(`{"path":"a.go","line":3,"severity":"high","title":"T"}`)
+			if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
+				t.Fatalf("an unreadable response must not fail a created review: %v", err)
+			}
+			// The summary still publishes, naming the review without a link.
+			if len(comments) != 1 {
+				t.Fatalf("posted %d summary comments, want 1", len(comments))
+			}
+			if !strings.Contains(comments[0], "Read the review on this pull request") {
+				t.Errorf("summary should name the review when it has no URL: %q", comments[0])
+			}
+		})
+	}
+}

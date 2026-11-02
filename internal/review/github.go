@@ -82,10 +82,20 @@ func (g githubClient) request(ctx context.Context, method, path, token string, b
 		return httpError{status: resp.StatusCode, method: method, path: path}
 	}
 	if result != nil {
-		return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(result)
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(result); err != nil {
+			return decodeError{err}
+		}
 	}
 	return nil
 }
+
+// decodeError separates "the request did not happen" from "the request
+// happened and the reply was unreadable". A caller that only wanted a field
+// out of the body can ignore it; one that needs the body must not.
+type decodeError struct{ err error }
+
+func (e decodeError) Error() string { return "decode GitHub response: " + e.err.Error() }
+func (e decodeError) Unwrap() error { return e.err }
 func appJWT(appID, key string, now time.Time) (string, error) {
 	block, _ := pem.Decode([]byte(strings.ReplaceAll(key, `\n`, "\n")))
 	if block == nil {
@@ -333,7 +343,7 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	var published struct {
 		URL string `json:"html_url"`
 	}
-	err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published)
+	err := publishedReview(g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published), repo, number)
 	var status httpError
 	if !errors.As(err, &status) || status.status != http.StatusUnprocessableEntity {
 		if err == nil {
@@ -351,11 +361,25 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	// because the push that removed it has already triggered its own review.
 	body["comments"] = []any{}
 	body["body"] = reviewBody(ref, sha, summary, "Findings", findings)
-	if err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published); err != nil {
+	if err := publishedReview(g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published), repo, number); err != nil {
 		return err
 	}
 	g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
 	return nil
+}
+
+// publishedReview drops the error from an unreadable response body. The status
+// already said GitHub created the review, and the body is read only for the
+// summary's link. Returning the error here would report a failed publication
+// for a review that is visibly on the pull request, and Worker.Run would then
+// add a failure comment beside it -- the "never both" that GO-4 forbids.
+func publishedReview(err error, repo string, number int) error {
+	var decode decodeError
+	if errors.As(err, &decode) {
+		slog.Warn("read published review response", "repo", repo, "pr", number, "error", decode.Error())
+		return nil
+	}
+	return err
 }
 
 // postSummary puts a short pointer to a findings review where a plain comment

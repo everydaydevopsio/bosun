@@ -1068,3 +1068,15 @@ Bosun review pass 2 (7c44105) returned two findings, both confirmed and fixed:
 ## Outcome
 - Result: implemented; full suite, vet, lint, and diff checks pass.
 - Evidence: `env -u CODEX_HOME go test ./...`, `make lint`.
+
+Bosun review of this branch found three issues across two passes, all confirmed
+and fixed:
+- Medium: the summary said every finding is a thread on Files changed. False
+  after the 422 fallback and for findings outside the diff. It now links the
+  published review and describes both placements.
+- Low: the severity ranking duplicated `findings.go` and omitted `blocker`, so
+  blockers sorted last. It reuses the one `severities` map.
+- Medium: decoding the create-review response made publication depend on reading
+  the body, so a truncated reply after a 2xx failed a review GitHub had created
+  and Worker.Run would add a contradictory failure comment. Decode failures are
+  now a distinct error that only this caller ignores.
