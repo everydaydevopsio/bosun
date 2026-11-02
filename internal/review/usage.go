@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"os"
 	"regexp"
@@ -115,9 +116,26 @@ func (r *usageRecorder) flushPartial() string {
 	return r.scan(held, true)
 }
 
-// couldBeMarker reports whether s may still grow into the reserved prefix.
-func couldBeMarker(s string) bool {
-	return strings.HasPrefix(s, usagePrefix) || strings.HasPrefix(usagePrefix, s)
+// maybeMarkerStart reports whether s is a strict prefix of the reserved marker,
+// so it may still grow into one once more of the line arrives.
+func maybeMarkerStart(s string) bool { return s != "" && strings.HasPrefix(usagePrefix, s) }
+
+// consumeMarker reads one usage record from a line already known to carry the
+// reserved prefix. It records a valid aggregate and returns any bytes that
+// followed the record, so output coalesced onto the same payload survives.
+// incomplete distinguishes a record truncated mid-transport, which more input
+// may finish, from a malformed one, which never will.
+func (r *usageRecorder) consumeMarker(line string) (rest string, parsed, incomplete bool) {
+	body := strings.TrimPrefix(line, usagePrefix)
+	decoder := json.NewDecoder(strings.NewReader(body))
+	var u ProviderUsage
+	if err := decoder.Decode(&u); err != nil {
+		return "", false, errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF)
+	}
+	if !r.seen && u.Source == r.usage.Source && validUsage(&u) {
+		r.usage, r.seen = u, true
+	}
+	return body[decoder.InputOffset():], true, false
 }
 
 func (r *usageRecorder) scan(raw string, final bool) string {
@@ -130,22 +148,35 @@ func (r *usageRecorder) scan(raw string, final bool) string {
 		if line == "" {
 			continue
 		}
-		if !final && !strings.HasSuffix(line, "\n") && couldBeMarker(line) {
+		body := strings.TrimSuffix(line, "\n")
+		terminator := line[len(body):]
+		// Oversized input is never buffered, so a fragment cannot grow without
+		// bound while it waits for a terminator that may never come.
+		holdable := !final && terminator == "" && len(line) <= 64*1024
+		if strings.HasPrefix(body, usagePrefix) {
+			if len(line) > 64*1024 {
+				continue
+			}
+			rest, parsed, incomplete := r.consumeMarker(body)
+			if parsed {
+				// A complete record is consumed on sight, whatever followed it
+				// on the same payload is review text.
+				if rest != "" {
+					output.WriteString(rest + terminator)
+				}
+				continue
+			}
+			if incomplete && holdable {
+				r.partial = line
+				break
+			}
+			continue
+		}
+		if holdable && maybeMarkerStart(body) {
 			r.partial = line
 			break
 		}
-		if !strings.HasPrefix(line, usagePrefix) {
-			output.WriteString(line)
-			continue
-		}
-		if r.seen {
-			continue
-		}
-		var u ProviderUsage
-		if len(line) > 64*1024 || json.Unmarshal([]byte(strings.TrimPrefix(line, usagePrefix)), &u) != nil || u.Source != r.usage.Source || !validUsage(&u) {
-			continue
-		}
-		r.usage, r.seen = u, true
+		output.WriteString(line)
 	}
 	return output.String()
 }

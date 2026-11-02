@@ -1010,3 +1010,16 @@ tests first:
 Live verification: `bosun help`, `bosun review`, and `bosun review-status` all
 ran unprompted under the installed v3 skill. Bosun review of afa8c129 with
 `--provider codex-bosun` completed with no material findings.
+
+Bosun review of 16323c1 (`--provider codex-bosun`) returned one high finding,
+confirmed against the code and fixed:
+- Buffering an unterminated fragment that merely looked like the marker was
+  wrong, because bridgectl strips newlines (measured and documented in
+  `internal/review/findings.go`). Both adapters emit the record first, so the
+  record was buffered, the review was concatenated onto it and buffered too, and
+  the combined text failed to decode at exit -- `runSession` reported "agent
+  session produced no output" and the whole review was lost. `scan` now consumes
+  a complete record on sight via a JSON decoder, keeps any text that followed it
+  on the same payload, and buffers only a genuinely truncated record. The
+  reviewer's suggested `runSession` regression with newline-free payloads is
+  added and failed first for both providers.

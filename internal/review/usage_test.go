@@ -251,3 +251,29 @@ func TestUnterminatedFinalUsageLineIsRecordedNotPublished(t *testing.T) {
 		t.Fatalf("unterminated record was not captured: %+v", r.usage)
 	}
 }
+
+// With newlines stripped, a record and the text that followed it can arrive as
+// one payload. The record is consumed and the trailing text survives as review
+// prose -- dropping the whole payload would lose the review.
+func TestRecordAndReviewTextInOnePayloadBothSurvive(t *testing.T) {
+	r := newUsageRecorder("codex-bosun")
+	got := r.filter(`BOSUN_USAGE_V1 {"source":"codex","status":"available","input_tokens":11,"output_tokens":2}` + "Trailing review text.")
+	if got != "Trailing review text." {
+		t.Fatalf("output %q", got)
+	}
+	if !r.seen || r.usage.InputTokens == nil || *r.usage.InputTokens != 11 {
+		t.Fatalf("record not consumed: %+v", r.usage)
+	}
+}
+
+// A malformed record is dropped, not published: the point of the reserved line
+// is that provider JSON never reaches the review, valid or not.
+func TestMalformedRecordIsDroppedNotPublished(t *testing.T) {
+	r := newUsageRecorder("codex-bosun")
+	if got := r.filter(`BOSUN_USAGE_V1 {"source":"codex",,,}` + "\n"); got != "" {
+		t.Fatalf("malformed record published: %q", got)
+	}
+	if r.seen {
+		t.Fatal("malformed record was recorded")
+	}
+}
