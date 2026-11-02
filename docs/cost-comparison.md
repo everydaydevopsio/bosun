@@ -2,8 +2,12 @@
 
 Compare the cost of a useful review on the same commit, including failed attempts,
 repeat reviews, and infrastructure. Elapsed minutes alone do not measure model cost.
-This guide records public USD list prices checked on **2026-10-27**. Preserve that
-date with any calculation and refresh the sources before making pricing claims.
+This guide records public USD list prices. The Copilot and OpenAI figures were
+checked on **2026-10-27** and the OpenAI table re-verified on **2026-11-03**; the
+Anthropic figures were checked on **2026-11-03**. Preserve the date with any
+calculation and refresh the sources before making pricing claims -- model lineups
+turn over faster than this document does, and a price that is merely stale reads
+exactly like a price that is current.
 
 ## Measurement workflow
 
@@ -156,6 +160,62 @@ many times, so the diff size alone does not determine total input usage.
 Codex authenticated through a ChatGPT subscription has different allowance/credit
 accounting. These API prices apply to API-key billing; they do not establish the
 cash cost of subscription-backed reviews. See [Codex pricing](https://developers.openai.com/codex/pricing).
+
+## Anthropic API model costs
+
+The `claude-bosun` provider is the one whose per-model usage Bosun captures in
+most detail, so its list prices belong here too.
+[Anthropic's published prices](https://platform.claude.com/docs/en/about-claude/pricing),
+in USD per million tokens, verified 3 November 2026:
+
+| Model | Base input | Cache read | 5m cache write | 1h cache write | Output |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `claude-haiku-5-5` (≤100k-token prompts) | $0.10 | $0.01 | $0.125 | $0.20 | $0.50 |
+| `claude-haiku-5-5` (>100k-token prompts) | $0.50 | $0.05 | $0.625 | $1.00 | $2.50 |
+| `claude-sonnet-5-5` | $2.00 | $0.10 | $2.50 | $4.00 | $10.00 |
+| `claude-sonnet-5` | $2.00 | $0.20 | $2.50 | $4.00 | $10.00 |
+| `claude-opus-5-5` | $4.00 | $0.20 | $5.00 | $8.00 | $20.00 |
+| `claude-opus-5` | $5.00 | $0.50 | $6.25 | $10.00 | $25.00 |
+| `claude-fable-5-1` | $10.00 | $0.25 | $12.50 | $20.00 | $50.00 |
+
+**The cache-read multiplier is not uniform across the lineup.** It is 0.025× base
+input on `claude-fable-5-1`, 0.05× on `claude-opus-5-5` and `claude-sonnet-5-5`,
+and 0.10× everywhere else. Deriving a cache-read rate by assuming one tenth of
+base input overstates it on exactly the models most likely to be in use. Take the
+rate from the table or the pricing page, never from a multiplier.
+
+Two further cautions when pricing a Claude review:
+
+- **Cache lifetimes differ from OpenAI's.** Anthropic's prompt cache is 5-minute
+  and 1-hour; OpenAI's is 30-minute and 12-hour. The `cache_write_30m_tokens` and
+  `cache_write_12h_tokens` measurement fields are OpenAI's categories and stay
+  null for Claude; a Claude cache write lands in `cache_write_input_tokens`
+  without a lifetime breakdown, so it cannot be priced at a specific write rate
+  from the record alone.
+- **Models from Claude Opus 4.7 onward use a newer tokenizer** that produces
+  roughly 30% more tokens for the same text. Token counts are therefore not
+  comparable across that boundary, and neither are costs derived from them.
+  Compare dollars, not tokens, when the models differ.
+
+Anthropic's cost accounting differs from OpenAI's in one way that matters for the
+formula below: **base input excludes cache reads and cache writes**, which bill
+as their own line items. Do not subtract them from `input_tokens`:
+
+```text
+request_model_cost_usd = (
+    base_input_tokens * base_input_rate
+  + cache_read_tokens * cache_read_rate
+  + cache_write_tokens * cache_write_rate
+  + output_tokens * output_rate
+) / 1_000_000
+```
+
+The measurement record normalizes `usage.input_tokens` to the *total* observed
+input, cache reads and writes included (see Measurement fields below), so recover
+the base-input component by subtracting them back out before applying this
+formula. That normalization is deliberate — it makes "how much input did this
+review consume" answerable across providers — but it is not the billing base for
+Anthropic. Batch API requests are 50% off and do not apply to interactive reviews.
 
 ## Include Kubernetes and operating costs
 

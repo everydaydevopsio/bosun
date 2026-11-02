@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -163,8 +164,90 @@ func TestUsageModelRedactionDoesNotCorruptNumbers(t *testing.T) {
 
 func TestUnknownModelPriceIsNotAZeroCost(t *testing.T) {
 	meter := newUsageRecorder("claude-bosun")
-	meter.filter(usagePrefix + `{"source":"claude","status":"available","input_tokens":100,"output_tokens":20,"provider_reported_cost_usd":0,"model_usage":[{"model":"claude-new","input_tokens":100,"output_tokens":20,"cost_basis":"unknown","provider_reported_cost_usd":0}]}`)
+	meter.filter(usagePrefix + `{"source":"claude","status":"available","input_tokens":100,"output_tokens":20,"provider_reported_cost_usd":0,"model_usage":[{"model":"claude-new","input_tokens":100,"output_tokens":20,"cost_basis":"unknown","provider_reported_cost_usd":0}]}` + "\n")
 	if !meter.seen || meter.usage.ProviderReportedCostUSD != nil || meter.usage.CostBasis != "unknown" {
 		t.Fatalf("unknown price presented as free: %+v", meter.usage)
+	}
+}
+
+// bridgectl is documented to forward stdout a line at a time, but nothing
+// enforces it, and bridge.go appends a newline to any argument-provider payload
+// that lacks one -- which bisects a split line permanently. A usage record
+// split across two payloads then lost its first half to a failed parse and
+// emitted the second half as review prose: provider JSON in the published
+// review, and usage reported as missing.
+func TestSplitUsageLineIsReassembledAndNeverLeaks(t *testing.T) {
+	line := `BOSUN_USAGE_V1 {"source":"codex","status":"available","input_tokens":120,"output_tokens":30}` + "\n"
+	for _, at := range []int{1, 15, 40, len(line) - 2} {
+		t.Run(fmt.Sprint(at), func(t *testing.T) {
+			r := newUsageRecorder("codex-bosun")
+			var out strings.Builder
+			out.WriteString(r.filter("Review text.\n" + line[:at]))
+			out.WriteString(r.filter(line[at:]))
+			out.WriteString(r.flushPartial())
+			if got := out.String(); got != "Review text.\n" {
+				t.Fatalf("output %q; provider JSON must not reach the review", got)
+			}
+			if !r.seen || r.usage.InputTokens == nil || *r.usage.InputTokens != 120 {
+				t.Fatalf("usage lost across the split: %+v", r.usage)
+			}
+		})
+	}
+}
+
+// Holding back every unterminated chunk would stall ordinary review text behind
+// the next payload. Only a fragment that could still become the marker waits.
+func TestOrdinaryTextIsNotDelayedByUsageBuffering(t *testing.T) {
+	r := newUsageRecorder("codex-bosun")
+	if got := r.filter("a partial sentence with no newline"); got != "a partial sentence with no newline" {
+		t.Fatalf("ordinary text was withheld: %q", got)
+	}
+	if r.partial != "" {
+		t.Fatalf("ordinary text buffered: %q", r.partial)
+	}
+}
+
+// A fragment that looks like the marker's start but never completes is review
+// text after all; flushing must return it rather than silently dropping it.
+func TestUnfinishedMarkerFragmentIsFlushedNotDropped(t *testing.T) {
+	r := newUsageRecorder("codex-bosun")
+	if got := r.filter("BOSUN_US"); got != "" {
+		t.Fatalf("fragment emitted before it could be judged: %q", got)
+	}
+	if got := r.flushPartial(); got != "BOSUN_US" {
+		t.Fatalf("flush returned %q, want the held fragment", got)
+	}
+	if got := r.flushPartial(); got != "" {
+		t.Fatalf("flush is not idempotent: %q", got)
+	}
+}
+
+// runner.go re-filters the fully assembled output with the same recorder. A
+// complete output has no "more data coming", so holding a trailing fragment
+// there would drop it -- nothing flushes after that pass.
+func TestFinalFilterHoldsNothingBack(t *testing.T) {
+	r := newUsageRecorder("codex-bosun")
+	if got := r.filterFinal("Review text.\nBOSUN_US"); got != "Review text.\nBOSUN_US" {
+		t.Fatalf("final pass withheld %q", got)
+	}
+	if r.partial != "" {
+		t.Fatalf("final pass buffered %q", r.partial)
+	}
+}
+
+// The adapters terminate the marker, but a stream can still end without a
+// newline. Such a line is a record, not prose: flushing must record it rather
+// than publish provider JSON as the tail of the review.
+func TestUnterminatedFinalUsageLineIsRecordedNotPublished(t *testing.T) {
+	r := newUsageRecorder("codex-bosun")
+	held := r.filter(`BOSUN_USAGE_V1 {"source":"codex","status":"available","input_tokens":7,"output_tokens":3}`)
+	if held != "" {
+		t.Fatalf("emitted %q mid-stream", held)
+	}
+	if got := r.flushPartial(); got != "" {
+		t.Fatalf("flush published provider JSON: %q", got)
+	}
+	if !r.seen || r.usage.InputTokens == nil || *r.usage.InputTokens != 7 {
+		t.Fatalf("unterminated record was not captured: %+v", r.usage)
 	}
 }

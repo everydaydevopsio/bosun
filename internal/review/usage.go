@@ -70,6 +70,9 @@ type usageKey struct{}
 type usageRecorder struct {
 	usage ProviderUsage
 	seen  bool
+	// partial holds a trailing fragment that could still become the reserved
+	// marker once the rest of the line arrives.
+	partial string
 }
 
 func newUsageRecorder(provider string) *usageRecorder {
@@ -83,16 +86,54 @@ func newUsageRecorder(provider string) *usageRecorder {
 	return &usageRecorder{usage: ProviderUsage{Source: source, Status: "missing"}}
 }
 
-// bridgectl's stream_json transport forwards stdout one line at a time. Strip
-// the adapter's reserved control lines before diagnostics or review publication.
-// Replayed samples replace nothing: the adapter emits one final aggregate and
-// bridge sequence deduplication handles reattachment. Never sum aggregates.
-func (r *usageRecorder) filter(raw string) string {
+// Strip the adapter's reserved control lines before diagnostics or review
+// publication. Replayed samples replace nothing: the adapter emits one final
+// aggregate and bridge sequence deduplication handles reattachment. Never sum
+// aggregates.
+//
+// bridgectl's stream_json transport is documented to forward stdout a line at a
+// time, but nothing enforces that, and the bridge appends a newline to any
+// argument-provider payload lacking one -- which makes a split permanent. So a
+// trailing fragment that could still become the marker waits for the rest of
+// the line instead of being judged on its own. Ordinary text never waits.
+func (r *usageRecorder) filter(raw string) string { return r.scan(raw, false) }
+
+// filterFinal reads a complete, already-terminated output. Nothing more is
+// coming, so no fragment is held back -- there is no later flush to release it.
+func (r *usageRecorder) filterFinal(raw string) string { return r.scan(raw, true) }
+
+// flushPartial ends the stream: it judges any held fragment now that nothing
+// more is coming. A fragment that turned out to be a complete record is
+// recorded, not emitted -- an unterminated final line must not become review
+// prose. Anything else was review text all along and is returned.
+func (r *usageRecorder) flushPartial() string {
+	if r == nil || r.partial == "" {
+		return ""
+	}
+	held := r.partial
+	r.partial = ""
+	return r.scan(held, true)
+}
+
+// couldBeMarker reports whether s may still grow into the reserved prefix.
+func couldBeMarker(s string) bool {
+	return strings.HasPrefix(s, usagePrefix) || strings.HasPrefix(usagePrefix, s)
+}
+
+func (r *usageRecorder) scan(raw string, final bool) string {
 	if r == nil || r.usage.Source == "unknown" {
 		return raw
 	}
+	raw, r.partial = r.partial+raw, ""
 	var output strings.Builder
 	for _, line := range strings.SplitAfter(raw, "\n") {
+		if line == "" {
+			continue
+		}
+		if !final && !strings.HasSuffix(line, "\n") && couldBeMarker(line) {
+			r.partial = line
+			break
+		}
 		if !strings.HasPrefix(line, usagePrefix) {
 			output.WriteString(line)
 			continue

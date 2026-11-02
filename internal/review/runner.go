@@ -243,7 +243,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	providerStart := time.Now()
 	output, err := w.Agent(ctx, workspace, cfg.ReviewProvider, prompt, max)
 	providerSeconds = time.Since(providerStart).Seconds()
-	output = meter.filter(output)
+	output = meter.filterFinal(output)
 	if err != nil {
 		return fail(agentFailureStage(err), err)
 	}

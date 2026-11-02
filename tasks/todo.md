@@ -960,6 +960,20 @@ image, which reads like a Bosun release number and ages the same way.
   Kubernetes tooling, and a configured distinct reviewer are unavailable here.
   Keep the PR draft and run that review on its exact committed head before merge.
 
+Follow-up (2026-11-03), from reviewing this branch against the merged main:
+- `usageRecorder.filter` judged each payload independently, so a usage record
+  split across two bridge payloads lost its first half to a failed parse and
+  published the second half as review prose -- provider JSON in the review, usage
+  reported missing. The bridge's own newline injection made the split permanent.
+  A trailing fragment that could still become the marker now waits for the rest
+  of its line; `flushPartial` judges it at end of stream, and the whole-output
+  pass holds nothing back so the two passes cannot leak into each other.
+- Anthropic list prices were absent even though `claude-bosun` is the provider
+  whose per-model usage is captured in most detail. Added, verified 2026-11-03,
+  with the non-uniform cache-read multiplier (0.025x / 0.05x / 0.10x) called out.
+- The four OpenAI model names and every rate in that table were re-verified
+  against the live pricing page and are correct as published.
+
 # Task: Review command permissions
 
 ## Acceptance Criteria

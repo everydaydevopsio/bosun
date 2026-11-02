@@ -189,6 +189,11 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 		return "", fmt.Errorf("attach bridge session: %w", err)
 	}
 	var out strings.Builder
+	meter := usageFrom(ctx)
+	// A fragment held back mid-stream is ordinary text once the stream ends.
+	// Release it here rather than letting it reach the second, whole-output
+	// filter pass, which has no flush of its own.
+	settled := func() string { return out.String() + meter.flushPartial() }
 	reporter := progress.From(ctx)
 	reporter.Emit("stage", "reviewing")
 	type received struct {
@@ -231,7 +236,7 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 				continue
 			}
 			if state.Status == bridgev1.SessionStatus_SESSION_STATUS_FAILED || (state.ExitRecorded && (state.ExitCode != 0 || state.Error != "")) {
-				return "", providerExitError(provider, state.ExitCode, state.Error, out.String())
+				return "", providerExitError(provider, state.ExitCode, state.Error, settled())
 			}
 			reporter.Emit("session", fmt.Sprintf("Session %s; last sequence %d", state.Status, state.LastSeq))
 			continue
@@ -295,23 +300,23 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 			sent = true
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
 			reporter.Emit("activity", "Provider output received")
-			payload := usageFrom(ctx).filter(string(event.Payload))
+			payload := meter.filter(string(event.Payload))
 			out.WriteString(payload)
 			if payload != "" && argumentProvider(provider) && !strings.HasSuffix(payload, "\n") {
 				out.WriteByte('\n')
 			}
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT:
 			if event.ExitCode != 0 || event.Error != "" {
-				return "", providerExitError(provider, event.ExitCode, event.Error, out.String())
+				return "", providerExitError(provider, event.ExitCode, event.Error, settled())
 			}
-			if strings.TrimSpace(out.String()) == "" {
+			if strings.TrimSpace(settled()) == "" {
 				return "", fmt.Errorf("agent session produced no output")
 			}
-			return CleanOutput(out.String()), nil
+			return CleanOutput(settled()), nil
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING:
 			reporter.Emit("activity", "Provider active")
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
-			return "", providerExitError(provider, event.ExitCode, event.Error, out.String())
+			return "", providerExitError(provider, event.ExitCode, event.Error, settled())
 		}
 		select {
 		case <-ctx.Done():

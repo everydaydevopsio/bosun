@@ -68,3 +68,4 @@ and whether savings survive infrastructure allocation and current entitlements.
 | Date | Change |
 | --- | --- |
 | 2026-10-27 | Capture measured usage first; separate list-price comparison from actual billing. |
+| 2026-11-03 | Reassemble usage records split across bridge payloads; add verified Anthropic list prices. |
