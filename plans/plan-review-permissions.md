@@ -16,7 +16,9 @@ Use direct command calls so the host can match command prefixes.
 ## Files Affected
 - internal/skills/: embedded skill, rules installer, regression tests.
 - cmd/bosun/init.go: explicit permissions setup option.
+- cmd/bosun/main.go: review usage advertises the flags the skill checks for.
 - docs/local-development.md: setup and permission boundaries.
+- PRD.md: GO-2 base verification semantics; acceptance criterion 7.
 
 ## Phases
 - [x] Inspect skills and official permission documentation.
@@ -46,3 +48,4 @@ None.
 | --- | --- |
 | 2026-10-25 | Add review command permissions. |
 | 2026-11-03 | Correct Claude grants to comma-separated `Bash(<prefix>:*)`; remove shell expansions from the skill's Bosun commands so grants can match. |
+| 2026-11-03 | Base verification checks containment, not tip equality; `bosun help` advertises the review flags the skill checks for. Found by running the skill end to end. |

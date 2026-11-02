@@ -289,7 +289,7 @@ func TestSkillVerifiesUpstreamPRBase(t *testing.T) {
 	if err := Print(&out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"baseRefOid", "baseRefName", "FETCH_HEAD", `"$FETCHED_SHA" != "$BASE_SHA"`, `BASE="$BASE_SHA"`, "GIT_TERMINAL_PROMPT=0 git fetch"} {
+	for _, want := range []string{"baseRefOid", "baseRefName", "FETCH_HEAD", `BASE="$BASE_SHA"`, "GIT_TERMINAL_PROMPT=0 git fetch"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("skill does not verify upstream PR base: missing %q", want)
 		}
@@ -544,5 +544,25 @@ func TestSkillRunsBosunCommandsUnwrapped(t *testing.T) {
 				t.Errorf("Bosun command is wrapped in shell %q, so its grant cannot match:\n%s", shell, line)
 			}
 		}
+	}
+}
+
+// gh reports baseRefOid as the commit the PR is measured from. It stays put
+// while the base branch moves on, so requiring the fetched tip to equal it
+// rejected every PR opened before the base branch advanced -- the ordinary
+// case, and it blocked this repository's own review. The invariant that
+// catches a fork's origin or a wrong upstream is containment, not equality:
+// the recorded base must be reachable from the branch that was fetched.
+func TestSkillAcceptsABaseBranchThatMovedOn(t *testing.T) {
+	var out bytes.Buffer
+	if err := Print(&out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	if strings.Contains(body, `"$FETCHED_SHA" != "$BASE_SHA"`) {
+		t.Error("skill rejects a base branch that advanced after the PR was opened")
+	}
+	if !strings.Contains(body, `git merge-base --is-ancestor "$BASE_SHA" FETCH_HEAD`) {
+		t.Error("skill does not confirm the PR base is contained in the fetched upstream branch")
 	}
 }

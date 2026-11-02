@@ -64,3 +64,34 @@ func TestUsageListsEveryCommand(t *testing.T) {
 		}
 	}
 }
+
+// The review skill tells an agent to confirm its bosun is new enough by reading
+// `bosun help` for the flags it is about to pass. That check is only meaningful
+// if the review line actually advertises them: --local-credentials appeared
+// solely under `bosun up`, so the check passed on any binary that had `up`,
+// including one whose `review` predates both flags.
+func TestUsageAdvertisesTheReviewFlagsTheSkillChecksFor(t *testing.T) {
+	// The entry wraps, so take it from its first line up to the next command.
+	var reviewLine string
+	for _, line := range strings.Split(usage, "\n") {
+		if strings.Contains(line, "bosun review ") {
+			reviewLine = line
+			continue
+		}
+		if reviewLine == "" {
+			continue
+		}
+		if strings.Contains(line, "bosun ") {
+			break
+		}
+		reviewLine += " " + strings.TrimSpace(line)
+	}
+	if reviewLine == "" {
+		t.Fatal("usage text has no bosun review line")
+	}
+	for _, flag := range []string{"--detach", "--local-credentials"} {
+		if !strings.Contains(reviewLine, flag) {
+			t.Errorf("review usage line does not advertise %s:\n%s", flag, reviewLine)
+		}
+	}
+}

@@ -61,9 +61,11 @@ Read the output yourself rather than piping it through `grep`: a pipeline puts
 other programs in the same invocation and the command grant stops matching.
 
 If the command is not found, Bosun is not installed — point the user at
-https://github.com/everydaydevopsio/bosun. If the help text does not list
-`--local-credentials`, this `bosun` predates the flags below and must be
-upgraded. Either way, tell the user how to fix it and stop. Do not try to work
+https://github.com/everydaydevopsio/bosun. If the `bosun review` entry does not
+list both `--detach` and `--local-credentials`, this `bosun` predates the flags
+below and must be upgraded. Read that entry specifically: the flags also appear
+under other commands, so finding the words somewhere in the help proves
+nothing. Either way, tell the user how to fix it and stop. Do not try to work
 around a missing or old binary.
 
 ## Decide what to review
@@ -140,9 +142,11 @@ if [ -n "$PR_DATA" ]; then
     echo "Cannot fetch $UPSTREAM branch $BASE_BRANCH; stop." >&2
     exit 1
   }
-  FETCHED_SHA="$(git rev-parse 'FETCH_HEAD^{commit}')" || exit 1
-  if [ "$FETCHED_SHA" != "$BASE_SHA" ]; then
-    echo "The PR base moved during fetch ($BASE_SHA to $FETCHED_SHA); refresh and retry." >&2
+  # The base branch keeps moving after a PR is opened, so its tip will not
+  # equal the base commit. What must hold is that the fetched branch contains
+  # that commit: a fork's origin or the wrong upstream does not.
+  if ! git merge-base --is-ancestor "$BASE_SHA" FETCH_HEAD; then
+    echo "The PR base $BASE_SHA is not in $UPSTREAM $BASE_BRANCH; refresh and retry." >&2
     exit 1
   fi
   BASE="$BASE_SHA"
@@ -167,8 +171,11 @@ Tell the user which base was used. A review against the wrong base is worse than
 no review, because the diff looks plausible.
 
 In a fork checkout `origin` is your fork, not the repository the pull request
-targets. The SHA check prevents a moved or incorrectly fetched upstream branch
-from becoming a plausible but wrong review. If GitHub lookup or fetch fails,
+targets. The containment check prevents an incorrectly fetched upstream branch
+from becoming a plausible but wrong review, while still allowing the ordinary
+case where the base branch gained commits after the PR was opened. `baseRefOid`
+is the commit the PR is measured from, so it is the base to review against even
+when the base branch has moved past it. If GitHub lookup or fetch fails,
 stop; never substitute a local base by name. For a branch without a PR, explicitly
 choose `BOSUN_REVIEW_OFFLINE=true` before resolving the arguments. Bosun prints
 the resolved base and merge base when it submits the review.

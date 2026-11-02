@@ -16,8 +16,11 @@ run a local bridgectl gRPC session, redact credentials, and post the resulting
 review to the pull request when applicable. Local Kind reviews must include
 uncommitted changes and print the result without modifying the source checkout.
 For a local pull-request review, the comparison base must be the exact commit
-reported by the target upstream repository. If that commit cannot be fetched
-and verified, submission must stop. The CLI must report the resolved base and
+reported by the target upstream repository. Verification must confirm that the
+fetched upstream base branch *contains* that commit, not that the commit is the
+branch tip: a base branch that gained commits after the pull request was opened
+is the ordinary case and must not block the review. If that commit cannot be
+fetched and verified, submission must stop. The CLI must report the resolved base and
 merge base so a reviewer can audit the comparison.
 When a provider fails, the review status must retain a safe diagnostic that
 classifies known authentication failures and gives the local user a concrete
@@ -67,3 +70,8 @@ review` remain the supported operator interface.
 6. A pull-request review publishes inline comments for anchorable findings,
    falls back to a body-only publication when GitHub rejects a position, and
    publishes a failure comment when the review does not complete.
+7. The installed review skill grants review commands in each agent's own
+   permission syntax, and every Bosun command it tells an agent to run is a
+   plain command those grants can match. `bosun help` advertises the review
+   flags the skill checks for, so the version check cannot pass on a binary
+   that lacks them.

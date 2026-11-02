@@ -24,7 +24,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--timeout 30m]
+const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--detach]
+                           [--local-credentials] [--timeout 30m]
        bosun review-status JOB [--follow]
        bosun review-result JOB [--json] [--summary] [--against-ref REF]
        bosun init [--target claude,codex] [--force] [--print]
