@@ -34,6 +34,21 @@ headless provider request succeeds before copying the local credential.
 A hosted review with a pull-request number must end in exactly one terminal
 publication: a review, or a failure comment. Never both, never neither.
 
+A review that carries findings must additionally post one short summary comment.
+That summary is a pointer, not a terminal publication: it states how many
+findings were published and where the threads are, it never duplicates their
+detail, and it does not satisfy or replace the terminal publication above. It
+exists because the terminal publication for a findings review is a review rather
+than a comment, and the ordinary ways of listing a pull request's comments do
+not return reviews -- so without it, polling comments reports a clean review and
+stays silent about one that found something. Because the review is the artifact
+and the summary only points at it, a summary that fails to post must not fail a
+review that already published.
+
+The two surfaces must stay one-to-one: a consumer listing issue comments sees
+exactly one Bosun artifact per review, and a consumer listing reviews sees
+exactly one.
+
 Findings must be published as a pull-request review with one inline comment per
 finding anchored to the diff, so replies and thread resolution work without a
 consumer reconstructing state from prose. Findings that cannot be anchored --
@@ -69,7 +84,11 @@ review` remain the supported operator interface.
    public configuration and Kubernetes object names are unchanged.
 6. A pull-request review publishes inline comments for anchorable findings,
    falls back to a body-only publication when GitHub rejects a position, and
-   publishes a failure comment when the review does not complete.
+   publishes a failure comment when the review does not complete. A review that
+   found something also posts one short summary comment beside its threads, so
+   that every Bosun publication -- findings, no findings, or failure -- is
+   visible to a plain issue-comment listing. Losing that summary does not fail a
+   review that already published.
 7. The installed review skill grants review commands in each agent's own
    permission syntax, and every Bosun command it tells an agent to run is a
    plain command those grants can match. `bosun help` advertises the review

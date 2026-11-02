@@ -138,10 +138,10 @@ kubectl -n bosun patch secret bosun-github --type=json \
 
 ## What Bosun publishes
 
-Every hosted review with a pull-request number ends in exactly one publication:
-a review, or a failure comment. Both open with a marker line and a metadata
-line naming the reviewed ref and commit, so a consumer can correlate output to
-a specific push rather than to a timestamp.
+Every hosted review with a pull-request number ends in exactly one terminal
+publication: a review, or a failure comment. Both open with a marker line and a
+metadata line naming the reviewed ref and commit, so a consumer can correlate
+output to a specific push rather than to a timestamp.
 
 Findings are published as a pull-request review (`event: COMMENT`) with one
 inline comment per finding, so the standard reply and resolve machinery works
@@ -158,6 +158,45 @@ summary:
 
 Each inline comment opens with its severity: `**high** — <title>`, then the
 failure it causes and a remediation.
+
+### Finding the review
+
+A review lives under `/repos/OWNER/REPO/pulls/N/reviews`; a comment lives under
+`/repos/OWNER/REPO/issues/N/comments`. Listing comments does not return reviews
+-- `gh pr view N --json comments` included. A findings review therefore also
+posts one short summary comment, so a plain comment listing shows that the
+review happened and where to read it:
+
+```markdown
+## Bosun code review
+
+<sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
+
+**3 findings** — 2 high, 1 low.
+
+[Read the review](https://github.com/OWNER/REPO/pull/7#pullrequestreview-99) —
+findings are inline threads where they could be anchored to the diff, and in the
+review body otherwise. This comment is a pointer; the detail is in the review.
+```
+
+It links the review rather than naming a location, because not every finding is
+a thread: the 422 fallback folds them all into the review body, and a finding
+outside the diff is never anchorable. Severities are listed in the same triage
+order a consumer sorts by, so the summary and the review agree.
+
+The summary is a pointer, not the review: it never repeats a finding's detail,
+and it is not the terminal publication. One review yields exactly one comment
+and exactly one review, so neither listing double-counts. If the summary fails
+to post, the review still stands and the Job still succeeds -- the warning is in
+the worker log.
+
+To answer "did Bosun review this commit" without depending on which surface was
+used, match the commit SHA in both listings:
+
+```bash
+gh api repos/OWNER/REPO/pulls/N/reviews --jq '.[].body'
+gh api repos/OWNER/REPO/issues/N/comments --jq '.[].body'
+```
 
 Two cases fall back to a conversation comment under the same marker, because a
 published review beats a lost one:

@@ -4,6 +4,7 @@ Active and in-flight implementation plans. Each plan graduates to an ADR under `
 
 | Plan | Status |
 | --- | --- |
+| [plan-review-summary-comment.md](plan-review-summary-comment.md) | Implemented |
 | [plan-review-permissions.md](plan-review-permissions.md) | Implemented; validation pending |
 | [plan-build-pipeline.md](plan-build-pipeline.md) | In progress |
 | [pr-review-surface.md](pr-review-surface.md) | In progress |

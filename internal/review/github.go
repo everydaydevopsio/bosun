@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -81,10 +82,20 @@ func (g githubClient) request(ctx context.Context, method, path, token string, b
 		return httpError{status: resp.StatusCode, method: method, path: path}
 	}
 	if result != nil {
-		return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(result)
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(result); err != nil {
+			return decodeError{err}
+		}
 	}
 	return nil
 }
+
+// decodeError separates "the request did not happen" from "the request
+// happened and the reply was unreadable". A caller that only wanted a field
+// out of the body can ignore it; one that needs the body must not.
+type decodeError struct{ err error }
+
+func (e decodeError) Error() string { return "decode GitHub response: " + e.err.Error() }
+func (e decodeError) Unwrap() error { return e.err }
 func appJWT(appID, key string, now time.Time) (string, error) {
 	block, _ := pem.Decode([]byte(strings.ReplaceAll(key, `\n`, "\n")))
 	if block == nil {
@@ -329,9 +340,15 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 		"body":      reviewBody(ref, sha, summary, "Findings outside the diff", outside),
 		"comments":  inlineComments(inline),
 	}
-	err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
+	var published struct {
+		URL string `json:"html_url"`
+	}
+	err := publishedReview(g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published), repo, number)
 	var status httpError
 	if !errors.As(err, &status) || status.status != http.StatusUnprocessableEntity {
+		if err == nil {
+			g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
+		}
 		return err
 	}
 	// GitHub rejects the whole review when any single comment position is
@@ -344,7 +361,91 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	// because the push that removed it has already triggered its own review.
 	body["comments"] = []any{}
 	body["body"] = reviewBody(ref, sha, summary, "Findings", findings)
-	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
+	if err := publishedReview(g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published), repo, number); err != nil {
+		return err
+	}
+	g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
+	return nil
+}
+
+// publishedReview drops the error from an unreadable response body. The status
+// already said GitHub created the review, and the body is read only for the
+// summary's link. Returning the error here would report a failed publication
+// for a review that is visibly on the pull request, and Worker.Run would then
+// add a failure comment beside it -- the "never both" that GO-4 forbids.
+func publishedReview(err error, repo string, number int) error {
+	var decode decodeError
+	if errors.As(err, &decode) {
+		slog.Warn("read published review response", "repo", repo, "pr", number, "error", decode.Error())
+		return nil
+	}
+	return err
+}
+
+// postSummary puts a short pointer to a findings review where a plain comment
+// listing will find it.
+//
+// A review and its threads live under /pulls/N/reviews; issue comments live
+// under /issues/N/comments, and the common checks -- `gh pr view --json
+// comments` among them -- read only the latter. A review with no findings
+// already publishes there, so polling comments alone reports a clean review and
+// stays silent about one that found something: the answer is inverted exactly
+// when it matters. This comment closes that gap without becoming a second copy
+// of the review.
+//
+// Failure is deliberately not returned. The review is the artifact and it has
+// already reached the pull request; failing here would report a failed review
+// that is visibly published, and re-running it would spend model credits to
+// produce findings that are already there.
+func (g githubClient) postSummary(ctx context.Context, repo string, number int, token, ref, sha string, findings []Finding, reviewURL string) {
+	// Not every finding becomes a thread: the 422 fallback folds all of them
+	// into the review body, and a finding outside the diff is never anchorable.
+	// Naming a location that only sometimes holds them sends a reader looking
+	// where the findings are not, so point at the review itself -- the one
+	// destination that is correct however it published.
+	destination := "Read the review on this pull request"
+	if reviewURL != "" {
+		destination = "[Read the review](" + reviewURL + ")"
+	}
+	body := reviewMarker + "\n\n" + metadata(ref, sha) + "\n\n" +
+		findingCount(findings) + severityBreakdown(findings) + ".\n\n" +
+		destination + " — findings are inline threads where they could be anchored to the diff, " +
+		"and in the review body otherwise. This comment is a pointer; the detail is in the review."
+	if err := g.postComment(ctx, repo, number, token, body); err != nil {
+		slog.Warn("publish review summary comment", "repo", repo, "pr", number, "error", redact(err.Error(), token))
+	}
+}
+
+// findingCount keeps the singular readable: "1 finding", not "1 findings".
+func findingCount(findings []Finding) string {
+	if len(findings) == 1 {
+		return "**1 finding**"
+	}
+	return "**" + strconv.Itoa(len(findings)) + " findings**"
+}
+
+// severityBreakdown orders by the triage rank a consumer already sorts by, so
+// the summary agrees with the review it points at. severities is that single
+// ranking; a second one here sorted blockers last. parseFindings rejects any
+// severity outside it, so every finding that reaches this point is ranked.
+func severityBreakdown(findings []Finding) string {
+	counts := map[string]int{}
+	var order []string
+	for _, f := range findings {
+		if counts[f.Severity] == 0 {
+			order = append(order, f.Severity)
+		}
+		counts[f.Severity]++
+	}
+	sort.SliceStable(order, func(i, j int) bool { return severities[order[i]] < severities[order[j]] })
+	parts := make([]string, 0, len(order))
+	for _, severity := range order {
+		parts = append(parts, strconv.Itoa(counts[severity])+" "+codeSpan(severity))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " — " + strings.Join(parts, ", ")
 }
 
 // prFiles lists the paths the pull request touches.
