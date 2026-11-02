@@ -309,10 +309,13 @@ func runSession(ctx context.Context, client bridgev1.BridgeServiceClient, worksp
 			if event.ExitCode != 0 || event.Error != "" {
 				return "", providerExitError(provider, event.ExitCode, event.Error, settled())
 			}
-			if strings.TrimSpace(settled()) == "" {
+			// settled() flushes destructively; take it once and reuse it, or
+			// the emptiness check consumes the held fragment.
+			review := settled()
+			if strings.TrimSpace(review) == "" {
 				return "", fmt.Errorf("agent session produced no output")
 			}
-			return CleanOutput(settled()), nil
+			return CleanOutput(review), nil
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING:
 			reporter.Emit("activity", "Provider active")
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:

@@ -13,6 +13,7 @@ import (
 
 	"github.com/everydaydevopsio/bosun/internal/cluster"
 	"github.com/everydaydevopsio/bosun/internal/progress"
+	"github.com/everydaydevopsio/bosun/internal/review"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -256,6 +257,13 @@ func monitor(ctx context.Context, c kubernetes.Interface, r *record, o options, 
 								}
 								var event progress.Event
 								if json.Unmarshal([]byte(body), &event) != nil || event.Version != 1 || event.Run != r.Job {
+									if isUsageLog(body) {
+										// The worker logs the measurement
+										// envelope to stderr as well. It is
+										// durable state, not a diagnostic to
+										// print at a terminal.
+										continue
+									}
 									if !diagnostics[body] && len(diagnostics) < 100 {
 										diagnostics[body] = true
 										if len(body) > 2048 {
@@ -429,4 +437,13 @@ func cancelReview(c kubernetes.Interface, r *record, message func(string, string
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// isUsageLog reports whether a pod log line is the worker's own structured
+// usage summary, which `review-result` already carries.
+func isUsageLog(body string) bool {
+	var entry struct {
+		Event string `json:"event"`
+	}
+	return json.Unmarshal([]byte(body), &entry) == nil && entry.Event == review.UsageLogEvent
 }

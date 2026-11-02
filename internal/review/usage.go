@@ -14,6 +14,11 @@ import (
 
 const usagePrefix = "BOSUN_USAGE_V1 "
 
+// UsageLogEvent names the worker's structured usage log. The monitor matches on
+// it to keep the measurement envelope out of human terminal output, so producer
+// and consumer share this constant rather than repeating the string.
+const UsageLogEvent = "bosun.review.usage"
+
 // TokenUsage uses total input (including cache reads/writes) and total output
 // (including reasoning). Null means unreported, never free. Cache lifetimes
 // are provider-specific; the 30m/12h fields apply only when actually reported.

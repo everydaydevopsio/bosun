@@ -317,3 +317,23 @@ func TestNewlineFreePayloadsKeepUsageOutOfTheReview(t *testing.T) {
 		})
 	}
 }
+
+// Found by Bosun review. settled() destructively flushes the held fragment, so
+// calling it for the emptiness check and again for the return value dropped
+// that fragment from the published review.
+func TestTrailingHeldFragmentSurvivesSessionExit(t *testing.T) {
+	f := &fakeBridge{events: []*pb.AttachSessionEvent{
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("The review body. ")},
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT, Payload: []byte("BOSUN_US")},
+		{Type: pb.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT},
+	}}
+	meter := newUsageRecorder("codex-bosun")
+	ctx := context.WithValue(context.Background(), usageKey{}, meter)
+	out, err := runSession(ctx, f, "/repo", "codex-bosun", "review")
+	if err != nil {
+		t.Fatalf("review lost: %v", err)
+	}
+	if !strings.Contains(out, "BOSUN_US") {
+		t.Fatalf("held fragment dropped from the review: %q", out)
+	}
+}

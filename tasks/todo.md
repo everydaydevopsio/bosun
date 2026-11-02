@@ -1023,3 +1023,14 @@ confirmed against the code and fixed:
   on the same payload, and buffers only a genuinely truncated record. The
   reviewer's suggested `runSession` regression with newline-free payloads is
   added and failed first for both providers.
+
+Bosun review pass 2 (7c44105) returned two findings, both confirmed and fixed:
+- Medium: `settled()` flushes the held fragment destructively, and `runSession`
+  called it once for the emptiness check and again for the return value, so the
+  fragment never reached the published review. Taken once and reused.
+- Low: the worker logs the usage summary to stderr as well as emitting the
+  progress event. That log is not a progress event, so the monitor printed the
+  whole telemetry envelope through its diagnostic fallback -- the existing test
+  fed only progress events and missed it. The monitor now suppresses logs whose
+  `event` is `review.UsageLogEvent`, a constant now shared by producer and
+  consumer so the two cannot drift. The monitor test feeds both representations.

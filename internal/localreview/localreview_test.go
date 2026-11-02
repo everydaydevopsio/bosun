@@ -247,6 +247,10 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 			reporter.Emit("stage", "reviewing")
 			usage := `{"schema_version":1,"run_id":"job","actual_cost_usd":null,"usage":{"source":"codex","status":"partial","input_tokens":123}}`
 			reporter.Emit("usage", usage)
+			// The worker also slogs the summary to stderr. That line is not a
+			// progress event, so without suppression the monitor prints the
+			// whole telemetry envelope through its diagnostic fallback.
+			fmt.Fprintf(&logs, "%s\n", `{"time":"2026-11-03T00:00:00Z","level":"INFO","msg":"review usage","event":"bosun.review.usage","metrics":`+usage+`}`)
 			if failed {
 				reporter.Emit("failed", "authentication failed")
 			} else {

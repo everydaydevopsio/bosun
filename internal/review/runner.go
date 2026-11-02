@@ -83,7 +83,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		if summary.Usage.ProviderReportedCostUSD != nil {
 			summary.CostStatus = "provider_reported_estimate"
 		}
-		slog.Info("review usage", "event", "bosun.review.usage", "metrics", summary)
+		slog.Info("review usage", "event", UsageLogEvent, "metrics", summary)
 		encoded, _ := json.Marshal(summary)
 		reporter.Emit("usage", string(encoded))
 	}
