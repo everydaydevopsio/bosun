@@ -172,11 +172,17 @@ review happened and where to read it:
 
 <sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
 
-**3 findings** published as review threads — 2 high, 1 low.
+**3 findings** — 2 high, 1 low.
 
-Each finding is its own thread on the Files changed tab. This comment is a
-pointer; the detail is in the threads.
+[Read the review](https://github.com/OWNER/REPO/pull/7#pullrequestreview-99) —
+findings are inline threads where they could be anchored to the diff, and in the
+review body otherwise. This comment is a pointer; the detail is in the review.
 ```
+
+It links the review rather than naming a location, because not every finding is
+a thread: the 422 fallback folds them all into the review body, and a finding
+outside the diff is never anchorable. Severities are listed in the same triage
+order a consumer sorts by, so the summary and the review agree.
 
 The summary is a pointer, not the review: it never repeats a finding's detail,
 and it is not the terminal publication. One review yields exactly one comment

@@ -59,3 +59,4 @@ None.
 | Date | Change |
 | --- | --- |
 | 2026-11-03 | Post a summary comment beside a findings review. |
+| 2026-11-03 | Link the published review instead of naming a location, and order severities by the shared triage rank. |

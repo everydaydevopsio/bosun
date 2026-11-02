@@ -330,11 +330,14 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 		"body":      reviewBody(ref, sha, summary, "Findings outside the diff", outside),
 		"comments":  inlineComments(inline),
 	}
-	err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil)
+	var published struct {
+		URL string `json:"html_url"`
+	}
+	err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published)
 	var status httpError
 	if !errors.As(err, &status) || status.status != http.StatusUnprocessableEntity {
 		if err == nil {
-			g.postSummary(ctx, repo, number, token, ref, sha, findings)
+			g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
 		}
 		return err
 	}
@@ -348,10 +351,10 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	// because the push that removed it has already triggered its own review.
 	body["comments"] = []any{}
 	body["body"] = reviewBody(ref, sha, summary, "Findings", findings)
-	if err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, nil); err != nil {
+	if err := g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published); err != nil {
 		return err
 	}
-	g.postSummary(ctx, repo, number, token, ref, sha, findings)
+	g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
 	return nil
 }
 
@@ -370,10 +373,20 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 // already reached the pull request; failing here would report a failed review
 // that is visibly published, and re-running it would spend model credits to
 // produce findings that are already there.
-func (g githubClient) postSummary(ctx context.Context, repo string, number int, token, ref, sha string, findings []Finding) {
+func (g githubClient) postSummary(ctx context.Context, repo string, number int, token, ref, sha string, findings []Finding, reviewURL string) {
+	// Not every finding becomes a thread: the 422 fallback folds all of them
+	// into the review body, and a finding outside the diff is never anchorable.
+	// Naming a location that only sometimes holds them sends a reader looking
+	// where the findings are not, so point at the review itself -- the one
+	// destination that is correct however it published.
+	destination := "Read the review on this pull request"
+	if reviewURL != "" {
+		destination = "[Read the review](" + reviewURL + ")"
+	}
 	body := reviewMarker + "\n\n" + metadata(ref, sha) + "\n\n" +
-		findingCount(findings) + " published as review threads" + severityBreakdown(findings) + ".\n\n" +
-		"Each finding is its own thread on the Files changed tab. This comment is a pointer; the detail is in the threads."
+		findingCount(findings) + severityBreakdown(findings) + ".\n\n" +
+		destination + " — findings are inline threads where they could be anchored to the diff, " +
+		"and in the review body otherwise. This comment is a pointer; the detail is in the review."
 	if err := g.postComment(ctx, repo, number, token, body); err != nil {
 		slog.Warn("publish review summary comment", "repo", repo, "pr", number, "error", redact(err.Error(), token))
 	}
@@ -387,35 +400,20 @@ func findingCount(findings []Finding) string {
 	return "**" + strconv.Itoa(len(findings)) + " findings**"
 }
 
-// severityBreakdown orders by how much a reader should care, not
-// alphabetically, and keeps unrecognized severities rather than dropping a
-// finding from the count a reader checks against the threads.
+// severityBreakdown orders by the triage rank a consumer already sorts by, so
+// the summary agrees with the review it points at. severities is that single
+// ranking; a second one here sorted blockers last. parseFindings rejects any
+// severity outside it, so every finding that reaches this point is ranked.
 func severityBreakdown(findings []Finding) string {
 	counts := map[string]int{}
 	var order []string
 	for _, f := range findings {
-		severity := strings.ToLower(strings.TrimSpace(f.Severity))
-		if severity == "" {
-			severity = "unspecified"
+		if counts[f.Severity] == 0 {
+			order = append(order, f.Severity)
 		}
-		if counts[severity] == 0 {
-			order = append(order, severity)
-		}
-		counts[severity]++
+		counts[f.Severity]++
 	}
-	rank := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "unspecified": 5}
-	known := func(s string) int {
-		if r, ok := rank[s]; ok {
-			return r
-		}
-		return len(rank)
-	}
-	sort.SliceStable(order, func(i, j int) bool {
-		if a, b := known(order[i]), known(order[j]); a != b {
-			return a < b
-		}
-		return order[i] < order[j]
-	})
+	sort.SliceStable(order, func(i, j int) bool { return severities[order[i]] < severities[order[j]] })
 	parts := make([]string, 0, len(order))
 	for _, severity := range order {
 		parts = append(parts, strconv.Itoa(counts[severity])+" "+codeSpan(severity))

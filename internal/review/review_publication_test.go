@@ -12,6 +12,9 @@ import (
 
 const testSHA = "0123456789abcdef0123456789abcdef01234567"
 
+// reviewURL is what GitHub returns for a published review.
+const reviewURL = "https://github.com/acme/widget/pull/7#pullrequestreview-99"
+
 type reviewPayload struct {
 	Event    string `json:"event"`
 	CommitID string `json:"commit_id"`
@@ -55,7 +58,7 @@ func reviewStub(t *testing.T, files []string, reject func(int) bool, comments *[
 				return
 			}
 			w.WriteHeader(200)
-			fmt.Fprint(w, `{}`)
+			fmt.Fprint(w, `{"html_url":"`+reviewURL+`"}`)
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/7/comments"):
 			if comments != nil {
 				var posted struct {
@@ -230,7 +233,7 @@ func TestFindingsReviewAlsoPostsADiscoverableSummary(t *testing.T) {
 	}
 	// It must say that findings exist, how many, and where they are, or a
 	// reader who sees only this comment draws the wrong conclusion.
-	for _, want := range []string{"2 findings", "1 high", "1 low", "review threads"} {
+	for _, want := range []string{"2 findings", "1 high", "1 low", "the detail is in the review"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("summary missing %q: %q", want, body)
 		}
@@ -286,5 +289,64 @@ func TestSummaryFailureDoesNotFailAPublishedReview(t *testing.T) {
 	output := withFindings(`{"path":"a.go","line":3,"severity":"high","title":"T"}`)
 	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
 		t.Fatalf("a failed summary must not fail the published review: %v", err)
+	}
+}
+
+// Found by Bosun review of this branch. "Each finding is its own thread" is
+// false twice over: the 422 fallback folds every finding into the review body,
+// and findings outside the diff are never threads either. A pointer that names
+// the wrong destination sends a reader looking for threads that do not exist.
+func TestSummaryNeverPromisesThreadsItCannotGuarantee(t *testing.T) {
+	cases := []struct {
+		name   string
+		files  []string
+		reject func(int) bool
+	}{
+		{"inline", []string{"a.go"}, nil},
+		{"422 fallback folds everything into the body", []string{"a.go"}, func(i int) bool { return i == 0 }},
+		{"finding outside the diff is not a thread", []string{"other.go"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var comments []string
+			api, _ := reviewStub(t, tc.files, tc.reject, &comments)
+			defer api.Close()
+			output := withFindings(`{"path":"a.go","line":3,"severity":"high","title":"T"}`)
+			if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
+				t.Fatalf("postReview: %v", err)
+			}
+			if len(comments) != 1 {
+				t.Fatalf("posted %d summary comments, want 1", len(comments))
+			}
+			body := comments[0]
+			// One destination that is correct however the review published.
+			if !strings.Contains(body, reviewURL) {
+				t.Errorf("summary does not link the published review: %q", body)
+			}
+			if strings.Contains(body, "Files changed tab") {
+				t.Errorf("summary promises a tab location it cannot guarantee: %q", body)
+			}
+		})
+	}
+}
+
+// Bosun's severity order lives in findings.go and starts at blocker. A second
+// ranking that omits it sorts the most urgent finding last.
+func TestSummaryOrdersSeveritiesByTriageRank(t *testing.T) {
+	var comments []string
+	api, _ := reviewStub(t, []string{"a.go"}, nil, &comments)
+	defer api.Close()
+	output := withFindings(`{"path":"a.go","line":1,"severity":"low","title":"C"},` +
+		`{"path":"a.go","line":2,"severity":"blocker","title":"A"},` +
+		`{"path":"a.go","line":3,"severity":"medium","title":"B"},` +
+		`{"path":"a.go","line":4,"severity":"high","title":"D"}`)
+	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
+		t.Fatalf("postReview: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("posted %d summary comments, want 1", len(comments))
+	}
+	if !strings.Contains(comments[0], "1 blocker, 1 high, 1 medium, 1 low") {
+		t.Fatalf("severities are not in triage order: %q", comments[0])
 	}
 }
