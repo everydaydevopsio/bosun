@@ -1080,3 +1080,81 @@ and fixed:
   the body, so a truncated reply after a 2xx failed a review GitHub had created
   and Worker.Run would add a contradictory failure comment. Decode failures are
   now a distinct error that only this caller ignores.
+
+# Task: Report reviewer terminations the reviewer cannot report
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-03
+- Mode: Autonomous
+- Issue: #62
+- Plan: `plans/plan-oom-termination-report.md`
+
+## Scope
+- In scope: publishing a failure comment for a reviewer Job killed for
+  exceeding `review.resources.limits.memory`, without breaking the
+  one-terminal-publication invariant.
+- Out of scope: Jobs killed by `activeDeadlineSeconds` (#72); reviews with no
+  pull request to publish to (#65); the memory limit's default value (#60).
+
+## Acceptance Criteria
+- AC1: a reviewer Job killed for exceeding its memory limit results in exactly
+  one publication on the pull request. ✅ `TestAnOOMKilledReviewProducesExactlyOnePublication`
+- AC2: that publication names memory as the cause and points at
+  `review.resources.limits.memory`. ✅ `TestTerminationCommentNamesMemoryAndTheChartValue`
+- AC3: the invariant in `docs/github-app.md` still holds -- never both a review
+  and a failure comment. ✅ `TestTerminationIsSilentWhenBosunAlreadyPublished`
+
+## Constraints
+- The controller must keep holding nothing per-review: it mints a narrow
+  repository token on demand rather than retaining the Job's.
+- No new reads of Secrets. The added RBAC is `pods: get, list, watch` only.
+
+## Risks and Tradeoffs
+- Risk: acting on every failed Job would double-publish over the reviewer's own
+  failure comment. Mitigated by classifying only on `OOMKilled`, a reason the
+  reviewer provably cannot survive.
+- Risk: a controller restart re-reporting everything inside the Job TTL.
+  Mitigated by the `bosun/termination-reported` annotation.
+- Risk: two replicas racing between the remote check and the post. Mitigated by
+  the `bosun-termination-sentinel` Lease, separate from admission so a webhook
+  delivery never queues behind a GitHub call.
+- Tradeoff: PAT installs must share the token with the controller to get a
+  comment. Documented, optional, and it logs rather than failing silently.
+
+## Execution Checklist
+- [x] `internal/review` termination publisher with the existing-publication check
+- [x] `internal/sentinel` reconcile loop with OOM classification
+- [x] Lease seam so replicas cannot both publish
+- [x] Wire into `bosun serve`; chart RBAC, values, deployment env
+- [x] Chart/config drift guard for the new environment variable
+- [x] Docs: `docs/github-app.md` publication section
+- [x] Promote the `activeDeadlineSeconds` gap to an issue (#72)
+
+## Test Strategy
+- Unit: `internal/review/termination_test.go` over an httptest GitHub; table
+  cases for each surface an existing publication can live on.
+- Unit: `internal/sentinel/sentinel_test.go` over a fake clientset; table cases
+  for every termination the reviewer reports itself.
+- Integration: `TestTheSentinelReadsAJobBuiltBySubmission` drives `jobs.Submit`
+  so the environment contract between submission and the sentinel cannot drift.
+- End-to-end: `TestAnOOMKilledReviewProducesExactlyOnePublication` runs the real
+  publisher and reconciles three times.
+- Failure paths: a rejected POST, a lost lease, and a missing pull request each
+  have a case; each asserts the Job is left unrecorded so the work is retried.
+- Both guards were verified load-bearing by disabling each in turn and
+  confirming the end-to-end test fails.
+
+## Rollback Strategy
+- Trigger: duplicate or incorrect failure comments on pull requests.
+- Rollback: set `review.terminationSentinel.intervalSeconds: 0` and upgrade.
+  The controller logs terminations instead of publishing them; no other
+  behaviour changes.
+- Validation after rollback: the controller logs
+  "termination sentinel disabled" at startup and posts no further comments.
+
+## Outcome
+- Result: implemented on `issue-62-report-oom-terminations`.
+- Evidence: `go test ./...`, `make lint`, `helm template`.
+- Remaining: a live review forced past its memory limit on a real cluster has
+  not been run; the manual verification in the plan is still open.

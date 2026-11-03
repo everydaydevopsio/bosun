@@ -109,3 +109,40 @@ func TestRepositoryLabelIsBoundedAndUnique(t *testing.T) {
 		t.Fatal("full repository name not preserved")
 	}
 }
+
+// Reporting a termination talks to GitHub and can hold its lock for seconds. A
+// webhook delivery waiting to learn whether it may start a review must not
+// queue behind that, so the two use different Leases.
+func TestSerializeUsesALeaseOfItsOwn(t *testing.T) {
+	if SentinelLease == admissionLease {
+		t.Fatal("the sentinel shares the admission lease; a GitHub call would block submissions")
+	}
+	client := fake.NewSimpleClientset()
+	ran := 0
+	if err := Serialize(context.Background(), client, "bosun", SentinelLease, 5*time.Second, func(context.Context) error {
+		ran++
+		return nil
+	}); err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if ran != 1 {
+		t.Fatalf("want the operation run once, got %d", ran)
+	}
+	lease, err := client.CoordinationV1().Leases("bosun").Get(context.Background(), SentinelLease, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("the sentinel lease was never taken: %v", err)
+	}
+	if lease.Name != SentinelLease {
+		t.Fatalf("took the wrong lease: %s", lease.Name)
+	}
+}
+
+// An operation that fails must surface, not be swallowed by the lease wrapper.
+func TestSerializeReportsTheOperationError(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	want := fmt.Errorf("GitHub POST returned HTTP 502")
+	err := Serialize(context.Background(), client, "bosun", SentinelLease, 5*time.Second, func(context.Context) error { return want })
+	if !strings.Contains(fmt.Sprint(err), "502") {
+		t.Fatalf("the operation error did not reach the caller: %v", err)
+	}
+}

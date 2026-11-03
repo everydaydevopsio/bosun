@@ -16,6 +16,14 @@ rules:
     # submission does not hold a concurrency slot forever.
     verbs: ["create", "get", "list", "watch", "patch", "delete"]
   - apiGroups: [""]
+    resources: ["pods"]
+    # A reviewer killed for exceeding its memory limit dies on SIGKILL and
+    # cannot publish its own failure. Only the pod records why it died, in
+    # status.containerStatuses[].state.terminated.reason, so the controller
+    # reads it in order to tell the pull request. Read-only: the controller
+    # never creates, edits, deletes, or execs into a pod.
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
     resources: ["secrets"]
     # The controller creates one short-lived, repository-scoped token Secret per
     # reviewer Job, owned by that Job. It never reads Secrets: get and list are

@@ -17,6 +17,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/jobs"
 	"github.com/everydaydevopsio/bosun/internal/review"
+	"github.com/everydaydevopsio/bosun/internal/sentinel"
 	"github.com/everydaydevopsio/bosun/internal/server"
 	"github.com/everydaydevopsio/bosun/internal/version"
 	"k8s.io/client-go/kubernetes"
@@ -93,6 +94,56 @@ func (s submitter) Submit(ctx context.Context, r review.Request, d string) (stri
 		return review.IssueRepositoryToken(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, repo, appID, key)
 	}
 	return jobs.SubmitAuthenticated(ctx, s.client, s.cfg, r, d, issue)
+}
+
+// controllerToken mints a credential the controller can publish with.
+//
+// The App path is the same one submission uses and keeps the same property:
+// the controller holds the key, mints narrowly on demand, and retains nothing
+// per-review. The fallback exists because an install using a personal access
+// token has no key to mint from; it publishes with the shared token when the
+// operator has chosen to make it available, and otherwise cannot publish at
+// all, which the caller reports rather than hides.
+func controllerToken(ctx context.Context, repo string) (string, error) {
+	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
+	if appID != "" && key != "" {
+		token, err := review.IssueRepositoryToken(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, repo, appID, key)
+		if err != nil {
+			return "", err
+		}
+		return token.Value, nil
+	}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token, nil
+	}
+	return "", errors.New("the controller has no GitHub credential: configure a GitHub App, or give the controller the shared token")
+}
+
+// startSentinel runs the loop that reports reviewer deaths the reviewer could
+// not report itself. Without it an OOM-killed review publishes nothing at all
+// and is indistinguishable, from the pull request, from a review that never
+// ran.
+func startSentinel(ctx context.Context, client kubernetes.Interface, cfg config.Config) {
+	if cfg.SentinelIntervalSeconds <= 0 {
+		slog.Warn("termination sentinel disabled; a reviewer killed for exceeding its memory limit will publish nothing",
+			"logger", "bosun.sentinel")
+		return
+	}
+	s := sentinel.Sentinel{
+		Client: client, Config: cfg,
+		Interval: time.Duration(cfg.SentinelIntervalSeconds) * time.Second,
+		Publish: func(ctx context.Context, t review.Termination) (bool, error) {
+			token, err := controllerToken(ctx, t.Repo)
+			if err != nil {
+				return false, err
+			}
+			return review.PublishTermination(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, token, t)
+		},
+		Lock: func(ctx context.Context, op func(context.Context) error) error {
+			return jobs.Serialize(ctx, client, cfg.Namespace, jobs.SentinelLease, 60*time.Second, op)
+		},
+	}
+	go s.Run(ctx)
 }
 func kubeClient() (kubernetes.Interface, error) {
 	cfg, err := rest.InClusterConfig()
@@ -178,6 +229,7 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews)
+	startSentinel(ctx, client, cfg)
 	srv := newWebhookServer(server.Handler{Config: cfg, Submitter: submitter{client, cfg}})
 	drained := make(chan struct{})
 	go func() {

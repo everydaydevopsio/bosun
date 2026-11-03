@@ -1,0 +1,201 @@
+package review
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+const terminatedSHA = "0123456789abcdef0123456789abcdef01234567"
+
+// terminationStub serves the three endpoints the publisher touches: the two it
+// reads to decide whether Bosun has already spoken, and the one it posts to.
+// Existing comments and reviews are supplied as bodies.
+type terminationStub struct {
+	comments, reviews []string
+	posted            []string
+	postStatus        int
+}
+
+func (s *terminationStub) server(t *testing.T) *httptest.Server {
+	t.Helper()
+	page := func(w http.ResponseWriter, r *http.Request, bodies []string) {
+		// Page 1 carries everything; later pages are empty, which is how the
+		// publisher learns to stop.
+		if r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1" {
+			bodies = nil
+		}
+		out := make([]map[string]string, 0, len(bodies))
+		for _, b := range bodies {
+			out = append(out, map[string]string{"body": b})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/acme/widget/issues/7/comments":
+			page(w, r, s.comments)
+		case r.Method == "GET" && r.URL.Path == "/repos/acme/widget/pulls/7/reviews":
+			page(w, r, s.reviews)
+		case r.Method == "POST" && r.URL.Path == "/repos/acme/widget/issues/7/comments":
+			var body struct {
+				Body string `json:"body"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			s.posted = append(s.posted, body.Body)
+			status := s.postStatus
+			if status == 0 {
+				status = 201
+			}
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected GitHub request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func memoryTermination() Termination {
+	return Termination{Repo: "acme/widget", PRNumber: 7, Ref: "feature", SHA: terminatedSHA, Cause: OutOfMemoryCause("1Gi")}
+}
+
+// An operator reading "the review provider failed" goes looking at the agent.
+// The fix is a chart value, so the comment has to name it.
+func TestTerminationCommentNamesMemoryAndTheChartValue(t *testing.T) {
+	stub := &terminationStub{}
+	api := stub.server(t)
+	defer api.Close()
+
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", memoryTermination())
+	if err != nil {
+		t.Fatalf("PublishTermination: %v", err)
+	}
+	if !published {
+		t.Fatal("nothing was published for an unreported termination")
+	}
+	if len(stub.posted) != 1 {
+		t.Fatalf("want exactly one comment, got %d", len(stub.posted))
+	}
+	body := stub.posted[0]
+	for _, want := range []string{
+		"## Bosun code review failed",
+		"`feature` @ `" + terminatedSHA + "`",
+		"memory",
+		"review.resources.limits.memory",
+		"1Gi",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("termination comment omits %q:\n%s", want, body)
+		}
+	}
+}
+
+// The invariant in docs/github-app.md: exactly one terminal publication, never
+// both a review and a failure comment. A reviewer that published its review and
+// was then killed must not be contradicted.
+func TestTerminationIsSilentWhenBosunAlreadyPublished(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		comments []string
+		reviews  []string
+	}{
+		{
+			name:    "a review landed for this commit",
+			reviews: []string{reviewMarker + "\n\n" + metadata("feature", terminatedSHA) + "\n\nFindings."},
+		},
+		{
+			name:     "a summary comment landed for this commit",
+			comments: []string{reviewMarker + "\n\n" + metadata("feature", terminatedSHA) + "\n\nFindings."},
+		},
+		{
+			name:     "a failure comment already reported this commit",
+			comments: []string{failureMarker + "\n\n" + metadata("feature", terminatedSHA) + "\n\n`boom`"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &terminationStub{comments: tc.comments, reviews: tc.reviews}
+			api := stub.server(t)
+			defer api.Close()
+
+			published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", memoryTermination())
+			if err != nil {
+				t.Fatalf("PublishTermination: %v", err)
+			}
+			if published {
+				t.Error("published a second terminal publication for the same commit")
+			}
+			if len(stub.posted) != 0 {
+				t.Errorf("posted despite an existing publication: %q", stub.posted)
+			}
+		})
+	}
+}
+
+// Publications are correlated to a commit, not to a pull request. An earlier
+// push having been reviewed says nothing about this one.
+func TestTerminationPublishesWhenOnlyAnEarlierCommitWasReviewed(t *testing.T) {
+	other := strings.Repeat("a", 40)
+	stub := &terminationStub{
+		reviews:  []string{reviewMarker + "\n\n" + metadata("feature", other) + "\n\nFindings."},
+		comments: []string{"a human comment", failureMarker + "\n\n" + metadata("feature", other) + "\n\n`boom`"},
+	}
+	api := stub.server(t)
+	defer api.Close()
+
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", memoryTermination())
+	if err != nil {
+		t.Fatalf("PublishTermination: %v", err)
+	}
+	if !published || len(stub.posted) != 1 {
+		t.Fatalf("a termination on an unreviewed commit was not reported: published=%v posts=%d", published, len(stub.posted))
+	}
+}
+
+// Reporting the failure of the report is the caller's decision, so the error
+// has to reach it rather than being swallowed into a silent false.
+func TestTerminationReportsAFailedPost(t *testing.T) {
+	stub := &terminationStub{postStatus: 500}
+	api := stub.server(t)
+	defer api.Close()
+
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", memoryTermination())
+	if err == nil {
+		t.Fatal("a rejected comment was reported as success")
+	}
+	if published {
+		t.Error("reported a publication that GitHub rejected")
+	}
+}
+
+// A termination with no pull request has nowhere to go, and a caller that
+// passes one should not be made to special-case it.
+func TestTerminationWithoutAPullRequestIsNotPublished(t *testing.T) {
+	stub := &terminationStub{}
+	api := stub.server(t)
+	defer api.Close()
+
+	term := memoryTermination()
+	term.PRNumber = 0
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", term)
+	if err != nil {
+		t.Fatalf("PublishTermination: %v", err)
+	}
+	if published || len(stub.posted) != 0 {
+		t.Errorf("published without a pull request: published=%v posts=%q", published, stub.posted)
+	}
+}
+
+// An unset limit still produces a usable message: the operator needs to be
+// pointed at the value whether or not the chart currently sets one.
+func TestOutOfMemoryCauseWithoutAConfiguredLimit(t *testing.T) {
+	cause := OutOfMemoryCause("")
+	if !strings.Contains(cause, "memory") || !strings.Contains(cause, "review.resources.limits.memory") {
+		t.Fatalf("cause does not point at the memory limit: %q", cause)
+	}
+}

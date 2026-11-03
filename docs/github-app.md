@@ -224,12 +224,69 @@ failed (`setup`, `clone`, `provider`, `review`, or `publish`). It reports
 infrastructure failure, not findings. Treat both marker lines as an interface:
 agents select Bosun's comments by them.
 
+### Failures the reviewer cannot report
+
+The reviewer publishes its own failures from a deferred function, which covers
+every error it can return and nothing it cannot survive. A reviewer that
+exceeds `review.resources.limits.memory` is OOM-killed, and an OOM kill is
+SIGKILL: no deferred function runs, the Job fails, its credential Secret is
+garbage-collected with it, and after `review.ttlSecondsAfterFinished` the Job
+and its logs are gone. Left alone, the pull request is told nothing and the
+absence is indistinguishable from a review that never ran.
+
+The controller closes that gap. Every `review.terminationSentinel.intervalSeconds`
+it lists reviewer Jobs, and for one that failed with a container-termination
+reason the reviewer could not have survived, it publishes the failure comment
+the reviewer could not:
+
+```markdown
+## Bosun code review failed
+
+<sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
+
+The reviewer was killed for exceeding its memory limit of `1Gi`, so it could
+not report the failure itself. Raise `review.resources.limits.memory` and
+review this commit again.
+```
+
+The comment names memory and the chart value on purpose. "The review provider
+failed" sends an operator looking at the agent, its credentials, and the model,
+when the fix is one quantity in `values.yaml`.
+
+This does not weaken the one-publication rule above. Before posting, the
+controller looks for a Bosun marker already carrying this commit's metadata
+line, across both comments and reviews, and stays silent if it finds one --
+which covers the case it cannot see from Kubernetes alone, a reviewer that
+published its review and was then killed while finishing up. It records the
+outcome on the Job as `bosun/termination-reported`, so neither a later pass nor
+a restarted controller reports it twice, and it holds the
+`bosun-termination-sentinel` Lease while publishing, so two controller replicas
+cannot both decide to speak. Only a failure to publish is left unrecorded,
+because a transient GitHub error must stay retryable.
+
+Reporting needs a credential after the Job's own one is gone. With a GitHub App
+the controller mints a narrow repository token on demand, exactly as it does at
+submission, and still holds nothing per-review. An install using a personal
+access token has nothing to mint from: the chart offers the controller the
+shared `token` key from the same Secret, and an install that declines it logs
+the termination instead of publishing it.
+
+A review with no pull request -- the `branch-created` trigger, which runs with
+`BOSUN_PR_NUMBER=0` -- has nowhere to publish. The controller logs it at WARN
+rather than discarding it silently; the discarded review itself is #65.
+
+Set `review.terminationSentinel.intervalSeconds` to `0` to turn the check off
+and return to publishing nothing when a reviewer is killed.
+
 ## What this does not do yet
 
 Installation tokens request only `contents: read` and `pull_requests: write`;
 no Checks permission is requested, so a review is not a status check. Branch-
 only reviews, and failures that happen before a token is obtained, remain in
-Job logs. Repeated reviews are independent: Bosun does not resolve or supersede
+Job logs. The controller reports an out-of-memory kill; a Job killed by its
+`activeDeadlineSeconds` -- which fires 120s after the review's own timeout, so
+only when the reviewer has already hung past reporting -- is not yet classified
+the same way. Repeated reviews are independent: Bosun does not resolve or supersede
 the threads an earlier pass opened (#42).
 
 ## Notes
