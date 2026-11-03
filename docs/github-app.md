@@ -234,10 +234,14 @@ garbage-collected with it, and after `review.ttlSecondsAfterFinished` the Job
 and its logs are gone. Left alone, the pull request is told nothing and the
 absence is indistinguishable from a review that never ran.
 
-The controller closes that gap. Every `review.terminationSentinel.intervalSeconds`
-it lists reviewer Jobs, and for one that failed with a container-termination
-reason the reviewer could not have survived, it publishes the failure comment
-the reviewer could not:
+The same is true of the Job's own deadline, `review.timeoutSeconds` plus a
+startup allowance. The reviewer's internal timeout fires first and publishes a
+properly diagnosed failure; the Job deadline only fires when the reviewer has
+run past that without unwinding, and it kills the pod.
+
+The controller closes both gaps. Every `review.terminationSentinel.intervalSeconds`
+it lists reviewer Jobs, and for one that died in a way the reviewer could not
+have reported, it publishes the failure comment the reviewer could not:
 
 ```markdown
 ## Bosun code review failed
@@ -251,7 +255,23 @@ review this commit again.
 
 The comment names memory and the chart value on purpose. "The review provider
 failed" sends an operator looking at the agent, its credentials, and the model,
-when the fix is one quantity in `values.yaml`.
+when the fix is one quantity in `values.yaml`. A deadline kill reads the same
+way and points at `review.timeoutSeconds`.
+
+Only deaths the reviewer provably could not report are published, and the two
+are told apart by different signals:
+
+| Outcome | Reviewer published? | Signal the controller reads |
+| --- | --- | --- |
+| Reviewer's own timeout | yes, with the stage that failed | Job `Failed`, reason `BackoffLimitExceeded` |
+| Job deadline, a startup allowance later | no -- killed | Job `Failed`, reason `DeadlineExceeded` |
+| Memory limit | no -- SIGKILL | container `state.terminated.reason: OOMKilled` |
+
+A deadline kill is a SIGTERM, so its container reason is `Error` --
+indistinguishable from a reviewer that exited non-zero on its own and already
+published. Only the Job condition separates them, which is why it is read
+rather than the pod. When a reviewer is both out of memory and out of time,
+memory is reported: it is the cause an operator can act on.
 
 This does not weaken the one-publication rule above. Before posting, the
 controller looks for a Bosun publication already carrying this commit's
@@ -303,10 +323,8 @@ and return to publishing nothing when a reviewer is killed.
 Installation tokens request only `contents: read` and `pull_requests: write`;
 no Checks permission is requested, so a review is not a status check. Branch-
 only reviews, and failures that happen before a token is obtained, remain in
-Job logs. The controller reports an out-of-memory kill; a Job killed by its
-`activeDeadlineSeconds` -- which fires 120s after the review's own timeout, so
-only when the reviewer has already hung past reporting -- is not yet classified
-the same way. Repeated reviews are independent: Bosun does not resolve or supersede
+Job logs. Repeated reviews of one commit share a publication identity, so two
+overlapping attempts can suppress each other's termination report (#74). Repeated reviews are independent: Bosun does not resolve or supersede
 the threads an earlier pass opened (#42).
 
 ## Notes

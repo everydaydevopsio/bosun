@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -43,6 +44,22 @@ func OutOfMemoryCause(limit string) string {
 	}
 	return "The reviewer was killed for exceeding its memory limit of `" + codeSpan(limit) + "`, so it could not report the failure itself. " +
 		"Raise `review.resources.limits.memory` and review this commit again."
+}
+
+// DeadlineExceededCause explains a reviewer killed by its Job deadline.
+//
+// The Job's deadline sits a startup allowance beyond review.timeoutSeconds, so
+// it only fires once the reviewer has run past its own timeout without
+// unwinding -- a reviewer that times out normally publishes for itself well
+// before this. Naming review.timeoutSeconds points the operator at the knob
+// that moves both.
+func DeadlineExceededCause(timeoutSeconds int64) string {
+	limit := ""
+	if timeoutSeconds > 0 {
+		limit = " of `" + strconv.FormatInt(timeoutSeconds, 10) + "s`"
+	}
+	return "The reviewer ran past its deadline" + limit + " and was killed before it could report the failure itself. " +
+		"Raise `review.timeoutSeconds` and review this commit again."
 }
 
 // terminationPages bounds the search for an existing publication, so that a

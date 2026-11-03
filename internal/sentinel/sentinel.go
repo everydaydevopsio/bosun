@@ -114,7 +114,21 @@ func (s Sentinel) Reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (s Sentinel) inspect(ctx context.Context, job *batchv1.Job) error {
+// inspect examines one Job, recovering from a panic rather than letting it
+// reach the goroutine Run started. The sentinel shares a process with the
+// webhook server that submits every review: a panic here -- client-go raises
+// one outright for a label selector it cannot parse -- would stop reviews
+// being accepted at all, trading the primary feature for a secondary one.
+func (s Sentinel) inspect(ctx context.Context, job *batchv1.Job) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("inspecting %s panicked: %v", job.Name, r)
+		}
+	}()
+	return s.inspectJob(ctx, job)
+}
+
+func (s Sentinel) inspectJob(ctx context.Context, job *batchv1.Job) error {
 	if job.Annotations[reportedAnnotation] != "" {
 		return nil
 	}
@@ -225,9 +239,19 @@ func (s Sentinel) cause(ctx context.Context, job *batchv1.Job) (string, error) {
 			// begun recycling reports the kill it is replacing there.
 			for _, state := range []*corev1.ContainerStateTerminated{c.State.Terminated, c.LastTerminationState.Terminated} {
 				if state != nil && state.Reason == "OOMKilled" {
+					// Checked before the deadline below: both can be true of
+					// one Job, and memory is the cause an operator can act on.
 					return review.OutOfMemoryCause(s.Config.ReviewResources.MemoryLimit), nil
 				}
 			}
+		}
+	}
+	// A deadline kill is a SIGTERM, so the container reason is "Error" --
+	// indistinguishable from a reviewer that exited non-zero on its own, which
+	// has already published. Only the Job condition separates them.
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue && c.Reason == "DeadlineExceeded" {
+			return review.DeadlineExceededCause(s.Config.ReviewTimeoutSeconds), nil
 		}
 	}
 	return "", nil
