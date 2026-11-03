@@ -143,7 +143,11 @@ func resolveIdentity(ctx context.Context, r review.Request) review.Request {
 		var ref, sha string
 		ref, sha, err = review.ResolvePullRequest(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, r.Repo, r.PRNumber, token)
 		if err == nil {
-			r.Ref, r.SHA = ref, sha
+			// Keep the ref the trigger carried: the Job's name derives from
+			// it and is the deduplication key for this delivery, so a
+			// resolution that succeeds on a redelivery after failing once
+			// must not produce a second Job.
+			r.TriggerRef, r.Ref, r.SHA = r.Ref, ref, sha
 			return r
 		}
 	}

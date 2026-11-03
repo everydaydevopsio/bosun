@@ -126,6 +126,10 @@ the fix is a chart value.
 - PAT installs: the controller has no GitHub credential today. Mounting the
   shared token is optional and documented, but an install that declines it gets
   logging instead of a comment.
+- Publications correlate to a commit, not to the attempt that made them, so two
+  overlapping reviews of one commit can suppress each other's reports. The time
+  bound added in pass 2 closes the common case; the rest needs a run identifier
+  in the publication and is #74.
 
 ## Change Log
 
@@ -135,3 +139,4 @@ the fix is a chart value.
 | 2026-11-03 | Implemented; `activeDeadlineSeconds` promoted to #72 |
 | 2026-11-03 | Bosun pass 1: resolve review identity at submission; anchor marker matching; make an exhausted search retryable |
 | 2026-11-03 | Bosun pass 2: bound the publication search below by the review's start; separate lease acquisition from the operation budget |
+| 2026-11-03 | Bosun pass 3: keep a Job's name stable across resolution; attempt-level correlation promoted to #74 |

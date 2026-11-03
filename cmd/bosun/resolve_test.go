@@ -52,6 +52,12 @@ func TestACommentTriggeredRequestIsResolvedBeforeSubmission(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("want one lookup, got %d", calls)
 	}
+	// The Job's name is this delivery's deduplication key and derives from the
+	// ref. Resolution must not move it, or a redelivery after a failed
+	// resolution creates a second Job.
+	if got.NameRef() != "pr-73" {
+		t.Errorf("NameRef() = %q; resolution moved the deduplication key", got.NameRef())
+	}
 }
 
 // A request that already names its commit -- every pull_request trigger does --

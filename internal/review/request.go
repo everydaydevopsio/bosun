@@ -8,6 +8,22 @@ import (
 type Request struct {
 	Repo, Ref, SHA, Trigger string
 	PRNumber                int
+	// TriggerRef is the ref the trigger carried, kept when Ref is replaced by
+	// a resolved one. A Job's name is the deduplication key for a webhook
+	// delivery, and it is derived from the ref: if resolution fails on one
+	// delivery and succeeds on its redelivery, a changing ref turns one
+	// delivery into two Jobs, two reviews, and two publications. Empty when
+	// nothing was resolved.
+	TriggerRef string
+}
+
+// NameRef is the ref a Job is named after: stable across resolution, so one
+// webhook delivery always maps to one Job.
+func (r Request) NameRef() string {
+	if r.TriggerRef != "" {
+		return r.TriggerRef
+	}
+	return r.Ref
 }
 
 func FromWebhook(event string, payload json.RawMessage, command string, allowed map[string]bool) (Request, bool) {

@@ -1094,8 +1094,10 @@ and fixed:
 - In scope: publishing a failure comment for a reviewer Job killed for
   exceeding `review.resources.limits.memory`, without breaking the
   one-terminal-publication invariant.
-- Out of scope: Jobs killed by `activeDeadlineSeconds` (#72); reviews with no
-  pull request to publish to (#65); the memory limit's default value (#60).
+- Out of scope: Jobs killed by `activeDeadlineSeconds` (#72); correlating a
+  publication to the attempt that made it rather than to the commit (#74);
+  reviews with no pull request to publish to (#65); the memory limit's default
+  value (#60).
 
 ## Acceptance Criteria
 - AC1: a reviewer Job killed for exceeding its memory limit results in exactly
@@ -1176,6 +1178,19 @@ and fixed:
   shrank to whatever the wait left. Fixed: the wait and the operation budget
   are separate, with caller cancellation still propagated. `jobs.AdmissionBudget`
   now ties the webhook server's write timeout to the real worst case.
+
+## Bosun review findings (pass 3, 2 findings)
+- [x] **Medium** — resolving a comment-triggered ref moved the Job name, which
+  is the delivery's deduplication key, so a redelivery after a failed
+  resolution would create a second Job and a second review. A regression
+  introduced by the pass-1 fix. Fixed: `Request.NameRef()` names a Job after
+  the ref the trigger carried, not the resolved one.
+- [x] **Medium** — publications correlate to a commit, not to the attempt that
+  made them, so overlapping attempts and retries inside the clock-skew margin
+  can suppress each other's reports. Promoted to #74: closing it needs a run
+  identifier in every publication, which changes the documented metadata-line
+  interface and the review skill that parses it. The time bound added in pass 2
+  closes the common case.
 
 ## Outcome
 - Result: implemented on `issue-62-report-oom-terminations`.
