@@ -169,3 +169,36 @@ func TestSubmitRefusesInvalidResourceConfiguration(t *testing.T) {
 		t.Errorf("a Job was created despite invalid resource configuration: %d", len(jobs.Items))
 	}
 }
+
+// A Job's name is the deduplication key for a webhook delivery: a redelivery
+// finds the existing Job and is rejected as a duplicate. The name is derived
+// from the ref, and the controller now resolves a comment-triggered ref from
+// "pr-N" to the real branch before submitting. If that resolution fails on one
+// delivery and succeeds on its redelivery, the same delivery produces two
+// different names, two Jobs, two reviews, and two publications.
+//
+// Naming therefore has to use the ref the trigger carried, not the resolved
+// one.
+func TestResolutionDoesNotChangeADeliverysJobName(t *testing.T) {
+	const delivery = "7f3a1c2e-same-delivery"
+	unresolved := review.Request{Repo: "acme/widget", Ref: "pr-73", PRNumber: 73, Trigger: "comment"}
+	resolved := unresolved
+	resolved.TriggerRef = unresolved.Ref
+	resolved.Ref = "feature"
+	resolved.SHA = "0123456789abcdef0123456789abcdef01234567"
+
+	before := Name(unresolved.Repo, unresolved.NameRef(), delivery)
+	after := Name(resolved.Repo, resolved.NameRef(), delivery)
+	if before != after {
+		t.Fatalf("one delivery yields two Jobs across a resolution:\n  unresolved: %s\n  resolved:   %s", before, after)
+	}
+}
+
+// A request that was never resolved names itself, so every other trigger is
+// unaffected.
+func TestAnUnresolvedRequestNamesItselfByItsOwnRef(t *testing.T) {
+	r := review.Request{Repo: "acme/widget", Ref: "feature", SHA: "0123456789abcdef0123456789abcdef01234567", PRNumber: 7}
+	if got := r.NameRef(); got != "feature" {
+		t.Fatalf("NameRef() = %q, want the request's own ref", got)
+	}
+}

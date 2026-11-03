@@ -19,6 +19,12 @@ review:
   maxConcurrent: 3
   # How long one review may run. The Job deadline is derived from this.
   timeoutSeconds: 1800
+  # A reviewer killed for exceeding resources.limits.memory dies on SIGKILL and
+  # cannot publish its own failure, so the controller publishes it instead.
+  # Without this a review that hits the limit tells the pull request nothing at
+  # all. Set intervalSeconds to 0 to turn the check off and accept that silence.
+  terminationSentinel:
+    intervalSeconds: 30
   # Resources for the reviewer Job. Requests are the half that matters: with
   # none, the reviewer is BestEffort, the scheduler cannot tell whether a
   # second concurrent review fits, and maxConcurrent is the only thing between

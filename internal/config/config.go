@@ -23,6 +23,10 @@ type Config struct {
 	// quantity string omits that entry, so an operator can drop a limit
 	// without having to drop the request with it.
 	ReviewResources ReviewResources
+	// SentinelIntervalSeconds paces the reconcile that reports reviewer
+	// terminations the reviewer could not report itself. Zero disables it,
+	// which returns an OOM-killed review to publishing nothing at all.
+	SentinelIntervalSeconds int
 }
 
 // ReviewResources carries the reviewer Job's requests and limits as the
@@ -46,6 +50,7 @@ func Load() Config {
 			CPULimit:      os.Getenv("BOSUN_REVIEW_CPU_LIMIT"),
 			MemoryLimit:   os.Getenv("BOSUN_REVIEW_MEMORY_LIMIT"),
 		},
+		SentinelIntervalSeconds: envInt("BOSUN_SENTINEL_INTERVAL_SECONDS", 30),
 	}
 }
 

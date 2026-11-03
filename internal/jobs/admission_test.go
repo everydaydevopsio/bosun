@@ -109,3 +109,99 @@ func TestRepositoryLabelIsBoundedAndUnique(t *testing.T) {
 		t.Fatal("full repository name not preserved")
 	}
 }
+
+// Reporting a termination talks to GitHub and can hold its lock for seconds. A
+// webhook delivery waiting to learn whether it may start a review must not
+// queue behind that, so the two use different Leases.
+func TestSerializeUsesALeaseOfItsOwn(t *testing.T) {
+	if SentinelLease == admissionLease {
+		t.Fatal("the sentinel shares the admission lease; a GitHub call would block submissions")
+	}
+	client := fake.NewSimpleClientset()
+	ran := 0
+	if err := Serialize(context.Background(), client, "bosun", SentinelLease, 5*time.Second, func(context.Context) error {
+		ran++
+		return nil
+	}); err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if ran != 1 {
+		t.Fatalf("want the operation run once, got %d", ran)
+	}
+	lease, err := client.CoordinationV1().Leases("bosun").Get(context.Background(), SentinelLease, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("the sentinel lease was never taken: %v", err)
+	}
+	if lease.Name != SentinelLease {
+		t.Fatalf("took the wrong lease: %s", lease.Name)
+	}
+}
+
+// An operation that fails must surface, not be swallowed by the lease wrapper.
+func TestSerializeReportsTheOperationError(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	want := fmt.Errorf("GitHub POST returned HTTP 502")
+	err := Serialize(context.Background(), client, "bosun", SentinelLease, 5*time.Second, func(context.Context) error { return want })
+	if !strings.Contains(fmt.Sprint(err), "502") {
+		t.Fatalf("the operation error did not reach the caller: %v", err)
+	}
+}
+
+// The acquisition wait and the operation budget are different things. Binding
+// the operation to the acquisition deadline means a caller that asked for 60
+// seconds to publish gets whatever is left of a 35-second window -- five
+// seconds, after waiting out another replica -- and a termination that needs
+// a token mint and paginated reads never gets reported.
+func TestTheOperationBudgetSurvivesTheAcquisitionWindow(t *testing.T) {
+	original := leaseAcquireTimeout
+	leaseAcquireTimeout = 50 * time.Millisecond
+	defer func() { leaseAcquireTimeout = original }()
+
+	client := fake.NewSimpleClientset()
+	var deadline time.Time
+	var cancelled error
+	err := Serialize(context.Background(), client, "bosun", SentinelLease, 5*time.Second, func(ctx context.Context) error {
+		deadline, _ = ctx.Deadline()
+		// Outlive the acquisition window. Nothing about waiting for a lease
+		// should shorten the work done once it is held.
+		select {
+		case <-time.After(200 * time.Millisecond):
+		case <-ctx.Done():
+			cancelled = ctx.Err()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if cancelled != nil {
+		t.Fatalf("the operation was cancelled by the acquisition window, not by its own budget: %v", cancelled)
+	}
+	if remaining := time.Until(deadline); remaining < 4*time.Second {
+		t.Errorf("operation budget was %v, want close to the 5s requested", remaining)
+	}
+}
+
+// Propagating caller cancellation is the half that must survive the fix: a
+// drained webhook delivery or a shutting-down controller has to stop the work
+// it is holding the lease for.
+func TestTheOperationStopsWhenTheCallerGoesAway(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	ctx, cancel := context.WithCancel(context.Background())
+	var observed error
+	err := Serialize(ctx, client, "bosun", SentinelLease, 30*time.Second, func(opCtx context.Context) error {
+		cancel()
+		select {
+		case <-opCtx.Done():
+			observed = opCtx.Err()
+		case <-time.After(5 * time.Second):
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if observed == nil {
+		t.Error("cancelling the caller did not stop the operation")
+	}
+}

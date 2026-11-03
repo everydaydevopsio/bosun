@@ -80,7 +80,7 @@ func Submit(ctx context.Context, client kubernetes.Interface, cfg config.Config,
 }
 
 func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string) (string, error) {
-	name := Name(req.Repo, req.Ref, delivery)
+	name := Name(req.Repo, req.NameRef(), delivery)
 	if _, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
 		return "", ExistsError{name}
 	} else if !errors.IsNotFound(err) {

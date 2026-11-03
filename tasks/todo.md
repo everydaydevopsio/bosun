@@ -1080,3 +1080,130 @@ and fixed:
   the body, so a truncated reply after a 2xx failed a review GitHub had created
   and Worker.Run would add a contradictory failure comment. Decode failures are
   now a distinct error that only this caller ignores.
+
+# Task: Report reviewer terminations the reviewer cannot report
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-03
+- Mode: Autonomous
+- Issue: #62
+- Plan: `plans/plan-oom-termination-report.md`
+
+## Scope
+- In scope: publishing a failure comment for a reviewer Job killed for
+  exceeding `review.resources.limits.memory`, without breaking the
+  one-terminal-publication invariant.
+- Out of scope: Jobs killed by `activeDeadlineSeconds` (#72); correlating a
+  publication to the attempt that made it rather than to the commit (#74);
+  reviews with no pull request to publish to (#65); the memory limit's default
+  value (#60).
+
+## Acceptance Criteria
+- AC1: a reviewer Job killed for exceeding its memory limit results in exactly
+  one publication on the pull request. ✅ `TestAnOOMKilledReviewProducesExactlyOnePublication`
+- AC2: that publication names memory as the cause and points at
+  `review.resources.limits.memory`. ✅ `TestTerminationCommentNamesMemoryAndTheChartValue`
+- AC3: the invariant in `docs/github-app.md` still holds -- never both a review
+  and a failure comment. ✅ `TestTerminationIsSilentWhenBosunAlreadyPublished`
+
+## Constraints
+- The controller must keep holding nothing per-review: it mints a narrow
+  repository token on demand rather than retaining the Job's.
+- No new reads of Secrets. The added RBAC is `pods: get, list, watch` only.
+
+## Risks and Tradeoffs
+- Risk: acting on every failed Job would double-publish over the reviewer's own
+  failure comment. Mitigated by classifying only on `OOMKilled`, a reason the
+  reviewer provably cannot survive.
+- Risk: a controller restart re-reporting everything inside the Job TTL.
+  Mitigated by the `bosun/termination-reported` annotation.
+- Risk: two replicas racing between the remote check and the post. Mitigated by
+  the `bosun-termination-sentinel` Lease, separate from admission so a webhook
+  delivery never queues behind a GitHub call.
+- Tradeoff: PAT installs must share the token with the controller to get a
+  comment. Documented, optional, and it logs rather than failing silently.
+
+## Execution Checklist
+- [x] `internal/review` termination publisher with the existing-publication check
+- [x] `internal/sentinel` reconcile loop with OOM classification
+- [x] Lease seam so replicas cannot both publish
+- [x] Wire into `bosun serve`; chart RBAC, values, deployment env
+- [x] Chart/config drift guard for the new environment variable
+- [x] Docs: `docs/github-app.md` publication section
+- [x] Promote the `activeDeadlineSeconds` gap to an issue (#72)
+
+## Test Strategy
+- Unit: `internal/review/termination_test.go` over an httptest GitHub; table
+  cases for each surface an existing publication can live on.
+- Unit: `internal/sentinel/sentinel_test.go` over a fake clientset; table cases
+  for every termination the reviewer reports itself.
+- Integration: `TestTheSentinelReadsAJobBuiltBySubmission` drives `jobs.Submit`
+  so the environment contract between submission and the sentinel cannot drift.
+- End-to-end: `TestAnOOMKilledReviewProducesExactlyOnePublication` runs the real
+  publisher and reconciles three times.
+- Failure paths: a rejected POST, a lost lease, and a missing pull request each
+  have a case; each asserts the Job is left unrecorded so the work is retried.
+- Both guards were verified load-bearing by disabling each in turn and
+  confirming the end-to-end test fails.
+
+## Rollback Strategy
+- Trigger: duplicate or incorrect failure comments on pull requests.
+- Rollback: set `review.terminationSentinel.intervalSeconds: 0` and upgrade.
+  The controller logs terminations instead of publishing them; no other
+  behaviour changes.
+- Validation after rollback: the controller logs
+  "termination sentinel disabled" at startup and posts no further comments.
+
+## Bosun review findings (pass 1, 3 findings)
+- [x] **High** — comment-triggered Jobs record `BOSUN_REF=pr-N` and no commit,
+  so the sentinel could neither name the reviewed commit nor recognise the
+  reviewer's own publication, breaking AC3 for that trigger. Proven against the
+  real Job that reviewed this PR. Fixed by resolving the identity at submission
+  (`resolveIdentity`), stopping the reviewer re-resolving and drifting from it,
+  and refusing to report a termination with no commit.
+- [x] **Medium** — `publishedFor` matched a marker anywhere in a body, so a
+  GitHub "Quote reply" suppressed the report. Fixed: a publication must open
+  with the marker.
+- [x] **Medium** — exhausting the page bound was treated as proof of absence.
+  Fixed: it returns a retryable error instead.
+
+## Bosun review findings (pass 2, 2 findings)
+- [x] **High** — `publishedFor` correlated by commit alone, so an earlier
+  attempt's failure comment suppressed a retry's OOM report. Fixed: a
+  publication only counts if it was made after this review started, taken from
+  the Job's `status.startTime` less a clock-skew margin.
+- [x] **Medium** — `underLease` bound the operation to the 35s acquisition
+  window, so the sentinel's 60s publication budget could never be honoured and
+  shrank to whatever the wait left. Fixed: the wait and the operation budget
+  are separate, with caller cancellation still propagated. `jobs.AdmissionBudget`
+  now ties the webhook server's write timeout to the real worst case.
+
+## Bosun review findings (pass 3, 2 findings)
+- [x] **Medium** — resolving a comment-triggered ref moved the Job name, which
+  is the delivery's deduplication key, so a redelivery after a failed
+  resolution would create a second Job and a second review. A regression
+  introduced by the pass-1 fix. Fixed: `Request.NameRef()` names a Job after
+  the ref the trigger carried, not the resolved one.
+- [x] **Medium** — publications correlate to a commit, not to the attempt that
+  made them, so overlapping attempts and retries inside the clock-skew margin
+  can suppress each other's reports. Promoted to #74: closing it needs a run
+  identifier in every publication, which changes the documented metadata-line
+  interface and the review skill that parses it. The time bound added in pass 2
+  closes the common case.
+
+## Bosun review findings (pass 4, 2 findings)
+- [x] **Medium** — identity resolution ran before admission with no bound, and
+  each GitHub call carries its own 30s client timeout: 90s of resolution plus
+  40s of admission against a 60s write timeout, so a slow GitHub cost the
+  delivery its acknowledgement while its Job was created anyway. Another
+  regression from the pass-1 fix. Fixed: a 10s `identityResolveBudget`, with
+  the server's write timeout now checked against resolution plus admission.
+- [ ] **Medium** — publications correlate to a commit, not to the attempt. Same
+  finding as pass 3; tracked in #74 and deliberately not fixed here.
+
+## Outcome
+- Result: implemented on `issue-62-report-oom-terminations`.
+- Evidence: `go test ./...`, `make lint`, `helm template`.
+- Remaining: a live review forced past its memory limit on a real cluster has
+  not been run; the manual verification in the plan is still open.

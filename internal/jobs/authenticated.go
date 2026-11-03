@@ -35,7 +35,7 @@ type TokenIssuer func(ctx context.Context, repo string) (review.RepositoryToken,
 // credential that is not there yet.
 func SubmitAuthenticated(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string, issue TokenIssuer) (string, error) {
 	return withAdmission(ctx, client, cfg.Namespace, func(ctx context.Context) (string, error) {
-		name := Name(req.Repo, req.Ref, delivery)
+		name := Name(req.Repo, req.NameRef(), delivery)
 		if _, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
 			return "", ExistsError{name}
 		} else if !apierrors.IsNotFound(err) {

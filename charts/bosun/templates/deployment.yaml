@@ -49,6 +49,8 @@ spec:
               value: {{ .Values.review.resources.limits.memory | default "" | quote }}
             - name: BOSUN_ALLOWED_ASSOCIATIONS
               value: {{ .Values.review.allowedAssociations | quote }}
+            - name: BOSUN_SENTINEL_INTERVAL_SECONDS
+              value: {{ .Values.review.terminationSentinel.intervalSeconds | quote }}
             - name: BOSUN_MAX_CONCURRENT_REVIEWS
               value: {{ .Values.review.maxConcurrent | quote }}
             - name: BOSUN_REVIEW_TIMEOUT_SECONDS
@@ -75,6 +77,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.githubSecretName }}
                   key: private-key
+                  optional: true
+            # The termination sentinel publishes on behalf of a reviewer that
+            # was killed before it could publish for itself. With an App above
+            # it mints its own narrow token and this is unused; a personal
+            # access token cannot be minted, so an install using one must share
+            # it here or accept that an OOM-killed review stays silent.
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubSecretName }}
+                  key: token
                   optional: true
             - name: BOSUN_AI_SECRET
               value: {{ .Values.secrets.aiSecretName | quote }}

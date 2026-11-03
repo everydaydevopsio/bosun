@@ -17,6 +17,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/jobs"
 	"github.com/everydaydevopsio/bosun/internal/review"
+	"github.com/everydaydevopsio/bosun/internal/sentinel"
 	"github.com/everydaydevopsio/bosun/internal/server"
 	"github.com/everydaydevopsio/bosun/internal/version"
 	"k8s.io/client-go/kubernetes"
@@ -85,6 +86,7 @@ type submitter struct {
 // access token cannot be narrowed at submission time. Narrowing it is the
 // user's job, through the token's own scopes.
 func (s submitter) Submit(ctx context.Context, r review.Request, d string) (string, error) {
+	r = resolveIdentity(ctx, r)
 	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
 	if appID == "" || key == "" {
 		return jobs.Submit(ctx, s.client, s.cfg, r, d)
@@ -93,6 +95,105 @@ func (s submitter) Submit(ctx context.Context, r review.Request, d string) (stri
 		return review.IssueRepositoryToken(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, repo, appID, key)
 	}
 	return jobs.SubmitAuthenticated(ctx, s.client, s.cfg, r, d, issue)
+}
+
+// controllerToken mints a credential the controller can publish with.
+//
+// The App path is the same one submission uses and keeps the same property:
+// the controller holds the key, mints narrowly on demand, and retains nothing
+// per-review. The fallback exists because an install using a personal access
+// token has no key to mint from; it publishes with the shared token when the
+// operator has chosen to make it available, and otherwise cannot publish at
+// all, which the caller reports rather than hides.
+func controllerToken(ctx context.Context, repo string) (string, error) {
+	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
+	if appID != "" && key != "" {
+		token, err := review.IssueRepositoryToken(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, repo, appID, key)
+		if err != nil {
+			return "", err
+		}
+		return token.Value, nil
+	}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token, nil
+	}
+	return "", errors.New("the controller has no GitHub credential: configure a GitHub App, or give the controller the shared token")
+}
+
+// identityResolveBudget bounds the GitHub work done before admission. The
+// webhook server's write timeout has to cover this plus jobs.AdmissionBudget
+// plus writing the reply.
+const identityResolveBudget = 10 * time.Second
+
+// resolveIdentity fills in the branch and commit a review is about, when the
+// trigger did not carry them.
+//
+// A comment trigger knows only a pull-request number, so the Request it
+// produces names "pr-N" and no commit. The reviewer resolves the real head for
+// itself at startup, but only in memory: the Job it runs in still records the
+// placeholder. Anything outside that process -- the sentinel that reports a
+// reviewer killed before it could publish -- then has no commit to name, and
+// no way to recognise the reviewer's own publication in order to avoid
+// contradicting it.
+//
+// Resolving here makes the Job self-describing. It is an improvement rather
+// than a precondition: the reviewer still resolves for itself, so a failure
+// costs the review nothing and only leaves that one termination unreportable.
+func resolveIdentity(ctx context.Context, r review.Request) review.Request {
+	if r.PRNumber <= 0 || r.SHA != "" {
+		return r
+	}
+	// This runs inside the webhook response, ahead of admission, and each
+	// GitHub call it makes carries its own 30s client timeout: minting a
+	// token is two of them and the lookup is a third. Unbounded, a slow
+	// GitHub costs the delivery its acknowledgement while its Job is created
+	// anyway. Give up instead -- the reviewer still resolves for itself.
+	resolveCtx, cancel := context.WithTimeout(ctx, identityResolveBudget)
+	defer cancel()
+	ctx = resolveCtx
+	token, err := controllerToken(ctx, r.Repo)
+	if err == nil {
+		var ref, sha string
+		ref, sha, err = review.ResolvePullRequest(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, r.Repo, r.PRNumber, token)
+		if err == nil {
+			// Keep the ref the trigger carried: the Job's name derives from
+			// it and is the deduplication key for this delivery, so a
+			// resolution that succeeds on a redelivery after failing once
+			// must not produce a second Job.
+			r.TriggerRef, r.Ref, r.SHA = r.Ref, ref, sha
+			return r
+		}
+	}
+	slog.Warn("could not resolve the pull request head before submission; a termination of this review will not be reportable",
+		"logger", "bosun.server", "repo", r.Repo, "pr", r.PRNumber, "error", err)
+	return r
+}
+
+// startSentinel runs the loop that reports reviewer deaths the reviewer could
+// not report itself. Without it an OOM-killed review publishes nothing at all
+// and is indistinguishable, from the pull request, from a review that never
+// ran.
+func startSentinel(ctx context.Context, client kubernetes.Interface, cfg config.Config) {
+	if cfg.SentinelIntervalSeconds <= 0 {
+		slog.Warn("termination sentinel disabled; a reviewer killed for exceeding its memory limit will publish nothing",
+			"logger", "bosun.sentinel")
+		return
+	}
+	s := sentinel.Sentinel{
+		Client: client, Config: cfg,
+		Interval: time.Duration(cfg.SentinelIntervalSeconds) * time.Second,
+		Publish: func(ctx context.Context, t review.Termination) (bool, error) {
+			token, err := controllerToken(ctx, t.Repo)
+			if err != nil {
+				return false, err
+			}
+			return review.PublishTermination(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, token, t)
+		},
+		Lock: func(ctx context.Context, op func(context.Context) error) error {
+			return jobs.Serialize(ctx, client, cfg.Namespace, jobs.SentinelLease, 60*time.Second, op)
+		},
+	}
+	go s.Run(ctx)
 }
 func kubeClient() (kubernetes.Interface, error) {
 	cfg, err := rest.InClusterConfig()
@@ -178,6 +279,7 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews)
+	startSentinel(ctx, client, cfg)
 	srv := newWebhookServer(server.Handler{Config: cfg, Submitter: submitter{client, cfg}})
 	drained := make(chan struct{})
 	go func() {

@@ -71,3 +71,38 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// The sentinel's interval is the switch between "an OOM-killed review tells
+// the pull request nothing" and "it does". It does not share the BOSUN_REVIEW_
+// prefix the test above sweeps, so it needs its own check against the same
+// silent-rename failure.
+func TestChartAndConfigAgreeOnTheSentinelInterval(t *testing.T) {
+	const name = "BOSUN_SENTINEL_INTERVAL_SECONDS"
+	chart, err := os.ReadFile("../../charts/bosun/templates/deployment.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(chart), name) {
+		t.Errorf("the chart never renders %s, so the sentinel can only ever run at its default", name)
+	}
+	if !strings.Contains(string(source), name) {
+		t.Errorf("config.Load never reads %s, so the chart value is silently discarded", name)
+	}
+}
+
+// A default of zero would disable the sentinel for every install that does not
+// set it, which is the silence this exists to remove.
+func TestTheSentinelIsOnByDefault(t *testing.T) {
+	t.Setenv("BOSUN_SENTINEL_INTERVAL_SECONDS", "")
+	if got := Load().SentinelIntervalSeconds; got <= 0 {
+		t.Fatalf("sentinel disabled by default (interval %d)", got)
+	}
+	t.Setenv("BOSUN_SENTINEL_INTERVAL_SECONDS", "0")
+	if got := Load().SentinelIntervalSeconds; got != 0 {
+		t.Fatalf("the documented opt-out does not disable the sentinel: got %d", got)
+	}
+}
