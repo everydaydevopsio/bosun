@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/everydaydevopsio/bosun/internal/jobs"
 	"github.com/everydaydevopsio/bosun/internal/review"
 )
 
@@ -109,5 +111,47 @@ func TestARequestWithoutAPullRequestIsLeftAlone(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Errorf("spent %d GitHub calls resolving a branch", calls)
+	}
+}
+
+// Resolution runs inside the webhook response, before admission. Each GitHub
+// call it makes carries its own 30-second client timeout -- a token mint is
+// two of them, then the lookup is a third -- so an unbounded resolution can
+// spend 90 seconds before admission has even started, and the delivery loses
+// its acknowledgement while its Job is created anyway.
+func TestResolutionIsBoundedSoTheDeliveryStillGetsAnAnswer(t *testing.T) {
+	blocked := make(chan struct{})
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-blocked
+	}))
+	// Defers run last-in-first-out, so the handler is released before Close
+	// waits on it. The other order deadlocks the test.
+	defer api.Close()
+	defer close(blocked)
+	t.Setenv("BOSUN_GITHUB_API_URL", api.URL)
+	t.Setenv("BOSUN_GITHUB_APP_ID", "")
+	t.Setenv("BOSUN_GITHUB_PRIVATE_KEY", "")
+	t.Setenv("GITHUB_TOKEN", "test-token")
+
+	req := review.Request{Repo: "acme/widget", Ref: "pr-73", PRNumber: 73, Trigger: "comment"}
+	start := time.Now()
+	got := resolveIdentity(context.Background(), req)
+	elapsed := time.Since(start)
+
+	if got != req {
+		t.Errorf("a timed-out resolution altered the request: %+v", got)
+	}
+	if elapsed > identityResolveBudget+5*time.Second {
+		t.Errorf("resolution took %v; it must give up within its %v budget", elapsed, identityResolveBudget)
+	}
+}
+
+// The budget only helps if the response still has room for admission and for
+// writing the reply.
+func TestTheResponseBudgetCoversResolutionAndAdmission(t *testing.T) {
+	srv := newWebhookServer(nil)
+	needed := identityResolveBudget + jobs.AdmissionBudget
+	if srv.WriteTimeout <= needed {
+		t.Errorf("WriteTimeout %v must exceed resolution plus admission (%v)", srv.WriteTimeout, needed)
 	}
 }

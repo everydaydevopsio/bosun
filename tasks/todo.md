@@ -1192,6 +1192,16 @@ and fixed:
   interface and the review skill that parses it. The time bound added in pass 2
   closes the common case.
 
+## Bosun review findings (pass 4, 2 findings)
+- [x] **Medium** — identity resolution ran before admission with no bound, and
+  each GitHub call carries its own 30s client timeout: 90s of resolution plus
+  40s of admission against a 60s write timeout, so a slow GitHub cost the
+  delivery its acknowledgement while its Job was created anyway. Another
+  regression from the pass-1 fix. Fixed: a 10s `identityResolveBudget`, with
+  the server's write timeout now checked against resolution plus admission.
+- [ ] **Medium** — publications correlate to a commit, not to the attempt. Same
+  finding as pass 3; tracked in #74 and deliberately not fixed here.
+
 ## Outcome
 - Result: implemented on `issue-62-report-oom-terminations`.
 - Evidence: `go test ./...`, `make lint`, `helm template`.

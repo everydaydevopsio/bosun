@@ -120,6 +120,11 @@ func controllerToken(ctx context.Context, repo string) (string, error) {
 	return "", errors.New("the controller has no GitHub credential: configure a GitHub App, or give the controller the shared token")
 }
 
+// identityResolveBudget bounds the GitHub work done before admission. The
+// webhook server's write timeout has to cover this plus jobs.AdmissionBudget
+// plus writing the reply.
+const identityResolveBudget = 10 * time.Second
+
 // resolveIdentity fills in the branch and commit a review is about, when the
 // trigger did not carry them.
 //
@@ -138,6 +143,14 @@ func resolveIdentity(ctx context.Context, r review.Request) review.Request {
 	if r.PRNumber <= 0 || r.SHA != "" {
 		return r
 	}
+	// This runs inside the webhook response, ahead of admission, and each
+	// GitHub call it makes carries its own 30s client timeout: minting a
+	// token is two of them and the lookup is a third. Unbounded, a slow
+	// GitHub costs the delivery its acknowledgement while its Job is created
+	// anyway. Give up instead -- the reviewer still resolves for itself.
+	resolveCtx, cancel := context.WithTimeout(ctx, identityResolveBudget)
+	defer cancel()
+	ctx = resolveCtx
 	token, err := controllerToken(ctx, r.Repo)
 	if err == nil {
 		var ref, sha string

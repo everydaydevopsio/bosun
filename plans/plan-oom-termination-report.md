@@ -140,3 +140,4 @@ the fix is a chart value.
 | 2026-11-03 | Bosun pass 1: resolve review identity at submission; anchor marker matching; make an exhausted search retryable |
 | 2026-11-03 | Bosun pass 2: bound the publication search below by the review's start; separate lease acquisition from the operation budget |
 | 2026-11-03 | Bosun pass 3: keep a Job's name stable across resolution; attempt-level correlation promoted to #74 |
+| 2026-11-03 | Bosun pass 4: bound identity resolution so it cannot exhaust the webhook response budget |
