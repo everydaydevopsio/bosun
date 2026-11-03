@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.7] - 2026-11-03
+
+### Highlights
+- Improved visibility into reviewer failures, including cases where a reviewer is terminated before it can report its status.
+
+### Fixes
+- Report reviewers that are killed before they can submit a result, rather than leaving the termination unreported. (#73)
+
+### Changes
+- Added reporting for reviewer termination caused by a Job deadline. (#75)
+
 ## [0.2.6] - 2026-11-02
 
 ### Highlights
