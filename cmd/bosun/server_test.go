@@ -2,7 +2,8 @@ package main
 
 import (
 	"testing"
-	"time"
+
+	"github.com/everydaydevopsio/bosun/internal/jobs"
 )
 
 // The webhook server is internet-facing and verifies signatures only after the
@@ -22,12 +23,12 @@ func TestWebhookServerHasBoundedTimeouts(t *testing.T) {
 		t.Error("IdleTimeout must be set; kept-alive connections are never reclaimed")
 	}
 
-	// Admission waits up to 35s for the lease. A WriteTimeout at or below that
-	// cuts the response off while the handler is still legitimately working,
-	// turning a queued delivery into a GitHub-side failure.
-	const admissionWait = 35 * time.Second
-	if srv.WriteTimeout <= admissionWait {
-		t.Errorf("WriteTimeout %v must exceed the %v admission wait", srv.WriteTimeout, admissionWait)
+	// Admission waits for the lease and then runs the transaction it guards.
+	// A WriteTimeout at or below that total cuts the response off while the
+	// handler is still legitimately working, turning a delivery that queued
+	// behind another replica into a GitHub-side failure.
+	if srv.WriteTimeout <= jobs.AdmissionBudget {
+		t.Errorf("WriteTimeout %v must exceed the %v admission budget", srv.WriteTimeout, jobs.AdmissionBudget)
 	}
 	if srv.ReadHeaderTimeout > srv.ReadTimeout {
 		t.Errorf("ReadHeaderTimeout %v must not exceed ReadTimeout %v", srv.ReadHeaderTimeout, srv.ReadTimeout)

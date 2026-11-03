@@ -22,11 +22,25 @@ const admissionLease = "bosun-review-admission"
 // start a review must not queue behind that.
 const SentinelLease = "bosun-termination-sentinel"
 
+// leaseAcquireTimeout bounds how long a caller waits for the lease. It bounds
+// only the wait: the operation gets its own budget once the lease is held, so
+// waiting out another replica cannot leave the work with seconds to finish in.
+// A variable so tests can shorten it.
+var leaseAcquireTimeout = 35 * time.Second
+
+// AdmissionBudget is the longest one submission can take: the wait for the
+// lease plus the transaction it guards. The webhook server's write timeout has
+// to exceed it, or a delivery that queued behind another replica is cut off
+// while the handler is still legitimately working.
+const AdmissionBudget = 35*time.Second + admissionOperationTimeout
+
+const admissionOperationTimeout = 5 * time.Second
+
 // All controller replicas serialize the count/create transaction using the
 // namespace's admission Lease. It is renewed while held and automatically
 // becomes available after a crashed holder stops renewing it.
 func withAdmission(ctx context.Context, client kubernetes.Interface, namespace string, submit func(context.Context) (string, error)) (string, error) {
-	return underLease(ctx, client, namespace, admissionLease, 5*time.Second, submit)
+	return underLease(ctx, client, namespace, admissionLease, admissionOperationTimeout, submit)
 }
 
 // Serialize runs op while holding one of the namespace's named Leases, so that
@@ -43,7 +57,7 @@ func Serialize(ctx context.Context, client kubernetes.Interface, namespace, leas
 }
 
 func underLease(ctx context.Context, client kubernetes.Interface, namespace, lease string, operationTimeout time.Duration, op func(context.Context) (string, error)) (string, error) {
-	ctx, stopWaiting := context.WithTimeout(ctx, 35*time.Second)
+	waitCtx, stopWaiting := context.WithTimeout(ctx, leaseAcquireTimeout)
 	defer stopWaiting()
 	electionCtx, stopElection := context.WithCancel(context.Background())
 	acquired := make(chan context.Context, 1)
@@ -69,13 +83,17 @@ func underLease(ctx context.Context, client kubernetes.Interface, namespace, lea
 	// request cancellation still has the create operation unwinding.
 	defer func() { stopElection(); <-done }()
 	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
+	case <-waitCtx.Done():
+		return "", waitCtx.Err()
 	case <-done:
 		return "", fmt.Errorf("could not acquire the %s lease", lease)
 	case leaderCtx := <-acquired:
 		opCtx, cancel := context.WithTimeout(leaderCtx, operationTimeout)
 		defer cancel()
+		// The caller's own context, not the acquisition window: a drained
+		// delivery or a shutting-down controller must still stop the work,
+		// but time spent waiting for the lease must not come out of the
+		// budget for doing it.
 		stop := context.AfterFunc(ctx, cancel)
 		defer stop()
 		if ctx.Err() != nil {

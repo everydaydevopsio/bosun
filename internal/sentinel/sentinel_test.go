@@ -502,3 +502,47 @@ func TestAResolvedCommentTriggeredReviewIsReportable(t *testing.T) {
 		t.Errorf("reported under the wrong identity: %+v", got)
 	}
 }
+
+// The sentinel is the only thing that knows when the review ran, so it has to
+// supply the lower bound that stops an earlier attempt's publication from
+// suppressing this one.
+func TestTheReportCarriesTheReviewsStartTime(t *testing.T) {
+	started := metav1.NewTime(time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC))
+	job := failedJob("review-since", "7")
+	job.Status.StartTime = &started
+	client := fake.NewSimpleClientset(job, oomPod("review-since", "OOMKilled"))
+	rec := &recorder{published: true}
+	if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(rec.seen) != 1 {
+		t.Fatalf("want one termination, got %d", len(rec.seen))
+	}
+	got := rec.seen[0].Since
+	if got.IsZero() {
+		t.Fatal("the report carries no start time, so an earlier attempt's publication can suppress it")
+	}
+	// A margin below the Job's start absorbs clock skew between the cluster
+	// and GitHub. Erring late would miss this reviewer's own publication and
+	// contradict it, which is the worse failure.
+	if got.After(started.Time) {
+		t.Errorf("start bound %v is after the Job started (%v); this reviewer's own publication could fall outside it", got, started.Time)
+	}
+	if started.Time.Sub(got) > 5*time.Minute {
+		t.Errorf("start bound %v is %v before the Job started; the window is wide enough to re-admit an earlier attempt", got, started.Time.Sub(got))
+	}
+}
+
+// A Job with no recorded start time must still be reportable: falling back to
+// no lower bound keeps the commit correlation, which is what the guard had
+// before.
+func TestAJobWithoutAStartTimeIsStillReported(t *testing.T) {
+	client := fake.NewSimpleClientset(failedJob("review-nostart", "7"), oomPod("review-nostart", "OOMKilled"))
+	rec := &recorder{published: true}
+	if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(rec.seen) != 1 || !rec.seen[0].Since.IsZero() {
+		t.Fatalf("want one unbounded report, got %d with Since=%v", len(rec.seen), rec.seen[0].Since)
+	}
+}

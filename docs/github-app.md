@@ -263,7 +263,10 @@ reproduces a whole comment behind `> `, and matching a marker anywhere would
 let an ordinary human reply pass as Bosun's own output and suppress a report
 the pull request is owed. If the search for one runs past its page bound
 without concluding, that is reported as an unfinished search and retried, never
-treated as proof that nothing was published. It records the
+treated as proof that nothing was published. The search is also bounded below
+by the review's own start: correlating by commit alone would let an earlier
+attempt's failure comment suppress a retry's, leaving the pull request holding
+a stale reason for a different failure. It records the
 outcome on the Job as `bosun/termination-reported`, so neither a later pass nor
 a restarted controller reports it twice, and it holds the
 `bosun-termination-sentinel` Lease while publishing, so two controller replicas

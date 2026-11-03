@@ -1166,6 +1166,17 @@ and fixed:
 - [x] **Medium** — exhausting the page bound was treated as proof of absence.
   Fixed: it returns a retryable error instead.
 
+## Bosun review findings (pass 2, 2 findings)
+- [x] **High** — `publishedFor` correlated by commit alone, so an earlier
+  attempt's failure comment suppressed a retry's OOM report. Fixed: a
+  publication only counts if it was made after this review started, taken from
+  the Job's `status.startTime` less a clock-skew margin.
+- [x] **Medium** — `underLease` bound the operation to the 35s acquisition
+  window, so the sentinel's 60s publication budget could never be honoured and
+  shrank to whatever the wait left. Fixed: the wait and the operation budget
+  are separate, with caller cancellation still propagated. `jobs.AdmissionBudget`
+  now ties the webhook server's write timeout to the real worst case.
+
 ## Outcome
 - Result: implemented on `issue-62-report-oom-terminations`.
 - Evidence: `go test ./...`, `make lint`, `helm template`.

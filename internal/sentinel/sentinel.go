@@ -40,6 +40,17 @@ const reportedAnnotation = "bosun/termination-reported"
 // making the API server carry a poll it does not need.
 const DefaultInterval = 30 * time.Second
 
+// clockSkewMargin is subtracted from a Job's start time before it is used as
+// the lower bound for "was this review already published?".
+//
+// The bound exists so an earlier attempt's publication cannot suppress this
+// one. It is pushed slightly early because the two clocks being compared are
+// the cluster's and GitHub's: if GitHub's is behind, this reviewer's own
+// publication could be stamped just before the Job started, fall outside the
+// bound, and be contradicted. Missing our own publication is the worse
+// failure, so the margin errs that way.
+const clockSkewMargin = 30 * time.Second
+
 // Sentinel watches reviewer Jobs for deaths the reviewer could not report.
 type Sentinel struct {
 	Client kubernetes.Interface
@@ -124,6 +135,7 @@ func (s Sentinel) inspect(ctx context.Context, job *batchv1.Job) error {
 		return nil
 	}
 	term := review.Termination{
+		Since:    startedAt(job),
 		Repo:     env(job, "BOSUN_REPO"),
 		Ref:      env(job, "BOSUN_REF"),
 		SHA:      env(job, "BOSUN_SHA"),
@@ -248,6 +260,16 @@ func failed(job *batchv1.Job) bool {
 		}
 	}
 	return false
+}
+
+// startedAt is the lower bound for publications belonging to this review. A
+// Job with no recorded start time yields the zero time, which disables the
+// bound and leaves the commit correlation the guard had before.
+func startedAt(job *batchv1.Job) time.Time {
+	if job.Status.StartTime == nil {
+		return time.Time{}
+	}
+	return job.Status.StartTime.Time.Add(-clockSkewMargin)
 }
 
 func env(job *batchv1.Job, name string) string {

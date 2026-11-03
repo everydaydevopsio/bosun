@@ -134,3 +134,4 @@ the fix is a chart value.
 | 2026-11-03 | Plan created from issue #62 |
 | 2026-11-03 | Implemented; `activeDeadlineSeconds` promoted to #72 |
 | 2026-11-03 | Bosun pass 1: resolve review identity at submission; anchor marker matching; make an exhausted search retryable |
+| 2026-11-03 | Bosun pass 2: bound the publication search below by the review's start; separate lease acquisition from the operation budget |

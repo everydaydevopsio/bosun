@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 const terminatedSHA = "0123456789abcdef0123456789abcdef01234567"
@@ -19,6 +20,9 @@ type terminationStub struct {
 	comments, reviews []string
 	posted            []string
 	postStatus        int
+	// createdAt timestamps every existing item. Zero means "long ago", which
+	// keeps the cases that predate the since filter unaffected by it.
+	createdAt time.Time
 }
 
 func (s *terminationStub) server(t *testing.T) *httptest.Server {
@@ -29,9 +33,13 @@ func (s *terminationStub) server(t *testing.T) *httptest.Server {
 		if r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1" {
 			bodies = nil
 		}
+		stamp := s.createdAt
+		if stamp.IsZero() {
+			stamp = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+		}
 		out := make([]map[string]string, 0, len(bodies))
 		for _, b := range bodies {
-			out = append(out, map[string]string{"body": b})
+			out = append(out, map[string]string{"body": b, "created_at": stamp.Format(time.RFC3339), "submitted_at": stamp.Format(time.RFC3339)})
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	}
@@ -283,5 +291,56 @@ func TestTheReviewerKeepsTheCommitItsJobRecorded(t *testing.T) {
 	}
 	if !strings.Contains(string(source), `req.PRNumber > 0 && req.SHA == ""`) {
 		t.Error("the reviewer no longer resolves a request that arrived without a commit")
+	}
+}
+
+// Correlating only by commit makes an earlier attempt's failure comment
+// suppress a later attempt's. A review of commit X fails and says so; the user
+// retries the same commit; the retry is OOM-killed and the sentinel sees the
+// first failure, stays silent, and records the retry as already reported. The
+// pull request keeps a stale reason for a different failure.
+//
+// Only a publication made after this review started can be this review's.
+func TestAnEarlierAttemptDoesNotSuppressThisOne(t *testing.T) {
+	started := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	earlier := failureMarker + "\n\n" + metadata("feature", terminatedSHA) + "\n\n`provider: context deadline exceeded`"
+
+	stub := &terminationStub{
+		comments:  []string{earlier},
+		createdAt: started.Add(-10 * time.Minute),
+	}
+	api := stub.server(t)
+	defer api.Close()
+
+	term := memoryTermination()
+	term.Since = started
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", term)
+	if err != nil {
+		t.Fatalf("PublishTermination: %v", err)
+	}
+	if !published || len(stub.posted) != 1 {
+		t.Fatalf("an earlier attempt's failure suppressed this one: published=%v posts=%d", published, len(stub.posted))
+	}
+}
+
+// The guard that matters still has to hold: this review's own publication is
+// made while the review runs, so it is always newer than the start.
+func TestThisReviewsOwnPublicationStillSuppresses(t *testing.T) {
+	started := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	stub := &terminationStub{
+		reviews:   []string{reviewMarker + "\n\n" + metadata("feature", terminatedSHA) + "\n\nFindings."},
+		createdAt: started.Add(40 * time.Second),
+	}
+	api := stub.server(t)
+	defer api.Close()
+
+	term := memoryTermination()
+	term.Since = started
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", term)
+	if err != nil {
+		t.Fatalf("PublishTermination: %v", err)
+	}
+	if published || len(stub.posted) != 0 {
+		t.Fatalf("contradicted a review this reviewer had already published: published=%v posts=%d", published, len(stub.posted))
 	}
 }
