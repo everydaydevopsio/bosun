@@ -546,3 +546,90 @@ func TestAJobWithoutAStartTimeIsStillReported(t *testing.T) {
 		t.Fatalf("want one unbounded report, got %d with Since=%v", len(rec.seen), rec.seen[0].Since)
 	}
 }
+
+// deadlineJob is what Kubernetes leaves when activeDeadlineSeconds fires: a
+// Failed condition naming the reason. The pod is SIGTERMed, so its container
+// reason is "Error" -- indistinguishable from a reviewer that exited non-zero
+// on its own, which is why the condition is what gets read.
+func deadlineJob(name, reason string) *batchv1.Job {
+	job := failedJob(name, "7")
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: reason,
+	}}
+	return job
+}
+
+// The reviewer's own timeout fires 120s before the Job's, so a Job deadline
+// means the reviewer hung past reporting. Nothing else will tell the pull
+// request.
+func TestADeadlineKilledReviewerIsReported(t *testing.T) {
+	client := fake.NewSimpleClientset(deadlineJob("review-deadline", "DeadlineExceeded"), oomPod("review-deadline", "Error"))
+	rec := &recorder{published: true}
+	if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(rec.seen) != 1 {
+		t.Fatalf("a deadline-killed reviewer was not reported: %d", len(rec.seen))
+	}
+	if got := rec.seen[0].Cause; got != review.DeadlineExceededCause(testConfig().ReviewTimeoutSeconds) {
+		t.Errorf("cause does not name the review timeout: %q", got)
+	}
+	if annotation(t, client, "review-deadline", reportedAnnotation) == "" {
+		t.Error("the report was not recorded")
+	}
+}
+
+// A reviewer that exits non-zero on its own has already published. The Job
+// fails with backoffLimit exhausted, not with a deadline, and reporting it
+// would contradict the comment the reviewer just made.
+func TestJobFailureReasonsThatAreNotTerminationsAreLeftAlone(t *testing.T) {
+	for _, reason := range []string{"BackoffLimitExceeded", "PodFailurePolicy", "unset"} {
+		t.Run("reason="+reason, func(t *testing.T) {
+			name := "review-reason-" + strings.ToLower(reason)
+			if reason == "unset" {
+				reason = ""
+			}
+			client := fake.NewSimpleClientset(deadlineJob(name, reason), oomPod(name, "Error"))
+			rec := &recorder{published: true}
+			if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if len(rec.seen) != 0 {
+				t.Errorf("reported a failure the reviewer reports itself: %+v", rec.seen)
+			}
+		})
+	}
+}
+
+// Both can be true at once: a reviewer killed for memory while its deadline is
+// also up. Memory is the actionable cause, and the one the operator can fix.
+func TestMemoryTakesPrecedenceOverTheDeadline(t *testing.T) {
+	client := fake.NewSimpleClientset(deadlineJob("review-both", "DeadlineExceeded"), oomPod("review-both", "OOMKilled"))
+	rec := &recorder{published: true}
+	if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(rec.seen) != 1 {
+		t.Fatalf("want one report, got %d", len(rec.seen))
+	}
+	if got := rec.seen[0].Cause; got != review.OutOfMemoryCause(testConfig().ReviewResources.MemoryLimit) {
+		t.Errorf("reported the deadline over the memory kill: %q", got)
+	}
+}
+
+// The sentinel runs as a goroutine inside the controller that submits every
+// review. A panic in it -- client-go panics outright on a selector it cannot
+// parse -- would take the webhook server down with it, so a secondary feature
+// would cost the primary one.
+func TestOneBadJobDoesNotTakeTheControllerDown(t *testing.T) {
+	job := failedJob("review-trailing-dash-", "7")
+	client := fake.NewSimpleClientset(job)
+	rec := &recorder{published: true}
+	err := sentinelFor(client, rec).Reconcile(context.Background())
+	if err == nil {
+		t.Fatal("a Job the sentinel cannot inspect was reported as a clean pass")
+	}
+	if !strings.Contains(err.Error(), "review-trailing-dash-") {
+		t.Errorf("the error does not name the Job that caused it: %v", err)
+	}
+}

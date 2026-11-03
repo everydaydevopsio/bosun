@@ -1207,3 +1207,62 @@ and fixed:
 - Evidence: `go test ./...`, `make lint`, `helm template`.
 - Remaining: a live review forced past its memory limit on a real cluster has
   not been run; the manual verification in the plan is still open.
+
+# Task: Report a reviewer killed by its Job deadline
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-03
+- Mode: Autonomous
+- Issue: #72
+- Plan: `plans/plan-deadline-termination-report.md`
+
+## Scope
+- In scope: classifying a Job killed by `activeDeadlineSeconds` as a
+  termination the reviewer could not report, and publishing it.
+- Out of scope: attempt-level publication identity (#74); the value of
+  `review.timeoutSeconds` or the startup allowance.
+
+## Acceptance Criteria
+- AC1: a Job killed by `activeDeadlineSeconds` results in exactly one
+  publication. ✅ `TestADeadlineKilledReviewerIsReported`
+- AC2: it names the timeout and points at `review.timeoutSeconds`.
+  ✅ `TestDeadlineCauseNamesTheReviewTimeout`
+- AC3: a reviewer that reported its own timeout first is not reported again.
+  ✅ `TestADeadlineAfterTheReviewerPublishedIsNotReportedAgain`
+- AC4: `docs/github-app.md` drops this from "What this does not do yet". ✅
+
+## Risks and Tradeoffs
+- Risk: reporting a failure the reviewer already published. Mitigated by
+  classifying on the Job condition rather than the container reason -- a
+  graceful non-zero exit is `BackoffLimitExceeded`, never `DeadlineExceeded` --
+  and by the existing publish-once guard as a backstop.
+- Tradeoff: a reviewer both out of memory and out of time is reported as out of
+  memory only. That is the cause an operator can act on.
+
+## Execution Checklist
+- [x] `DeadlineExceededCause` naming `review.timeoutSeconds`
+- [x] Job-condition branch in `Sentinel.cause`, ordered after `OOMKilled`
+- [x] Table case per Job failure reason, including the ones to leave alone
+- [x] Recover around per-Job inspection so one bad Job cannot kill the
+      controller the webhook server shares a process with
+- [x] Docs
+
+## Test Strategy
+- Unit: table cases over Job failure reasons; precedence when both causes hold.
+- Unit: the reviewer-already-published case, driving the real guard.
+- Failure path: a Job whose name is not a valid label selector, asserting the
+  reconcile reports it instead of panicking the process.
+
+## Rollback Strategy
+- Trigger: duplicate comments on timed-out reviews.
+- Rollback: `review.terminationSentinel.intervalSeconds: 0` disables all
+  termination reporting, memory included.
+- Validation after rollback: the controller logs "termination sentinel
+  disabled" at startup.
+
+## Outcome
+- Result: implemented on `issue-72-report-deadline-terminations`.
+- Evidence: `go test ./...`, `make lint`, `go vet ./...`.
+- Remaining: a live review forced past its Job deadline on a real cluster has
+  not been run.

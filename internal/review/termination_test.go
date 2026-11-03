@@ -344,3 +344,41 @@ func TestThisReviewsOwnPublicationStillSuppresses(t *testing.T) {
 		t.Fatalf("contradicted a review this reviewer had already published: published=%v posts=%d", published, len(stub.posted))
 	}
 }
+
+// The deadline message has to point at the knob that fixes it, the way the
+// memory message points at review.resources.limits.memory.
+func TestDeadlineCauseNamesTheReviewTimeout(t *testing.T) {
+	cause := DeadlineExceededCause(1800)
+	for _, want := range []string{"review.timeoutSeconds", "1800"} {
+		if !strings.Contains(cause, want) {
+			t.Errorf("deadline cause omits %q: %q", want, cause)
+		}
+	}
+	if DeadlineExceededCause(0) == "" {
+		t.Error("an unconfigured timeout produces no message at all")
+	}
+}
+
+// A reviewer can publish its own timeout and then hang past the Job deadline.
+// The sentinel will try to report that kill; the guard has to recognise the
+// reviewer's own comment and stay silent, or the pull request carries both.
+func TestADeadlineAfterTheReviewerPublishedIsNotReportedAgain(t *testing.T) {
+	started := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	stub := &terminationStub{
+		comments:  []string{failureMarker + "\n\n" + metadata("feature", terminatedSHA) + "\n\n`provider: context deadline exceeded`"},
+		createdAt: started.Add(30 * time.Minute),
+	}
+	api := stub.server(t)
+	defer api.Close()
+
+	term := memoryTermination()
+	term.Since = started
+	term.Cause = DeadlineExceededCause(1800)
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", term)
+	if err != nil {
+		t.Fatalf("PublishTermination: %v", err)
+	}
+	if published || len(stub.posted) != 0 {
+		t.Fatalf("published a second terminal comment beside the reviewer's own: published=%v posts=%d", published, len(stub.posted))
+	}
+}
