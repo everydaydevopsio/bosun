@@ -265,6 +265,26 @@ func (g githubClient) resolvePR(ctx context.Context, repo string, number int, to
 	return pr.Head.Ref, pr.Head.SHA, nil
 }
 
+// ResolvePullRequest returns a pull request's head branch and commit.
+//
+// A comment-triggered review is created knowing only a pull-request number, so
+// the identity has to be looked up before anything can name what was reviewed.
+// The reviewer does this for itself; the controller does it too, so the Job it
+// creates records the same answer rather than leaving it in the reviewer's
+// memory where nothing else can reach it.
+func ResolvePullRequest(ctx context.Context, apiBaseURL string, client *http.Client, repo string, number int, token string) (string, string, error) {
+	if !validRepository(repo) {
+		return "", "", fmt.Errorf("invalid repository name")
+	}
+	if apiBaseURL == "" {
+		apiBaseURL = "https://api.github.com"
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return githubClient{base: apiBaseURL, http: client}.resolvePR(ctx, repo, number, token)
+}
+
 // Marker lines identify Bosun's output on a pull request. A consumer selects
 // comments by these prefixes, so treat them as an interface: changing one is a
 // breaking change for every agent driving a review loop.

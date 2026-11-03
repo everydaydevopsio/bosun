@@ -130,6 +130,18 @@ func (s Sentinel) inspect(ctx context.Context, job *batchv1.Job) error {
 		PRNumber: number(env(job, "BOSUN_PR_NUMBER")),
 		Cause:    cause,
 	}
+	// A review whose Job never recorded a commit cannot be correlated. The
+	// comment would name no commit, and the guard that keeps the
+	// one-publication invariant works by matching the metadata line, so it
+	// would also fail to recognise the reviewer's own publication and
+	// contradict a review that succeeded. Submission resolves this identity
+	// before the Job is created; if that did not happen, silence is the
+	// smaller failure.
+	if term.SHA == "" {
+		slog.Warn("reviewer terminated before its review identity was resolved; cannot correlate a report", "logger", "bosun.sentinel",
+			"job", job.Name, "repo", term.Repo, "ref", term.Ref, "pr", term.PRNumber, "cause", cause)
+		return s.record(ctx, job, "unresolved-identity")
+	}
 	if term.PRNumber <= 0 {
 		// A branch-created review has nowhere to publish. Record it so the
 		// sentinel stops looking, and say so once: a silent drop behind a

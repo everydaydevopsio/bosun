@@ -1153,6 +1153,19 @@ and fixed:
 - Validation after rollback: the controller logs
   "termination sentinel disabled" at startup and posts no further comments.
 
+## Bosun review findings (pass 1, 3 findings)
+- [x] **High** — comment-triggered Jobs record `BOSUN_REF=pr-N` and no commit,
+  so the sentinel could neither name the reviewed commit nor recognise the
+  reviewer's own publication, breaking AC3 for that trigger. Proven against the
+  real Job that reviewed this PR. Fixed by resolving the identity at submission
+  (`resolveIdentity`), stopping the reviewer re-resolving and drifting from it,
+  and refusing to report a termination with no commit.
+- [x] **Medium** — `publishedFor` matched a marker anywhere in a body, so a
+  GitHub "Quote reply" suppressed the report. Fixed: a publication must open
+  with the marker.
+- [x] **Medium** — exhausting the page bound was treated as proof of absence.
+  Fixed: it returns a retryable error instead.
+
 ## Outcome
 - Result: implemented on `issue-62-report-oom-terminations`.
 - Evidence: `go test ./...`, `make lint`, `helm template`.

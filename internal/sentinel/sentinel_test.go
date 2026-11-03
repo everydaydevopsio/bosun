@@ -446,3 +446,59 @@ func TestRunWithoutAnIntervalUsesTheDefault(t *testing.T) {
 		t.Fatal("Run did not return when its context was cancelled")
 	}
 }
+
+// A comment-triggered Job is created with BOSUN_REF="pr-N" and no commit: the
+// reviewer resolves the real branch and head itself, in memory. The sentinel
+// reads the Job, so it never sees that resolution.
+//
+// Reporting from the unresolved identity is worse than not reporting. The
+// comment would name no commit, and -- because the guard correlates by
+// metadata line -- it would fail to recognise the reviewer's own publication
+// and post a failure comment contradicting a review that succeeded.
+func TestAnUnresolvedReviewIdentityIsNotReported(t *testing.T) {
+	job := failedJob("review-bosun-pr-73", "73")
+	for i, v := range job.Spec.Template.Spec.Containers[0].Env {
+		switch v.Name {
+		case "BOSUN_REF":
+			job.Spec.Template.Spec.Containers[0].Env[i].Value = "pr-73"
+		case "BOSUN_SHA":
+			job.Spec.Template.Spec.Containers[0].Env[i].Value = ""
+		}
+	}
+	client := fake.NewSimpleClientset(job, oomPod("review-bosun-pr-73", "OOMKilled"))
+	rec := &recorder{published: true}
+	if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(rec.seen) != 0 {
+		t.Fatalf("reported a termination that could not name the commit it reviewed: %+v", rec.seen)
+	}
+	if annotation(t, client, "review-bosun-pr-73", reportedAnnotation) == "" {
+		t.Error("an unreportable termination was left to be retried every interval forever")
+	}
+}
+
+// The other half of the same fix: once submission has resolved a
+// comment-triggered review, its Job records a real branch and commit, and the
+// termination becomes reportable under the identity the reviewer would have
+// published under.
+func TestAResolvedCommentTriggeredReviewIsReportable(t *testing.T) {
+	job := failedJob("review-bosun-pr-73-resolved", "73")
+	for i, v := range job.Spec.Template.Spec.Containers[0].Env {
+		if v.Name == "BOSUN_TRIGGER" {
+			job.Spec.Template.Spec.Containers[0].Env[i].Value = "comment"
+		}
+	}
+	// Ref and SHA are already the resolved head, as resolveIdentity leaves them.
+	client := fake.NewSimpleClientset(job, oomPod("review-bosun-pr-73-resolved", "OOMKilled"))
+	rec := &recorder{published: true}
+	if err := sentinelFor(client, rec).Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(rec.seen) != 1 {
+		t.Fatalf("a resolved comment-triggered termination was not reported: %d", len(rec.seen))
+	}
+	if got := rec.seen[0]; got.Ref != "feature" || got.SHA != headSHA {
+		t.Errorf("reported under the wrong identity: %+v", got)
+	}
+}

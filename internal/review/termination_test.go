@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -197,5 +198,90 @@ func TestOutOfMemoryCauseWithoutAConfiguredLimit(t *testing.T) {
 	cause := OutOfMemoryCause("")
 	if !strings.Contains(cause, "memory") || !strings.Contains(cause, "review.resources.limits.memory") {
 		t.Fatalf("cause does not point at the memory limit: %q", cause)
+	}
+}
+
+// GitHub's "Quote reply" reproduces a whole comment body behind "> ". Matching
+// the marker anywhere in the body therefore lets an ordinary human reply look
+// like Bosun's own publication, and silently suppress the termination report
+// the pull request is owed.
+func TestAQuotedPublicationDoesNotSuppressTheReport(t *testing.T) {
+	quoted := "> " + reviewMarker + "\n> \n> " + metadata("feature", terminatedSHA) + "\n> \n> Findings.\n\nWhat did it mean by this?"
+	for _, tc := range []struct {
+		name     string
+		comments []string
+		reviews  []string
+	}{
+		{name: "a quote-reply to a review", comments: []string{quoted}},
+		{name: "a quote-reply to a comment", reviews: []string{quoted}},
+		{
+			name:     "prose that happens to mention both strings",
+			comments: []string{"I think " + reviewMarker + " output for " + metadata("feature", terminatedSHA) + " was wrong."},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &terminationStub{comments: tc.comments, reviews: tc.reviews}
+			api := stub.server(t)
+			defer api.Close()
+
+			published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", memoryTermination())
+			if err != nil {
+				t.Fatalf("PublishTermination: %v", err)
+			}
+			if !published || len(stub.posted) != 1 {
+				t.Fatalf("a quoted or mentioned marker suppressed the report: published=%v posts=%d", published, len(stub.posted))
+			}
+		})
+	}
+}
+
+// Running out of pages means "not found here", not "does not exist". Treating
+// the bound as proof of absence publishes a failure comment contradicting a
+// review that is sitting just past the boundary.
+func TestAnExhaustedSearchIsAnErrorNotAnAbsence(t *testing.T) {
+	var posted int
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			posted++
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		// Every page is full, so the search can never conclude.
+		full := make([]map[string]string, 100)
+		for i := range full {
+			full[i] = map[string]string{"body": "an ordinary comment"}
+		}
+		_ = json.NewEncoder(w).Encode(full)
+	}))
+	defer api.Close()
+
+	published, err := PublishTermination(context.Background(), api.URL, api.Client(), "test-token", memoryTermination())
+	if err == nil {
+		t.Fatal("an unfinished search was reported as proof that nothing was published")
+	}
+	if published || posted != 0 {
+		t.Errorf("posted without establishing that nothing was there: published=%v posts=%d", published, posted)
+	}
+}
+
+// The Job records the commit the controller resolved, and the reviewer
+// publishes under the commit it reviewed. If the reviewer re-resolves at
+// startup it can pick up a newer head after a push, publish under that, and
+// leave the sentinel correlating against the commit the Job recorded -- the
+// same mismatch resolving at submission exists to remove.
+//
+// Re-resolution is only needed when nothing resolved it first, which is what
+// an empty commit means.
+func TestTheReviewerKeepsTheCommitItsJobRecorded(t *testing.T) {
+	source, err := os.ReadFile("runner.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(source), `req.Trigger == "comment"`) {
+		t.Error("the reviewer still re-resolves every comment-triggered review, so it can drift from the commit its Job recorded")
+	}
+	if !strings.Contains(string(source), `req.PRNumber > 0 && req.SHA == ""`) {
+		t.Error("the reviewer no longer resolves a request that arrived without a commit")
 	}
 }

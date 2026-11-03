@@ -86,6 +86,7 @@ type submitter struct {
 // access token cannot be narrowed at submission time. Narrowing it is the
 // user's job, through the token's own scopes.
 func (s submitter) Submit(ctx context.Context, r review.Request, d string) (string, error) {
+	r = resolveIdentity(ctx, r)
 	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
 	if appID == "" || key == "" {
 		return jobs.Submit(ctx, s.client, s.cfg, r, d)
@@ -117,6 +118,38 @@ func controllerToken(ctx context.Context, repo string) (string, error) {
 		return token, nil
 	}
 	return "", errors.New("the controller has no GitHub credential: configure a GitHub App, or give the controller the shared token")
+}
+
+// resolveIdentity fills in the branch and commit a review is about, when the
+// trigger did not carry them.
+//
+// A comment trigger knows only a pull-request number, so the Request it
+// produces names "pr-N" and no commit. The reviewer resolves the real head for
+// itself at startup, but only in memory: the Job it runs in still records the
+// placeholder. Anything outside that process -- the sentinel that reports a
+// reviewer killed before it could publish -- then has no commit to name, and
+// no way to recognise the reviewer's own publication in order to avoid
+// contradicting it.
+//
+// Resolving here makes the Job self-describing. It is an improvement rather
+// than a precondition: the reviewer still resolves for itself, so a failure
+// costs the review nothing and only leaves that one termination unreportable.
+func resolveIdentity(ctx context.Context, r review.Request) review.Request {
+	if r.PRNumber <= 0 || r.SHA != "" {
+		return r
+	}
+	token, err := controllerToken(ctx, r.Repo)
+	if err == nil {
+		var ref, sha string
+		ref, sha, err = review.ResolvePullRequest(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, r.Repo, r.PRNumber, token)
+		if err == nil {
+			r.Ref, r.SHA = ref, sha
+			return r
+		}
+	}
+	slog.Warn("could not resolve the pull request head before submission; a termination of this review will not be reportable",
+		"logger", "bosun.server", "repo", r.Repo, "pr", r.PRNumber, "error", err)
+	return r
 }
 
 // startSentinel runs the loop that reports reviewer deaths the reviewer could

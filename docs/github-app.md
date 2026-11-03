@@ -254,10 +254,16 @@ failed" sends an operator looking at the agent, its credentials, and the model,
 when the fix is one quantity in `values.yaml`.
 
 This does not weaken the one-publication rule above. Before posting, the
-controller looks for a Bosun marker already carrying this commit's metadata
-line, across both comments and reviews, and stays silent if it finds one --
-which covers the case it cannot see from Kubernetes alone, a reviewer that
-published its review and was then killed while finishing up. It records the
+controller looks for a Bosun publication already carrying this commit's
+metadata line, across both comments and reviews, and stays silent if it finds
+one -- which covers the case it cannot see from Kubernetes alone, a reviewer
+that published its review and was then killed while finishing up. A
+publication is a body that *opens* with a marker: GitHub's "Quote reply"
+reproduces a whole comment behind `> `, and matching a marker anywhere would
+let an ordinary human reply pass as Bosun's own output and suppress a report
+the pull request is owed. If the search for one runs past its page bound
+without concluding, that is reported as an unfinished search and retried, never
+treated as proof that nothing was published. It records the
 outcome on the Job as `bosun/termination-reported`, so neither a later pass nor
 a restarted controller reports it twice, and it holds the
 `bosun-termination-sentinel` Lease while publishing, so two controller replicas
@@ -270,6 +276,17 @@ submission, and still holds nothing per-review. An install using a personal
 access token has nothing to mint from: the chart offers the controller the
 shared `token` key from the same Secret, and an install that declines it logs
 the termination instead of publishing it.
+
+Correlation needs the commit, so the controller resolves it before the Job is
+built. A comment trigger (`@bridgectl review`) knows only a pull-request
+number, and the reviewer used to resolve the real branch and head for itself at
+startup -- in memory, leaving its Job recording `pr-N` and no commit. The
+controller now resolves it at submission, so the Job records the same identity
+the reviewer publishes under. That resolution is an improvement, not a
+precondition: if it fails, the review still runs and still publishes for
+itself, and only that review's termination becomes unreportable. The controller
+says so at WARN and reports nothing rather than posting a comment naming no
+commit.
 
 A review with no pull request -- the `branch-created` trigger, which runs with
 `BOSUN_PR_NUMBER=0` -- has nowhere to publish. The controller logs it at WARN

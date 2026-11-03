@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -38,11 +39,20 @@ func OutOfMemoryCause(limit string) string {
 		"Raise `review.resources.limits.memory` and review this commit again."
 }
 
-// terminationPages bounds the search for an existing publication. A hundred
-// per page over ten pages covers any pull request where finding Bosun's own
-// output is still meaningful, and the bound means a repository with a pathological
-// comment count cannot turn one reconcile into an unbounded walk of the API.
+// terminationPages bounds the search for an existing publication, so that a
+// repository with a pathological comment count cannot turn one reconcile into
+// an unbounded walk of the API.
+//
+// Exhausting it is not an answer. "Not found in the first thousand" is not
+// "was never published", and treating it as one publishes a failure comment
+// contradicting a review sitting just past the boundary. The search says so
+// instead, and the caller retries.
 const terminationPages = 10
+
+// errSearchIncomplete means the search hit its bound without establishing
+// whether Bosun has already published. It is retryable: the sentinel leaves
+// the Job unrecorded and tries again.
+var errSearchIncomplete = errors.New("could not establish whether Bosun already published: too many comments to search")
 
 // PublishTermination reports a reviewer that was killed before it could speak.
 //
@@ -95,6 +105,7 @@ func (g githubClient) publishedFor(ctx context.Context, repo string, number int,
 		fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number),
 		fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number),
 	} {
+		done := false
 		for page := 1; page <= terminationPages; page++ {
 			var items []struct {
 				Body string `json:"body"`
@@ -103,17 +114,36 @@ func (g githubClient) publishedFor(ctx context.Context, repo string, number int,
 				return false, err
 			}
 			for _, item := range items {
-				if !strings.Contains(item.Body, want) {
-					continue
-				}
-				if strings.Contains(item.Body, reviewMarker) || strings.Contains(item.Body, failureMarker) {
+				if isPublication(item.Body, want) {
 					return true, nil
 				}
 			}
 			if len(items) < 100 {
+				done = true
 				break
 			}
 		}
+		if !done {
+			return false, errSearchIncomplete
+		}
 	}
 	return false, nil
+}
+
+// isPublication decides whether a body is one of Bosun's own publications for
+// this commit, rather than something that merely contains its text.
+//
+// The marker has to open the body. GitHub's "Quote reply" reproduces a whole
+// comment behind "> ", and a person discussing a review quotes both the marker
+// and the metadata line; matching either anywhere would let an ordinary reply
+// pass as Bosun's output and suppress a report the pull request is owed.
+// Anchoring to the start is install-independent, which checking the author is
+// not: an App install publishes as a bot and a personal-access-token install
+// publishes as the user who owns the token.
+func isPublication(body, metadataLine string) bool {
+	trimmed := strings.TrimSpace(body)
+	if !strings.HasPrefix(trimmed, reviewMarker) && !strings.HasPrefix(trimmed, failureMarker) {
+		return false
+	}
+	return strings.Contains(trimmed, metadataLine)
 }

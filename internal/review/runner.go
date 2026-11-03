@@ -201,7 +201,12 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		if err != nil {
 			return fail(StageSetup, err)
 		}
-		if req.PRNumber > 0 && (req.SHA == "" || req.Trigger == "comment") {
+		// Only when nothing resolved it first. The controller resolves a
+		// comment-triggered review before building the Job, so re-resolving
+		// here would let the reviewer pick up a newer head after a push,
+		// publish under that, and leave the commit the Job recorded naming a
+		// different review.
+		if req.PRNumber > 0 && req.SHA == "" {
 			req.Ref, req.SHA, err = github.resolvePR(ctx, req.Repo, req.PRNumber, token)
 			if err != nil {
 				return fail(StageClone, err)
