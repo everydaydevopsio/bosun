@@ -1403,3 +1403,32 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 
 ## Outcome
 - Result: see PR for #80.
+
+# Task: No-build quick start for local reviews (#50)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-04
+- Mode: Autonomous
+- Requirement IDs: #50
+
+## Scope
+- In scope: a quick start at the top of `docs/local-development.md`, and the
+  README link to it.
+- Out of scope: Docker Hub publishing (the issue notes GHCR is the only
+  registry).
+
+## Acceptance Criteria
+- AC1: the first screenful runs a local review without cloning this repo.
+- AC2: the quick start names only the tools it uses (Docker, Kind, a signed-in
+  `codex` or `claude`, Homebrew).
+- AC3: contributor setup follows, unchanged.
+- AC4: the reviewer image and its registry are named.
+
+## Execution Checklist
+- [x] Quick start section with prerequisites, install, run, image, `bosun doctor`
+- [x] "Developing Bosun itself" divider above the existing contributor material
+- [x] README points at the quick start anchor
+
+## Outcome
+- Result: docs only; existing sections unchanged.
