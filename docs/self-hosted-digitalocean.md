@@ -3,7 +3,7 @@
 Run Bosun as a GitHub App against your own repositories, on the cheapest
 Kubernetes cluster that will hold it: one node, no high availability.
 
-This is the hosted path — you comment `@bridgectl review` on a pull request and
+This is the hosted path — you comment `@bosun-review review` on a pull request and
 Bosun posts the review back. For reviewing a local checkout with no GitHub at
 all, use [local-development.md](local-development.md) instead; for running the
 hosted path from your own machine, see
@@ -207,7 +207,7 @@ and watch:
 kubectl -n bosun logs deployment/bosun-bosun -f
 ```
 
-Comment `@bridgectl review` on a pull request in an installed repository, as a
+Comment `@bosun-review review` on a pull request in an installed repository, as a
 repository owner, member, or collaborator:
 
 ```bash

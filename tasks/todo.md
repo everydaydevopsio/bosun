@@ -1364,3 +1364,42 @@ for installs that opt in.
 
 Not addressed: nothing supersedes an in-flight review when a newer push
 arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
+
+# Task: Default the review comment trigger to `@bosun-review review` (#80)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-04
+- Mode: Autonomous
+- Requirement IDs: #80
+
+## Scope
+- In scope: the `BOSUN_REVIEW_COMMAND` default, a `review.command` chart value,
+  docs, and test fixtures.
+- Out of scope: accepting several phrases at once; a `review_requested`
+  trigger for requesting `bosun-review` as a reviewer.
+
+## Acceptance Criteria
+- AC1: with no override, `@bosun-review review` on a PR starts a review.
+- AC2: `review.command` renders `BOSUN_REVIEW_COMMAND`, so an install can keep
+  `@bridgectl review`.
+
+## Execution Checklist
+- [x] Failing tests: config default, chart renders and defaults the value
+- [x] Default changed in `config.Load`; chart value and env added
+- [x] README, `docs/setup.md`, and every doc example updated
+- [ ] Post-merge: release, deploy to mca-cluster, verify with a live comment (evidence goes on #80, which closes then)
+
+## Test Strategy
+- Unit: `TestTheDefaultReviewCommandMentionsTheBosunReviewAccount`,
+  `TestTheChartRendersTheReviewCommand`.
+- E2E: on mca-cluster, an auto review on a new PR, then a second review from a
+  `@bosun-review review` comment.
+
+## Rollback Strategy
+- Trigger: comment reviews stop starting.
+- Rollback steps: set `review.command: "@bridgectl review"` in the gitops
+  values, or pin the previous release.
+
+## Outcome
+- Result: see PR for #80.

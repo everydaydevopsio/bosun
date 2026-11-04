@@ -135,3 +135,36 @@ func TestTheChartDefaultsBranchReviewOff(t *testing.T) {
 		t.Error("charts/bosun/values.yaml no longer defaults review.triggers.branchCreated to false")
 	}
 }
+
+// The default trigger names an account the project owns. "@bridgectl" was not
+// a GitHub user, so it never autocompleted, and anyone registering it would be
+// notified by every review request. "@bosun-review" is reserved by the project.
+func TestTheDefaultReviewCommandMentionsTheBosunReviewAccount(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_COMMAND", "")
+	if got := Load().ReviewCommand; got != "@bosun-review review" {
+		t.Fatalf("default review command %q, want %q", got, "@bosun-review review")
+	}
+	t.Setenv("BOSUN_REVIEW_COMMAND", "@BridgeCtl Review")
+	if got := Load().ReviewCommand; got != "@bridgectl review" {
+		t.Fatalf("override not honoured case-insensitively: got %q", got)
+	}
+}
+
+// Installs that taught their team the old phrase keep it by setting
+// review.command; that only works if the chart renders it.
+func TestTheChartRendersTheReviewCommand(t *testing.T) {
+	chart, err := os.ReadFile("../../charts/bosun/templates/deployment.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(chart), "BOSUN_REVIEW_COMMAND") {
+		t.Error("charts/bosun/templates/deployment.yaml does not render BOSUN_REVIEW_COMMAND")
+	}
+	values, err := os.ReadFile("../../charts/bosun/values.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(values), `command: "@bosun-review review"`) {
+		t.Error(`charts/bosun/values.yaml does not default review.command to "@bosun-review review"`)
+	}
+}

@@ -104,7 +104,7 @@ spending the model budget and then failing to publish.
 
 ## 5. Verify
 
-Comment `@bridgectl review` on a test pull request and watch the reviewer Job:
+Comment `@bosun-review review` on a test pull request and watch the reviewer Job:
 
 ```bash
 kubectl -n bosun logs -l app.kubernetes.io/name=bosun-review --tail=50
@@ -301,7 +301,7 @@ shared `token` key from the same Secret, and an install that declines it logs
 the termination instead of publishing it.
 
 Correlation needs the commit, so the controller resolves it before the Job is
-built. A comment trigger (`@bridgectl review`) knows only a pull-request
+built. A comment trigger (`@bosun-review review`) knows only a pull-request
 number, and the reviewer used to resolve the real branch and head for itself at
 startup -- in memory, leaving its Job recording `pr-N` and no commit. The
 controller now resolves it at submission, so the Job records the same identity

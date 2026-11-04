@@ -133,7 +133,7 @@ curl -i -X POST https://YOUR_TUNNEL_HOST/webhooks/github   # 401
 The 401 is the signature check refusing an unsigned request, through the tunnel
 — which proves the whole path. Then redeliver a ping from the App's **Advanced**
 tab, watch `kubectl -n bosun logs deployment/bosun-bosun -f`, and comment
-`@bridgectl review` on a pull request in the installed repository.
+`@bosun-review review` on a pull request in the installed repository.
 
 ## What will bite you
 

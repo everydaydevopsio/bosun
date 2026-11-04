@@ -34,7 +34,7 @@ review:
       memory: 1Gi
   timeoutSeconds: 1800
   ttlSecondsAfterFinished: 3600
-  # Who may spend model credits with "@bridgectl review".
+  # Who may spend model credits with "@bosun-review review".
   allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
 
 logging:

@@ -95,19 +95,22 @@ Bosun verifies `X-Hub-Signature-256` before accepting an event.
 A review starts when:
 - a branch is created;
 - a PR is opened, reopened, synchronized, or marked ready for review; or
-- an owner, member, or collaborator comments `@bridgectl review` on a pull request.
+- an owner, member, or collaborator comments `@bosun-review review` on a pull request.
 
 Draft pull requests are skipped. A draft that is opened or pushed to does not
-start a review; marking it ready for review does. Commenting `@bridgectl
+start a review; marking it ready for review does. Commenting `@bosun-review
 review` still reviews a draft, because that is someone asking for it directly.
 
 Comment-triggered reviews resolve the current PR head at execution time.
 
 Comments from bots are ignored, and comments on plain issues are ignored. Widen
-or narrow who may spend model credits with `review.allowedAssociations`:
+or narrow who may spend model credits with `review.allowedAssociations`, and
+change the trigger phrase with `review.command` (before 0.3.0 it was
+`@bridgectl review`):
 
 ```yaml
 review:
+  command: "@bosun-review review"
   allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
 ```
 
@@ -123,7 +126,7 @@ kubectl -n bosun get jobs
 kubectl -n bosun logs job/REVIEW_JOB_NAME
 ```
 
-Open a test PR and leave `@bridgectl review`. The resulting review appears as a pull-request review headed **Bosun code review**, with one inline comment per finding anchored to the diff. A review whose findings cannot be anchored arrives as a conversation comment under the same heading, and a failed review as one headed **Bosun code review failed**.
+Open a test PR and leave `@bosun-review review`. The resulting review appears as a pull-request review headed **Bosun code review**, with one inline comment per finding anchored to the diff. A review whose findings cannot be anchored arrives as a conversation comment under the same heading, and a failed review as one headed **Bosun code review failed**.
 
 ### Identify Bosun's output
 

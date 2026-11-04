@@ -27,7 +27,7 @@ flowchart TD
         end
     end
 
-    dev -->|"push branch or @bridgectl review"| repo
+    dev -->|"push branch or @bosun-review review"| repo
     repo -->|"signed webhook"| hook
     hook -->|"create Kubernetes Job"| clone
     ai -->|"post findings"| review
@@ -35,13 +35,15 @@ flowchart TD
 
 ## Triggers
 
-Bosun reviews a pull request when it is opened, on every push to it afterwards, and on `@bridgectl review` comments. A human, CI automation, or another AI agent can request a review without receiving the model credential.
+Bosun reviews a pull request when it is opened, on every push to it afterwards, and on `@bosun-review review` comments. A human, CI automation, or another AI agent can request a review without receiving the model credential.
 
 Branch creation is also a trigger, off by default (`review.triggers.branchCreated`). A branch push and the pull request opened from it review the same commit, so enabling it makes the ordinary `git push -u` then `gh pr create` flow pay for two identical reviews — and because `review.maxConcurrent` is counted across the namespace rather than per repository, the duplicate can take the last slot and leave the pull request rejected with 503, which GitHub does not redeliver. Turn it on when branches are pushed that will not become pull requests soon.
 
-Draft pull requests do not trigger automatic reviews; marking one ready for review does. An explicit `@bridgectl review` comment still works on a draft.
+Draft pull requests do not trigger automatic reviews; marking one ready for review does. An explicit `@bosun-review review` comment still works on a draft.
 
 Comment triggers are restricted to the author associations in `review.allowedAssociations` (`OWNER,MEMBER,COLLABORATOR` by default), and comments from bots are ignored so a review cannot trigger itself.
+
+The phrase is `review.command` (`BOSUN_REVIEW_COMMAND`), matched case-insensitively anywhere in the comment. It defaults to `@bosun-review review`; [`bosun-review`](https://github.com/bosun-review) is a GitHub account the project owns, so the mention autocompletes and notifies nobody else. Releases before 0.3.0 used `@bridgectl review`; set `review.command: "@bridgectl review"` to keep it.
 
 ## Why bridgectl
 
@@ -218,7 +220,7 @@ what it costs each month:
 3. Install `charts/bosun`.
 4. Expose `/webhooks/github` over TLS.
 5. Configure the GitHub webhook.
-6. Comment `@bridgectl review` on a test PR as a repository owner, member, or collaborator.
+6. Comment `@bosun-review review` on a test PR as a repository owner, member, or collaborator.
 
 See [docs/setup.md](docs/setup.md) for exact commands, permissions, Helm values, and security guidance.
 
