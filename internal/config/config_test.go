@@ -209,7 +209,7 @@ func TestNoCodePathProducesTheLatestTag(t *testing.T) {
 func TestAPublishedPrereleaseUsesItsOwnPublishedImage(t *testing.T) {
 	t.Setenv("BOSUN_REVIEW_IMAGE", "")
 	t.Cleanup(func() { version.Version = "dev" })
-	for _, v := range []string{"0.3.0-rc.1", "v0.3.0-rc.1", "v0.3.0-beta.2", "v0.3.0+build.5"} {
+	for _, v := range []string{"0.3.0-rc.1", "v0.3.0-rc.1", "v0.3.0-beta.2"} {
 		version.Version = v
 		want := publishedImage + ":" + strings.TrimPrefix(v, "v")
 		if got := Load().ReviewImage; got != want {
@@ -237,6 +237,26 @@ func TestGitDescribeStampsAreStillNotReleases(t *testing.T) {
 		version.Version = v
 		if got := Load().ReviewImage; got != devImage {
 			t.Errorf("local build stamp %q resolved to %q, want %q", v, got, devImage)
+		}
+	}
+}
+
+// publish.yml tags the image `type=raw` from the version verbatim, and a
+// Docker tag must match [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127} -- no "+". So a
+// build-metadata version never publishes an image, and naming one would give
+// reviewer Pods a reference that cannot be parsed. Found by Bosun reviewing
+// the commit that first widened this pattern.
+func TestBuildMetadataNeverNamesAnImageTag(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "")
+	t.Cleanup(func() { version.Version = "dev" })
+	for _, v := range []string{"v0.3.0+build.5", "0.3.0+20260101", "v0.3.0-rc.1+build.5"} {
+		version.Version = v
+		got := Load().ReviewImage
+		if strings.Contains(got, "+") {
+			t.Errorf("version %q produced %q, which is not a legal image reference", v, got)
+		}
+		if got != devImage {
+			t.Errorf("version %q resolved to %q, want %q", v, got, devImage)
 		}
 	}
 }

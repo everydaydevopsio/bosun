@@ -102,11 +102,16 @@ const devImage = "bosun:dev"
 // publishedImage is the repository publish.yml pushes release images to.
 const publishedImage = "ghcr.io/everydaydevopsio/bosun"
 
-// releaseVersion matches a version publish.yml would accept as a tag. It is
-// deliberately the same shape as that workflow's own "Tag is semver" gate,
-// prerelease and build metadata included, so a published v0.3.0-rc.1 resolves
-// to the image published alongside it rather than to the dev tag.
-var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+// releaseVersion matches a version that actually reaches the registry.
+//
+// It follows publish.yml's own "Tag is semver" gate as far as the prerelease
+// suffix, so a published v0.3.0-rc.1 resolves to the image published alongside
+// it rather than to the dev tag. Build metadata is deliberately excluded even
+// though that gate allows it: the image is tagged `type=raw` from the version
+// verbatim, and a Docker tag must match [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}, so
+// a "+" version never publishes an image at all. Naming one would produce a
+// reference that cannot even be parsed.
+var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
 
 // gitDescribed matches what the Makefile stamps for a local build:
 // `git describe --tags --always --dirty`, which emits "v0.2.8-2-gabc1234" and
