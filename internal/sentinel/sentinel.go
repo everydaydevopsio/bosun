@@ -169,10 +169,14 @@ func (s Sentinel) inspectJob(ctx context.Context, job *batchv1.Job) error {
 		return s.record(ctx, job, "unresolved-identity")
 	}
 	if term.PRNumber <= 0 {
-		// A branch-created review has nowhere to publish. Record it so the
+		// A reviewer killed before it could publish has nowhere to report to
+		// without a pull request. A completed branch-created review now
+		// publishes as a check run on the commit (#65); reporting a *killed*
+		// one the same way is #76, because the sentinel would have to mint a
+		// token carrying the optional Checks permission for a repository
+		// whose installation may not grant it. Record it so the
 		// sentinel stops looking, and say so once: a silent drop behind a
-		// Failed Job is the part that makes this hard to diagnose. The
-		// discarded review itself is #65.
+		// Failed Job is the part that makes this hard to diagnose.
 		slog.Warn("reviewer terminated with no pull request to report to", "logger", "bosun.sentinel",
 			"job", job.Name, "repo", term.Repo, "ref", term.Ref, "cause", cause)
 		return s.record(ctx, job, "no-pull-request")

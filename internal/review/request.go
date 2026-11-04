@@ -26,7 +26,17 @@ func (r Request) NameRef() string {
 	return r.Ref
 }
 
-func FromWebhook(event string, payload json.RawMessage, command string, allowed map[string]bool) (Request, bool) {
+// FromWebhook turns a delivery into a review request, or reports that the
+// event does not ask for one.
+//
+// branchCreated enables the `create` trigger. It is off by default: a branch
+// push and the pull request opened from it review the same commit, so the
+// ordinary flow paid for two identical reviews. maxConcurrent is counted
+// across the namespace rather than per repository, so the duplicate could take
+// the last slot and leave the pull request opened moments later rejected with
+// 503 -- which GitHub does not redeliver, losing the review that was actually
+// wanted. The pull-request triggers below already cover that flow.
+func FromWebhook(event string, payload json.RawMessage, command string, allowed map[string]bool, branchCreated bool) (Request, bool) {
 	var p struct {
 		Action     string `json:"action"`
 		RefType    string `json:"ref_type"`
@@ -57,7 +67,7 @@ func FromWebhook(event string, payload json.RawMessage, command string, allowed 
 	if json.Unmarshal(payload, &p) != nil || p.Repository.FullName == "" {
 		return Request{}, false
 	}
-	if event == "create" && p.RefType == "branch" {
+	if event == "create" && p.RefType == "branch" && branchCreated {
 		return Request{Repo: p.Repository.FullName, Ref: p.Ref, Trigger: "branch-created"}, true
 	}
 	if event == "pull_request" && (p.Action == "opened" || p.Action == "reopened" || p.Action == "synchronize" || p.Action == "ready_for_review") {

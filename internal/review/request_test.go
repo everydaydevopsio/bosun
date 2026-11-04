@@ -3,19 +3,19 @@ package review
 import "testing"
 
 func TestBranchCreateLeavesSHAEmpty(t *testing.T) {
-	r, ok := FromWebhook("create", []byte(`{"repository":{"full_name":"acme/widget"},"ref_type":"branch","ref":"feature/x"}`), "@bridgectl review", nil)
+	r, ok := FromWebhook("create", []byte(`{"repository":{"full_name":"acme/widget"},"ref_type":"branch","ref":"feature/x"}`), "@bridgectl review", nil, true)
 	if !ok || r.SHA != "" || r.Ref != "feature/x" {
 		t.Fatalf("unexpected request: %#v, %v", r, ok)
 	}
 }
 func TestAuthorizedComment(t *testing.T) {
-	r, ok := FromWebhook("issue_comment", []byte(`{"action":"created","repository":{"full_name":"acme/widget"},"comment":{"body":"@bridgectl review","author_association":"MEMBER"},"issue":{"number":42,"pull_request":{}}}`), "@bridgectl review", map[string]bool{"MEMBER": true})
+	r, ok := FromWebhook("issue_comment", []byte(`{"action":"created","repository":{"full_name":"acme/widget"},"comment":{"body":"@bridgectl review","author_association":"MEMBER"},"issue":{"number":42,"pull_request":{}}}`), "@bridgectl review", map[string]bool{"MEMBER": true}, false)
 	if !ok || r.PRNumber != 42 || r.Trigger != "comment" {
 		t.Fatalf("unexpected request: %#v, %v", r, ok)
 	}
 }
 func TestUnauthorizedCommentIgnored(t *testing.T) {
-	_, ok := FromWebhook("issue_comment", []byte(`{"action":"created","repository":{"full_name":"acme/widget"},"comment":{"body":"@bridgectl review","author_association":"NONE"},"issue":{"number":42,"pull_request":{}}}`), "@bridgectl review", map[string]bool{"MEMBER": true})
+	_, ok := FromWebhook("issue_comment", []byte(`{"action":"created","repository":{"full_name":"acme/widget"},"comment":{"body":"@bridgectl review","author_association":"NONE"},"issue":{"number":42,"pull_request":{}}}`), "@bridgectl review", map[string]bool{"MEMBER": true}, false)
 	if ok {
 		t.Fatal("unauthorized command was accepted")
 	}
@@ -27,7 +27,7 @@ func TestUnauthorizedCommentIgnored(t *testing.T) {
 func TestDraftPullRequestIsNotReviewed(t *testing.T) {
 	for _, action := range []string{"opened", "reopened", "synchronize"} {
 		payload := []byte(`{"action":"` + action + `","repository":{"full_name":"acme/widget"},"pull_request":{"number":7,"draft":true,"head":{"ref":"feature/x","sha":"abc123"}}}`)
-		if _, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil); ok {
+		if _, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil, false); ok {
 			t.Fatalf("draft pull request accepted a %s review", action)
 		}
 	}
@@ -35,7 +35,7 @@ func TestDraftPullRequestIsNotReviewed(t *testing.T) {
 func TestReadyPullRequestIsReviewed(t *testing.T) {
 	for _, action := range []string{"opened", "reopened", "synchronize", "ready_for_review"} {
 		payload := []byte(`{"action":"` + action + `","repository":{"full_name":"acme/widget"},"pull_request":{"number":7,"draft":false,"head":{"ref":"feature/x","sha":"abc123"}}}`)
-		r, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil)
+		r, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil, false)
 		if !ok || r.PRNumber != 7 || r.Trigger != "pull-request-"+action {
 			t.Fatalf("ready pull request rejected a %s review: %#v, %v", action, r, ok)
 		}
@@ -47,7 +47,7 @@ func TestReadyPullRequestIsReviewed(t *testing.T) {
 // draft, so a stale flag in the payload cannot suppress the review.
 func TestReadyForReviewSurvivesStaleDraftFlag(t *testing.T) {
 	payload := []byte(`{"action":"ready_for_review","repository":{"full_name":"acme/widget"},"pull_request":{"number":7,"draft":true,"head":{"ref":"feature/x","sha":"abc123"}}}`)
-	r, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil)
+	r, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil, false)
 	if !ok || r.Trigger != "pull-request-ready_for_review" {
 		t.Fatalf("ready_for_review suppressed by draft flag: %#v, %v", r, ok)
 	}
@@ -57,8 +57,44 @@ func TestReadyForReviewSurvivesStaleDraftFlag(t *testing.T) {
 // draft. Only the automatic triggers are gated.
 func TestCommentReviewsDraftPullRequest(t *testing.T) {
 	payload := []byte(`{"action":"created","repository":{"full_name":"acme/widget"},"comment":{"body":"@bridgectl review","author_association":"MEMBER"},"issue":{"number":42,"pull_request":{}},"pull_request":{"draft":true}}`)
-	r, ok := FromWebhook("issue_comment", payload, "@bridgectl review", map[string]bool{"MEMBER": true})
+	r, ok := FromWebhook("issue_comment", payload, "@bridgectl review", map[string]bool{"MEMBER": true}, false)
 	if !ok || r.PRNumber != 42 || r.Trigger != "comment" {
 		t.Fatalf("comment on a draft was ignored: %#v, %v", r, ok)
+	}
+}
+
+// A branch push and the pull request opened from it review the same commit.
+// Both ran, so the ordinary `git push -u` then `gh pr create` flow paid for two
+// identical reviews -- and because maxConcurrent is counted across the whole
+// namespace, the duplicate could take the last slot and leave the pull request
+// opened moments later rejected with 503, which GitHub never redelivers. The
+// pull-request triggers already cover that flow, so branch review is off until
+// an operator asks for it.
+func TestBranchCreationIsNotReviewedUnlessEnabled(t *testing.T) {
+	const payload = `{"repository":{"full_name":"acme/widget"},"ref_type":"branch","ref":"feature/x"}`
+	if _, ok := FromWebhook("create", []byte(payload), "@bridgectl review", nil, false); ok {
+		t.Fatal("a branch push started a review while branch review was disabled")
+	}
+	r, ok := FromWebhook("create", []byte(payload), "@bridgectl review", nil, true)
+	if !ok {
+		t.Fatal("branch review is enabled but the branch push did not request one")
+	}
+	if r.Trigger != "branch-created" || r.Ref != "feature/x" {
+		t.Fatalf("unexpected request: %+v", r)
+	}
+}
+
+// Disabling branch review must not touch the triggers that carry the ordinary
+// workflow: a pull request opened, and every push to it afterwards.
+func TestPullRequestTriggersAreUnaffectedByTheBranchSetting(t *testing.T) {
+	for _, action := range []string{"opened", "reopened", "synchronize", "ready_for_review"} {
+		payload := []byte(`{"action":"` + action + `","repository":{"full_name":"acme/widget"},"pull_request":{"number":7,"head":{"ref":"feature","sha":"0123456789abcdef0123456789abcdef01234567"}}}`)
+		r, ok := FromWebhook("pull_request", payload, "@bridgectl review", nil, false)
+		if !ok {
+			t.Fatalf("%s did not request a review with branch review disabled", action)
+		}
+		if r.PRNumber != 7 || r.Trigger != "pull-request-"+action {
+			t.Fatalf("%s produced %+v", action, r)
+		}
 	}
 }

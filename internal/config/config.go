@@ -23,6 +23,13 @@ type Config struct {
 	// quantity string omits that entry, so an operator can drop a limit
 	// without having to drop the request with it.
 	ReviewResources ReviewResources
+	// ReviewBranchCreated enables the `create` trigger, which reviews a branch
+	// push before any pull request exists. Off by default: it duplicates the
+	// review the pull request itself triggers moments later, and both count
+	// against the namespace-wide MaxConcurrentReviews. Turning it on is worth
+	// it only when branches are pushed that will not become pull requests
+	// soon, and the findings then publish as a check run on the commit.
+	ReviewBranchCreated bool
 	// SentinelIntervalSeconds paces the reconcile that reports reviewer
 	// terminations the reviewer could not report itself. Zero disables it,
 	// which returns an OOM-killed review to publishing nothing at all.
@@ -42,7 +49,8 @@ func Load() Config {
 		ReviewProvider: env("BOSUN_REVIEW_PROVIDER", "codex-bosun"), GitHubTokenSecret: env("BOSUN_GITHUB_TOKEN_SECRET", "bosun-github"), AISecret: env("BOSUN_AI_SECRET", "bosun-ai"),
 		JobTTLSeconds: int32(envInt("BOSUN_JOB_TTL_SECONDS", 3600)), ReviewTimeoutSeconds: int64(envInt("BOSUN_REVIEW_TIMEOUT_SECONDS", 1800)),
 		MaxConcurrentReviews: envInt("BOSUN_MAX_CONCURRENT_REVIEWS", 3), RunAsUser: int64(envInt("BOSUN_RUN_AS_USER", 1001)),
-		ReviewCommand: strings.ToLower(env("BOSUN_REVIEW_COMMAND", "@bridgectl review")), AllowedAssociations: associations(env("BOSUN_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER,COLLABORATOR")),
+		ReviewBranchCreated: envBool("BOSUN_REVIEW_BRANCH_CREATED"),
+		ReviewCommand:       strings.ToLower(env("BOSUN_REVIEW_COMMAND", "@bridgectl review")), AllowedAssociations: associations(env("BOSUN_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER,COLLABORATOR")),
 		WebhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET"),
 		ReviewResources: ReviewResources{
 			CPURequest:    os.Getenv("BOSUN_REVIEW_CPU_REQUEST"),
@@ -75,4 +83,12 @@ func associations(value string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// envBool fails safe: anything unset or unparseable is false. The one caller
+// enables a trigger that costs model credits, so an operator typo must not
+// turn it on.
+func envBool(key string) bool {
+	value, err := strconv.ParseBool(os.Getenv(key))
+	return err == nil && value
 }

@@ -45,7 +45,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "payload is not valid JSON object", http.StatusBadRequest)
 		return
 	}
-	req, ok := review.FromWebhook(r.Header.Get("X-GitHub-Event"), raw, h.Config.ReviewCommand, h.Config.AllowedAssociations)
+	req, ok := review.FromWebhook(r.Header.Get("X-GitHub-Event"), raw, h.Config.ReviewCommand, h.Config.AllowedAssociations, h.Config.ReviewBranchCreated)
 	if !ok {
 		jsonResponse(w, http.StatusOK, map[string]any{"accepted": false, "reason": "event does not request a review"})
 		return

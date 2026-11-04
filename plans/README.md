@@ -14,5 +14,6 @@ Active and in-flight implementation plans. Each plan graduates to an ADR under `
 | [plan-upstream-pr-base.md](plan-upstream-pr-base.md) | In progress |
 | [plan-review-snapshot-path.md](plan-review-snapshot-path.md) | Implemented locally |
 | [plan-review-usage.md](plan-review-usage.md) | Implemented; live review pending |
+| [plan-branch-review-check-run.md](plan-branch-review-check-run.md) | Implemented; live verification pending |
 
 Graduated plans live in [`adr/`](../adr/README.md).

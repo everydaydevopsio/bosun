@@ -1266,3 +1266,101 @@ and fixed:
 - Evidence: `go test ./...`, `make lint`, `go vet ./...`.
 - Remaining: a live review forced past its Job deadline on a real cluster has
   not been run.
+
+# Task: Give branch-only reviews a home on the commit (#65)
+
+## Context
+- Owner: mark
+- Date: 2026-11-04
+- Mode: Approval-Required
+- Requirement IDs: #65
+
+## Scope
+- In scope: publishing a `branch-created` review as a check run on the reviewed
+  commit; resolving a pull request late so one opened mid-review still gets the
+  normal inline review; a WARN when neither surface is available.
+- Out of scope: persisting a review for replay (no store exists, and the
+  controller deliberately cannot read Secrets); reporting a *killed* branch
+  review as a check run (promoted, see Outcome).
+
+## Acceptance Criteria
+- AC1: a branch pushed without a pull request has its findings reach the pull
+  request opened on that commit later, with no second review running.
+- AC2: a review that genuinely cannot be published logs WARN naming repo, ref,
+  SHA, and reason.
+- AC3: published pull-request output keeps its current shape.
+- AC4: regression coverage for the `BOSUN_PR_NUMBER=0` path.
+
+## Constraints
+- Checks is an optional App permission. Requesting a permission an installation
+  does not hold makes GitHub reject the whole token mint with 422, so the grant
+  must be read from the installation before it is asked for.
+- A check run must never conclude `failure`: on a repository that requires
+  checks, that would block a merge on an opinion nobody opted into.
+
+## Risks and Tradeoffs
+- Risk: an install that grants Checks starts seeing a new check on commits.
+  Mitigated by `neutral`/`success` conclusions only.
+- Tradeoff: a check run carries annotations rather than review threads. At
+  branch-created time there is no diff view to anchor threads to, so this is
+  the correct shape rather than a lesser one.
+
+## Execution Checklist
+- [x] Failing tests for the check-run publication, the cap invariant, and the WARN
+- [x] Installation permission detection; `checks: write` requested only when granted
+- [x] Check-run publisher with findings as annotations
+- [x] Late pull-request resolution before falling back
+- [x] End-to-end regression tests for `BOSUN_PR_NUMBER=0`
+- [x] Docs: `docs/github-app.md`, `README.md`
+
+## Test Strategy
+- Unit: check-run body shape, conclusion per clean/findings, marker and
+  metadata parity with a comment, annotation level per severity.
+- Unit: `tokenPermissions` across granted / not granted / read-only.
+- Unit: `associatedPR` for open and closed pull requests.
+- Invariant: `findingLimit <= checkRunAnnotationLimit`, so no finding is ever
+  silently dropped from a check run.
+- Failure path: a 403 from the check-run write is reported as Checks being
+  unavailable and does not fail a completed review.
+- End-to-end: `Worker.Run` with `BOSUN_PR_NUMBER=0` for all three outcomes.
+
+## Rollback Strategy
+- Trigger: unwanted checks appearing on commits.
+- Rollback: revoke the Checks permission on the App installation. The token
+  stops requesting it and the review falls back to the WARN; no Bosun change
+  or redeploy is needed.
+- Validation after rollback: "review completed but was not published" at WARN.
+
+## Outcome
+- Result: implemented on `issue-65-branch-review-check-run`.
+- Evidence: `go test ./...`, `gofmt -l .`, `go vet ./...`.
+- Remaining: a reviewer *killed* before publishing a branch review still has
+  nowhere to report. Promoted to #76 rather than widened into this change,
+  because the sentinel would need to mint a Checks-scoped token for a
+  repository whose installation may not grant it.
+
+## Addendum 2026-11-04: branch review defaults off
+
+The check run gave a branch review a home, but the workflow actually wanted is
+"review on pull-request open, then on every push". That already worked; what
+broke it was `branch-created` firing first.
+
+- `submitLocked` rejects over `MaxConcurrentReviews` with `CapacityError`,
+  which `server.go:56` answers with HTTP 503. GitHub does not redeliver a
+  failed webhook, so that review is lost, not retried.
+- `Active()` counts Jobs across the namespace with no repository filter, so the
+  three slots are global.
+- A duplicate branch review therefore holds a global slot for minutes and can
+  starve the `opened` review of the pull request it duplicates.
+
+So `review.triggers.branchCreated` now defaults false. The check-run work stays
+for installs that opt in.
+
+- [x] `FromWebhook` gates the `create` trigger
+- [x] `BOSUN_REVIEW_BRANCH_CREATED`, parsed fail-safe to off
+- [x] Chart value, default false, with a CI guard on the rendered default
+- [x] Tests: default off, pull-request triggers unaffected, chart default pinned
+- [x] README and `docs/github-app.md`
+
+Not addressed: nothing supersedes an in-flight review when a newer push
+arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
