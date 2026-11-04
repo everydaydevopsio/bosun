@@ -84,4 +84,5 @@ stored review.
 | Date | Change |
 | --- | --- |
 | 2026-11-04 | Created; approach chosen over persist-and-replay after the storage paths were ruled out |
+| 2026-11-04 | `review.triggers.branchCreated` now defaults false. The workflow wanted is review-on-open plus review-on-push, which the pull-request triggers already carry; branch review only duplicated them, and a duplicate can take the last global slot and lose the pull-request review to a 503 GitHub never redelivers. The check run is now the payoff for opting in. |
 | 2026-11-04 | Implemented. Annotation truncation turned out unreachable -- `findingLimit` is already 50 -- so the test pins that invariant instead of the symptom. Killed branch reviews promoted to #76. |

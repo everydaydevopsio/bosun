@@ -14,6 +14,21 @@ review:
   ttlSecondsAfterFinished: 3600
   # Comment authors permitted to spend model credits with "@bridgectl review".
   allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
+  triggers:
+    # Review a branch as soon as it is pushed, before any pull request exists.
+    #
+    # Off by default. A branch push and the pull request opened from it review
+    # the same commit, so `git push -u` followed by `gh pr create` pays for two
+    # identical reviews. maxConcurrent below is counted across the namespace,
+    # not per repository, so the duplicate can take the last slot and leave the
+    # pull request opened moments later rejected with 503 -- which GitHub does
+    # not redeliver, losing the review that was actually wanted.
+    #
+    # Turn this on when branches are pushed that will not become pull requests
+    # soon. Those reviews have no pull request to post to, so they publish as a
+    # check run on the commit, which needs the App's optional Checks
+    # permission. Without it they are reported at WARN and nothing is posted.
+    branchCreated: false
   # Reviews allowed to run at once. Further requests are rejected with 503
   # rather than queued, so a busy org cannot exhaust the cluster.
   maxConcurrent: 3

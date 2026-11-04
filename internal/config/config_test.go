@@ -106,3 +106,32 @@ func TestTheSentinelIsOnByDefault(t *testing.T) {
 		t.Fatalf("the documented opt-out does not disable the sentinel: got %d", got)
 	}
 }
+
+// Branch review duplicates the review the pull request itself triggers, and
+// both count against the namespace-wide maxConcurrent. Defaulting it on would
+// make an ordinary `git push -u` then `gh pr create` cost two reviews and risk
+// losing the pull-request one to a 503 GitHub never redelivers, so the default
+// is load-bearing rather than cosmetic.
+func TestBranchReviewIsOffUnlessAskedFor(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"", false}, {"false", false}, {"true", true}, {"1", true}, {"TRUE", true}, {"yes", false}, {"", false}} {
+		t.Setenv("BOSUN_REVIEW_BRANCH_CREATED", tc.value)
+		if got := Load().ReviewBranchCreated; got != tc.want {
+			t.Errorf("BOSUN_REVIEW_BRANCH_CREATED=%q gave %v, want %v", tc.value, got, tc.want)
+		}
+	}
+}
+
+// The chart is the only thing that sets this variable on the controller, and
+// the default it renders is the behaviour every install gets.
+func TestTheChartDefaultsBranchReviewOff(t *testing.T) {
+	values, err := os.ReadFile("../../charts/bosun/values.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(values), "branchCreated: false") {
+		t.Error("charts/bosun/values.yaml no longer defaults review.triggers.branchCreated to false")
+	}
+}

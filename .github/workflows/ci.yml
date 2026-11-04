@@ -149,6 +149,19 @@ jobs:
           grep -q "image: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
           grep -q "value: \"ghcr.io/everydaydevopsio/bosun:${appVersion}\"" /tmp/bosun-default.yaml
           ! grep -q ':latest' /tmp/bosun-default.yaml
+      # Branch review duplicates the review the pull request itself triggers,
+      # and both count against the namespace-wide maxConcurrent -- so a default
+      # of true makes an ordinary push-then-open-a-PR cost two reviews and can
+      # lose the pull-request one to a 503 GitHub never redelivers. The default
+      # is the behaviour every install gets, so pin it.
+      - name: Branch review is off by default
+        run: |
+          set -euo pipefail
+          helm template bosun charts/bosun > /tmp/bosun-triggers.yaml
+          grep -A1 'name: BOSUN_REVIEW_BRANCH_CREATED' /tmp/bosun-triggers.yaml | grep -q 'value: "false"'
+          helm template bosun charts/bosun --set review.triggers.branchCreated=true > /tmp/bosun-branch-on.yaml
+          grep -A1 'name: BOSUN_REVIEW_BRANCH_CREATED' /tmp/bosun-branch-on.yaml | grep -q 'value: "true"'
+
       - name: Reviewer Jobs can be locked down
         run: |
           helm template bosun charts/bosun --set networkPolicy.enabled=true \

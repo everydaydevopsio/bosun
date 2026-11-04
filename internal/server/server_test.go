@@ -56,10 +56,12 @@ func (f failingSubmitter) Submit(context.Context, review.Request, string) (strin
 // SubmitAuthenticated take a probe Job to find.
 func TestWebhookKeepsTheSubmissionFailureReasonOutOfTheResponse(t *testing.T) {
 	const secret = "webhook-secret"
-	payload := `{"ref_type":"branch","ref":"main","repository":{"full_name":"owner/repo"}}`
+	// A pull request opened, rather than a branch push: branch review is off
+	// by default, so a create event no longer reaches the submitter at all.
+	payload := `{"action":"opened","repository":{"full_name":"owner/repo"},"pull_request":{"number":7,"head":{"ref":"feature","sha":"0123456789abcdef0123456789abcdef01234567"}}}`
 
 	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader(payload))
-	r.Header.Set("X-GitHub-Event", "create")
+	r.Header.Set("X-GitHub-Event", "pull_request")
 	r.Header.Set("X-Hub-Signature-256", sign(secret, payload))
 	w := httptest.NewRecorder()
 

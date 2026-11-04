@@ -1338,3 +1338,29 @@ and fixed:
   nowhere to report. Promoted to #76 rather than widened into this change,
   because the sentinel would need to mint a Checks-scoped token for a
   repository whose installation may not grant it.
+
+## Addendum 2026-11-04: branch review defaults off
+
+The check run gave a branch review a home, but the workflow actually wanted is
+"review on pull-request open, then on every push". That already worked; what
+broke it was `branch-created` firing first.
+
+- `submitLocked` rejects over `MaxConcurrentReviews` with `CapacityError`,
+  which `server.go:56` answers with HTTP 503. GitHub does not redeliver a
+  failed webhook, so that review is lost, not retried.
+- `Active()` counts Jobs across the namespace with no repository filter, so the
+  three slots are global.
+- A duplicate branch review therefore holds a global slot for minutes and can
+  starve the `opened` review of the pull request it duplicates.
+
+So `review.triggers.branchCreated` now defaults false. The check-run work stays
+for installs that opt in.
+
+- [x] `FromWebhook` gates the `create` trigger
+- [x] `BOSUN_REVIEW_BRANCH_CREATED`, parsed fail-safe to off
+- [x] Chart value, default false, with a CI guard on the rendered default
+- [x] Tests: default off, pull-request triggers unaffected, chart default pinned
+- [x] README and `docs/github-app.md`
+
+Not addressed: nothing supersedes an in-flight review when a newer push
+arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.

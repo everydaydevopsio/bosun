@@ -35,7 +35,9 @@ flowchart TD
 
 ## Triggers
 
-Bosun accepts branch creation, selected pull-request lifecycle events, and `@bridgectl review` comments on pull requests. A human, CI automation, or another AI agent can request a review without receiving the model credential.
+Bosun reviews a pull request when it is opened, on every push to it afterwards, and on `@bridgectl review` comments. A human, CI automation, or another AI agent can request a review without receiving the model credential.
+
+Branch creation is also a trigger, off by default (`review.triggers.branchCreated`). A branch push and the pull request opened from it review the same commit, so enabling it makes the ordinary `git push -u` then `gh pr create` flow pay for two identical reviews — and because `review.maxConcurrent` is counted across the namespace rather than per repository, the duplicate can take the last slot and leave the pull request rejected with 503, which GitHub does not redeliver. Turn it on when branches are pushed that will not become pull requests soon.
 
 Draft pull requests do not trigger automatic reviews; marking one ready for review does. An explicit `@bridgectl review` comment still works on a draft.
 

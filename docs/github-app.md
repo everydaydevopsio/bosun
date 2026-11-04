@@ -35,7 +35,7 @@ Grant nothing else. Bosun never writes code, pushes, merges, or approves.
 
 ### Subscribe to events
 
-- **Create** — branch creation
+- **Create** — branch creation, needed only when `review.triggers.branchCreated` is on
 - **Pull request**
 - **Issue comment**
 - **Pull request review comment**
@@ -311,8 +311,8 @@ itself, and only that review's termination becomes unreportable. The controller
 says so at WARN and reports nothing rather than posting a comment naming no
 commit.
 
-A review with no pull request -- the `branch-created` trigger, which runs with
-`BOSUN_PR_NUMBER=0` -- publishes as a check run instead. See
+A review with no pull request -- the `branch-created` trigger, off by default,
+which runs with `BOSUN_PR_NUMBER=0` -- publishes as a check run instead. See
 [Branch-only reviews](#branch-only-reviews) below.
 
 Set `review.terminationSentinel.intervalSeconds` to `0` to turn the check off
@@ -320,7 +320,18 @@ and return to publishing nothing when a reviewer is killed.
 
 ## Branch-only reviews
 
-A `branch-created` review runs before any pull request exists, so there is no
+**Off by default.** Set `review.triggers.branchCreated: true` to enable it.
+
+A branch push and the pull request opened from it review the same commit, so
+leaving this on makes the ordinary `git push -u` then `gh pr create` flow pay
+for two identical reviews. `review.maxConcurrent` is counted across the
+namespace rather than per repository, so the duplicate can take the last slot
+and leave the pull request opened moments later rejected with 503 -- and GitHub
+does not redeliver a failed webhook, so that review is lost until the next
+push. Enable it when branches are pushed that will not become pull requests
+soon; the pull-request triggers already cover the ordinary flow.
+
+When it is on, the review runs before any pull request exists, so there is no
 pull request to post to. It publishes as a **check run on the reviewed commit**
 instead.
 

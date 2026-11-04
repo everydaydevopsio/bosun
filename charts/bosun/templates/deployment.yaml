@@ -49,6 +49,8 @@ spec:
               value: {{ .Values.review.resources.limits.memory | default "" | quote }}
             - name: BOSUN_ALLOWED_ASSOCIATIONS
               value: {{ .Values.review.allowedAssociations | quote }}
+            - name: BOSUN_REVIEW_BRANCH_CREATED
+              value: {{ .Values.review.triggers.branchCreated | quote }}
             - name: BOSUN_SENTINEL_INTERVAL_SECONDS
               value: {{ .Values.review.terminationSentinel.intervalSeconds | quote }}
             - name: BOSUN_MAX_CONCURRENT_REVIEWS
