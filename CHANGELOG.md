@@ -13,6 +13,19 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.3.1] - 2026-11-04
+
+### Highlights
+- The local development guide now leads with a quick start that requires no build step.
+
+### Fixes
+- No bug fixes in this release.
+
+### Changes
+- Reorganized the documentation to make the no-build local development path easier to find. (#50, #83)
+
+**Full changelog:** [v0.3.0...v0.3.1](../../compare/v0.3.0...v0.3.1)
+
 ## [0.3.0] - 2026-11-04
 
 ### Highlights
