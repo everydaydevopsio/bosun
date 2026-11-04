@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.2.8] - 2026-11-04
+
+### Highlights
+- Automated reviews now run when a pull request is opened and when new commits are pushed to it.
+
+### Fixes
+- Prevented branch-push events from triggering duplicate reviews for pull requests.
+
+### Changes
+- Aligned review triggers with pull request activity. (#65, #77)
+
 ## [0.2.7] - 2026-11-03
 
 ### Highlights
