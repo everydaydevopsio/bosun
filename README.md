@@ -114,7 +114,7 @@ another branch with `bosun review "$PWD" --branch feature/name --base main`.
 The CLI shows progress, elapsed time, errors, and history-based duration estimates.
 `make review REPO=...` remains a compatibility entrypoint.
 
-The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See [docs/local-development.md](docs/local-development.md).
+The result is printed to the terminal. The reviewed repository does not need to exist on GitHub. See the [no-build quick start](docs/local-development.md#quick-start-review-a-checkout-without-building-anything).
 
 Use `codex-bosun` or `claude-bosun`. The packaged `codex` provider runs Codex's
 interactive TUI, so its output is screen repaints and Bosun rejects it rather

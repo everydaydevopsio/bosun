@@ -2,6 +2,41 @@
 
 You can exercise Bosun's Kubernetes reviewer without configuring GitHub, creating a webhook, or pushing the repository being reviewed anywhere.
 
+## Quick start: review a checkout without building anything
+
+You need:
+
+- Docker, running;
+- [Kind](https://kind.sigs.k8s.io/) (`brew install kind`);
+- `codex` or `claude`, already signed in on this machine.
+
+You do not need Go, Helm, kubectl, shellcheck, or a clone of this repository.
+
+```bash
+brew install everydaydevopsio/bosun/bosun
+bosun review ~/src/project-to-review --local-credentials
+```
+
+The first run creates a Kind cluster, copies your local
+`codex` or `claude` sign-in into it, and prints the review to your terminal.
+Later runs reuse the cluster. Add `--provider claude-bosun` to review with
+Claude instead of the default `codex-bosun`.
+
+The review runs in `ghcr.io/everydaydevopsio/bosun:<version>`, where `<version>`
+is what `bosun version` prints. The image is public on GitHub Container Registry
+and is pulled anonymously on the first review, so a proxy or image policy must
+allow `ghcr.io`. See [Which image a review runs](#which-image-a-review-runs) to
+override it.
+
+If a review does not start, run `bosun doctor` first. It checks Kind, the
+cluster, the reviewer image, and your credentials, and prints a fix for each
+failed check.
+
+## Developing Bosun itself
+
+Everything below is for working on Bosun from a source checkout, where reviews
+run a locally built `bosun:dev` image instead of the published one.
+
 ## Requirements
 
 Install Go 1.26 or newer for local builds and tests. Run `make setup` to check
