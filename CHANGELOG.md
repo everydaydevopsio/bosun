@@ -13,6 +13,19 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.3.0] - 2026-11-04
+
+### Highlights
+Review requests now use an explicit, review-specific comment command.
+
+### Fixes
+No bug fixes included in this release.
+
+### Changes
+- Changed the default comment trigger to `@bosun-review review`. (#80, #81)
+
+**Release range:** `v0.2.8` → `v0.3.0`
+
 ## [0.2.8] - 2026-11-04
 
 ### Highlights
