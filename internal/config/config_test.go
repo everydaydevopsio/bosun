@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/everydaydevopsio/bosun/internal/version"
 )
 
 // The chart renders environment variables that this package reads by name.
@@ -133,5 +135,66 @@ func TestTheChartDefaultsBranchReviewOff(t *testing.T) {
 	}
 	if !strings.Contains(string(values), "branchCreated: false") {
 		t.Error("charts/bosun/values.yaml no longer defaults review.triggers.branchCreated to false")
+	}
+}
+
+// publish.yml pushes <version> and sha-<short> and nothing else, so the old
+// ":latest" default named a tag that has never existed. A chart install never
+// reached it -- the chart always sets BOSUN_REVIEW_IMAGE explicitly -- so it
+// only ever bit someone running the controller outside the chart, who got
+// ImagePullBackOff against a tag that is not there (#78).
+func TestTheReviewerImageDefaultsToTheImagePublishedAlongsideTheBinary(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "")
+	version.Version = "0.2.8"
+	t.Cleanup(func() { version.Version = "dev" })
+	if got := Load().ReviewImage; got != "ghcr.io/everydaydevopsio/bosun:0.2.8" {
+		t.Fatalf("released controller defaults to %q", got)
+	}
+	version.Version = "v0.2.8"
+	if got := Load().ReviewImage; got != "ghcr.io/everydaydevopsio/bosun:0.2.8" {
+		t.Fatalf("a v-prefixed stamp defaults to %q", got)
+	}
+}
+
+// `git describe` output for a local build names no published image, so it must
+// not be turned into a registry reference that cannot be pulled. The dev tag
+// is at least honest about being local.
+func TestAnUnstampedControllerDefaultsToTheDevImage(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "")
+	for _, v := range []string{"dev", "v0.2.8-2-gabc1234", "v0.2.8-dirty", ""} {
+		version.Version = v
+		t.Cleanup(func() { version.Version = "dev" })
+		if got := Load().ReviewImage; got != "bosun:dev" {
+			t.Errorf("version %q defaulted to %q, want bosun:dev", v, got)
+		}
+	}
+}
+
+func TestTheReviewerImageOverrideStillWins(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "registry.example.com/team/bosun:pinned")
+	if got := Load().ReviewImage; got != "registry.example.com/team/bosun:pinned" {
+		t.Fatalf("the explicit override was ignored: %q", got)
+	}
+}
+
+// The tag that started this. No stamp, no override, and no code path may
+// produce it, because nothing ever pushes it.
+func TestNoCodePathProducesTheLatestTag(t *testing.T) {
+	source, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The literal that was the bug. Narrow rather than any ":latest"
+	// substring, so the comment explaining the history does not trip it.
+	if strings.Contains(string(source), publishedImage+":latest") {
+		t.Error("config.go names a latest tag; publish.yml never pushes one")
+	}
+	for _, v := range []string{"dev", "0.2.8", "v0.2.8", "v0.2.8-dirty", ""} {
+		version.Version = v
+		t.Cleanup(func() { version.Version = "dev" })
+		t.Setenv("BOSUN_REVIEW_IMAGE", "")
+		if got := Load().ReviewImage; strings.HasSuffix(got, ":latest") {
+			t.Errorf("version %q produced %q", v, got)
+		}
 	}
 }
