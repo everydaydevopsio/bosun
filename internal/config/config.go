@@ -102,10 +102,22 @@ const devImage = "bosun:dev"
 // publishedImage is the repository publish.yml pushes release images to.
 const publishedImage = "ghcr.io/everydaydevopsio/bosun"
 
-// releaseVersion matches an exact release, with or without the "v" prefix.
-// `git describe` output for a local build ("v0.1.1-2-gabc1234", "v0.1.1-dirty")
-// deliberately does not match: no image was ever published under it.
-var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
+// releaseVersion matches a version publish.yml would accept as a tag. It is
+// deliberately the same shape as that workflow's own "Tag is semver" gate,
+// prerelease and build metadata included, so a published v0.3.0-rc.1 resolves
+// to the image published alongside it rather than to the dev tag.
+var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
+// gitDescribed matches what the Makefile stamps for a local build:
+// `git describe --tags --always --dirty`, which emits "v0.2.8-2-gabc1234" and
+// "v0.2.8-dirty".
+//
+// Those are valid semver prereleases, so widening releaseVersion to accept rc
+// tags would otherwise start treating a developer's working tree as a release
+// and name an image nobody ever pushed -- the same failure as the ":latest"
+// default, one shape along. A commit-count-and-hash suffix, or a dirty marker,
+// is never what a release tag looks like.
+var gitDescribed = regexp.MustCompile(`-[0-9]+-g[0-9a-f]{7,}|-dirty$`)
 
 // defaultReviewImage is the image reviewer Jobs run when nothing names one.
 //
@@ -122,7 +134,7 @@ var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
 // no published image, so it falls back to the dev tag rather than inventing a
 // registry reference that cannot be pulled.
 func defaultReviewImage() string {
-	if releaseVersion.MatchString(version.Version) {
+	if releaseVersion.MatchString(version.Version) && !gitDescribed.MatchString(version.Version) {
 		return publishedImage + ":" + strings.TrimPrefix(version.Version, "v")
 	}
 	return devImage

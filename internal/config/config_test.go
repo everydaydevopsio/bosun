@@ -198,3 +198,45 @@ func TestNoCodePathProducesTheLatestTag(t *testing.T) {
 		}
 	}
 }
+
+// publish.yml's own semver gate accepts a prerelease suffix:
+//
+//	^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$
+//
+// So v0.3.0-rc.1 is a tag that publishes an image. Rejecting it here sent a
+// published prerelease controller to bosun:dev -- the same unpullable-tag
+// failure #78 was about, one shape along. Found by Bosun reviewing #79.
+func TestAPublishedPrereleaseUsesItsOwnPublishedImage(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "")
+	t.Cleanup(func() { version.Version = "dev" })
+	for _, v := range []string{"0.3.0-rc.1", "v0.3.0-rc.1", "v0.3.0-beta.2", "v0.3.0+build.5"} {
+		version.Version = v
+		want := publishedImage + ":" + strings.TrimPrefix(v, "v")
+		if got := Load().ReviewImage; got != want {
+			t.Errorf("version %q gave %q, want %q", v, got, want)
+		}
+	}
+}
+
+// The reason the pattern cannot simply copy publish.yml's: `git describe
+// --tags --always --dirty`, which the Makefile stamps for local builds, emits
+// valid semver prereleases of its own. No image is ever published under one,
+// so widening for rc tags must not start treating a developer's working tree
+// as a release.
+func TestGitDescribeStampsAreStillNotReleases(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_IMAGE", "")
+	t.Cleanup(func() { version.Version = "dev" })
+	for _, v := range []string{
+		"v0.2.8-2-gabc1234",
+		"v0.2.8-dirty",
+		"v0.2.8-2-gabc1234-dirty",
+		"0.2.8-14-g0123456789",
+		"abc1234",
+		"dev",
+	} {
+		version.Version = v
+		if got := Load().ReviewImage; got != devImage {
+			t.Errorf("local build stamp %q resolved to %q, want %q", v, got, devImage)
+		}
+	}
+}
