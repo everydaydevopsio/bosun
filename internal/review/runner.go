@@ -262,12 +262,48 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		return fail(StageReview, err)
 	}
 	output = withoutMarker(output)
-	if !local && req.PRNumber > 0 {
+	if !local {
 		reporter.Emit("stage", "publishing")
-		if err := github.postReview(ctx, req.Repo, req.PRNumber, token, req.Ref, req.SHA, output); err != nil {
-			return failf(StagePublish, "publish review: %w", err)
+		// The pull-request number is fixed when the Job is built. A branch
+		// pushed and then opened as a pull request minutes later -- the
+		// ordinary `git push -u` then `gh pr create` flow -- would otherwise
+		// finish with nowhere to publish even though a home now exists.
+		if req.PRNumber <= 0 && req.SHA != "" {
+			number, err := github.associatedPR(ctx, req.Repo, req.SHA, token)
+			if err != nil {
+				// Not fatal: the check run below is still a home, and failing
+				// a completed review over a lookup would lose it entirely.
+				slog.Warn("look up a pull request for the reviewed commit",
+					"repo", req.Repo, "sha", req.SHA, "error", sanitize(redact(err.Error(), token)))
+			} else if number > 0 {
+				req.PRNumber = number
+			}
 		}
-		published = true
+		switch {
+		case req.PRNumber > 0:
+			if err := github.postReview(ctx, req.Repo, req.PRNumber, token, req.Ref, req.SHA, output); err != nil {
+				return failf(StagePublish, "publish review: %w", err)
+			}
+			published = true
+		default:
+			// A branch-created review has no pull request. A check run is
+			// keyed by commit, so it needs nothing stored and is already
+			// attached when a pull request opens on that commit later (#65).
+			err := github.postCheckRun(ctx, req.Repo, token, req.Ref, req.SHA, output)
+			switch {
+			case err == nil:
+				published = true
+			case isChecksUnavailable(err):
+				// The review succeeded; only the surface is missing. Say so
+				// rather than discarding it behind a Complete Job status,
+				// which is what made this invisible in the first place.
+				slog.Warn("review completed but was not published",
+					"repo", req.Repo, "ref", req.Ref, "sha", req.SHA, "trigger", req.Trigger,
+					"reason", "no open pull request exists for this commit and the GitHub App installation has not granted the optional Checks permission")
+			default:
+				return failf(StagePublish, "publish check run: %w", err)
+			}
+		}
 	}
 	if reporter != nil {
 		emitUsage()

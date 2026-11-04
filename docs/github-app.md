@@ -29,7 +29,7 @@ Bosun mints one per review. When `BOSUN_GITHUB_APP_ID` and
 | **Contents** | Read-only | clone the ref under review |
 | **Pull requests** | Read & write | post the review comment |
 | **Metadata** | Read-only | mandatory, granted automatically |
-| **Checks** | Read & write | *optional* — required only for the Checks output that gives branch-only reviews a home |
+| **Checks** | Read & write | *optional* — gives a branch-only review a home when no pull request exists |
 
 Grant nothing else. Bosun never writes code, pushes, merges, or approves.
 
@@ -312,18 +312,54 @@ says so at WARN and reports nothing rather than posting a comment naming no
 commit.
 
 A review with no pull request -- the `branch-created` trigger, which runs with
-`BOSUN_PR_NUMBER=0` -- has nowhere to publish. The controller logs it at WARN
-rather than discarding it silently; the discarded review itself is #65.
+`BOSUN_PR_NUMBER=0` -- publishes as a check run instead. See
+[Branch-only reviews](#branch-only-reviews) below.
 
 Set `review.terminationSentinel.intervalSeconds` to `0` to turn the check off
 and return to publishing nothing when a reviewer is killed.
 
+## Branch-only reviews
+
+A `branch-created` review runs before any pull request exists, so there is no
+pull request to post to. It publishes as a **check run on the reviewed commit**
+instead.
+
+A check run is keyed by commit rather than by pull request, which is what makes
+this work without storing anything: when a pull request opens on that commit
+later, GitHub surfaces the existing check run on it. The findings arrive
+without a second review running.
+
+| | |
+| --- | --- |
+| Name | `Bosun review` |
+| Anchored to | the commit the reviewer actually read |
+| Conclusion | `success` when the review is clean, otherwise `neutral` |
+| Findings | one annotation each, anchored to file and line |
+| Summary | the same `## Bosun code review` marker and ``` `ref` @ `sha` ``` metadata line a comment carries |
+
+The conclusion is never `failure`. A review reports; it does not gate. On a
+repository that requires checks to pass, concluding `failure` would block a
+merge on an opinion nobody opted into.
+
+Two things happen before the check run, in order:
+
+1. **The pull request is resolved again.** The number is fixed when the Job is
+   built, which is before the review runs. In the ordinary `git push -u` then
+   `gh pr create` flow the pull request often exists by the time the review
+   finishes, and that review publishes as a normal inline review.
+2. **The check run is written** when there is still no open pull request.
+
+If the installation has not granted **Checks**, the token never requests it --
+asking for a permission an installation does not hold makes GitHub reject the
+whole token mint -- and the review is reported at WARN naming the repository,
+ref, commit, and reason, rather than being discarded silently. Granting Checks
+to an existing installation needs no Bosun change; the next review picks it up.
+
 ## What this does not do yet
 
-Installation tokens request only `contents: read` and `pull_requests: write`;
-no Checks permission is requested, so a review is not a status check. Branch-
-only reviews, and failures that happen before a token is obtained, remain in
-Job logs. Repeated reviews of one commit share a publication identity, so two
+A review is not a required status check: the check run reports, and nothing
+consumes its conclusion. Failures that happen before a token is obtained remain
+in Job logs. Repeated reviews of one commit share a publication identity, so two
 overlapping attempts can suppress each other's termination report (#74). Repeated reviews are independent: Bosun does not resolve or supersede
 the threads an earlier pass opened (#42).
 

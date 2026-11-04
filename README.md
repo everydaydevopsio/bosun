@@ -229,7 +229,7 @@ See [docs/setup.md](docs/setup.md) for exact commands, permissions, Helm values,
 
 ## Current scope
 
-PR reviews are published as pull-request reviews with inline comments, falling back to a conversation comment when no finding can be anchored to the diff. A failed review publishes a failure comment rather than nothing. GitHub App installation tokens are supported, with a PAT fallback. Branch-created reviews remain in Job logs; Checks API output is not implemented yet.
+PR reviews are published as pull-request reviews with inline comments, falling back to a conversation comment when no finding can be anchored to the diff. A failed review publishes a failure comment rather than nothing. GitHub App installation tokens are supported, with a PAT fallback. A branch-created review has no pull request to post to, so it publishes as a check run on the reviewed commit; when a pull request opens on that commit later, GitHub surfaces it there. See [docs/github-app.md](docs/github-app.md#branch-only-reviews).
 
 ## Releasing
 
