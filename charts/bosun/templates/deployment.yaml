@@ -47,6 +47,8 @@ spec:
               value: {{ .Values.review.resources.limits.cpu | default "" | quote }}
             - name: BOSUN_REVIEW_MEMORY_LIMIT
               value: {{ .Values.review.resources.limits.memory | default "" | quote }}
+            - name: BOSUN_REVIEW_COMMAND
+              value: {{ .Values.review.command | quote }}
             - name: BOSUN_ALLOWED_ASSOCIATIONS
               value: {{ .Values.review.allowedAssociations | quote }}
             - name: BOSUN_REVIEW_BRANCH_CREATED

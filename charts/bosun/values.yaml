@@ -12,7 +12,12 @@ review:
   # Empty means image.repository at the chart appVersion.
   image: ""
   ttlSecondsAfterFinished: 3600
-  # Comment authors permitted to spend model credits with "@bridgectl review".
+  # A pull-request comment containing this phrase (case-insensitive) requests a
+  # review. "@bosun-review" is a GitHub account the project reserves, so the
+  # mention autocompletes and notifies nobody else. Releases before 0.3.0 used
+  # "@bridgectl review"; set that here to keep the old phrase working.
+  command: "@bosun-review review"
+  # Comment authors permitted to spend model credits with the review command.
   allowedAssociations: "OWNER,MEMBER,COLLABORATOR"
   triggers:
     # Review a branch as soon as it is pushed, before any pull request exists.

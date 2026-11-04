@@ -50,7 +50,7 @@ func Load() Config {
 		JobTTLSeconds: int32(envInt("BOSUN_JOB_TTL_SECONDS", 3600)), ReviewTimeoutSeconds: int64(envInt("BOSUN_REVIEW_TIMEOUT_SECONDS", 1800)),
 		MaxConcurrentReviews: envInt("BOSUN_MAX_CONCURRENT_REVIEWS", 3), RunAsUser: int64(envInt("BOSUN_RUN_AS_USER", 1001)),
 		ReviewBranchCreated: envBool("BOSUN_REVIEW_BRANCH_CREATED"),
-		ReviewCommand:       strings.ToLower(env("BOSUN_REVIEW_COMMAND", "@bridgectl review")), AllowedAssociations: associations(env("BOSUN_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER,COLLABORATOR")),
+		ReviewCommand:       strings.ToLower(env("BOSUN_REVIEW_COMMAND", "@bosun-review review")), AllowedAssociations: associations(env("BOSUN_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER,COLLABORATOR")),
 		WebhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET"),
 		ReviewResources: ReviewResources{
 			CPURequest:    os.Getenv("BOSUN_REVIEW_CPU_REQUEST"),

@@ -85,7 +85,7 @@ func TestWebhookToPinnedCheckoutAndPublishedReview(t *testing.T) {
 		resolve                       bool
 	}{
 		{"pinned PR", "pull_request", fmt.Sprintf(`{"action":"synchronize","repository":{"full_name":"acme/repo"},"pull_request":{"number":7,"head":{"ref":"feature","sha":%q}}}`, pinned), pinned, false},
-		{"comment resolves current head", "issue_comment", `{"action":"created","repository":{"full_name":"acme/repo"},"issue":{"number":7,"pull_request":{}},"comment":{"body":"@bridgectl review","author_association":"OWNER"},"sender":{"type":"User"}}`, latest, true},
+		{"comment resolves current head", "issue_comment", `{"action":"created","repository":{"full_name":"acme/repo"},"issue":{"number":7,"pull_request":{}},"comment":{"body":"@bosun-review review","author_association":"OWNER"},"sender":{"type":"User"}}`, latest, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const token = "test-github-token-sensitive"
@@ -119,7 +119,7 @@ func TestWebhookToPinnedCheckoutAndPublishedReview(t *testing.T) {
 				}
 			}))
 			defer api.Close()
-			cfg := config.Config{Namespace: "test", MaxConcurrentReviews: 3, ReviewTimeoutSeconds: 30, ReviewProvider: "codex-bosun", ReviewCommand: "@bridgectl review", AllowedAssociations: map[string]bool{"OWNER": true}, WebhookSecret: "webhook-secret"}
+			cfg := config.Config{Namespace: "test", MaxConcurrentReviews: 3, ReviewTimeoutSeconds: 30, ReviewProvider: "codex-bosun", ReviewCommand: "@bosun-review review", AllowedAssociations: map[string]bool{"OWNER": true}, WebhookSecret: "webhook-secret"}
 			client := fake.NewSimpleClientset()
 			h := server.Handler{Config: cfg, Submitter: jobSubmitter{client, cfg}}
 			req := httptest.NewRequest("POST", "/webhooks/github", strings.NewReader(tc.payload))
