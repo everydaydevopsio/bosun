@@ -115,7 +115,7 @@ func TestHostedFailurePublishesExactlyOneFailureComment(t *testing.T) {
 		t.Fatal("expected the review to fail")
 	}
 	if count != 1 {
-		t.Fatalf("published %d comments, want exactly 1", count)
+		t.Fatalf("published %d times, want exactly 1", count)
 	}
 	if !strings.HasPrefix(posted, "## Bosun code review failed") {
 		t.Fatalf("unexpected comment: %q", posted)
@@ -179,7 +179,7 @@ func TestPublishedReviewIsNotFollowedByAFailureComment(t *testing.T) {
 		t.Fatal("expected the output write to fail")
 	}
 	if count != 1 {
-		t.Fatalf("published %d comments, want exactly 1", count)
+		t.Fatalf("published %d times, want exactly 1", count)
 	}
 	if !strings.HasPrefix(posted, "## Bosun code review\n") {
 		t.Fatalf("the published review was contradicted by a failure comment: %q", posted)
@@ -190,11 +190,17 @@ type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("output stream closed") }
 
+// commentStub records the body of every publication: a review, a clean
+// review, or a failure comment.
 func commentStub(t *testing.T, posted *string, count *int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method+" "+r.URL.Path != "POST /repos/acme/repo/issues/7/comments" &&
-			r.Method+" "+r.URL.Path != "POST /repos/acme/widget/issues/7/comments" {
+		// Reviews and failures publish to different endpoints; both count as
+		// one publication each.
+		switch r.Method + " " + r.URL.Path {
+		case "POST /repos/acme/repo/issues/7/comments", "POST /repos/acme/widget/issues/7/comments",
+			"POST /repos/acme/repo/pulls/7/reviews", "POST /repos/acme/widget/pulls/7/reviews":
+		default:
 			t.Errorf("unexpected GitHub request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 			return

@@ -1432,3 +1432,39 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 
 ## Outcome
 - Result: docs only; existing sections unchanged.
+
+# Task: Publish every review on one surface
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-09
+- Mode: Autonomous
+- Plan: plans/plan-single-review-surface.md
+
+## Scope
+- In scope: clean reviews publish as pull-request reviews; drop the pointer
+  comment beside findings reviews; PRD GO-4 and docs.
+- Out of scope: failure comments (unchanged, still issue comments).
+
+## Acceptance Criteria
+- AC1: A review with no findings publishes as one `COMMENT` review anchored to
+  the reviewed commit, with no issue comment. ✅
+- AC2: A findings review, direct or via the 422 fallback, posts no comment
+  beside itself. ✅
+
+## Execution Checklist
+- [x] Failing tests for AC1 and AC2
+- [x] Implement in `postReview`; remove `postSummary` and helpers
+- [x] Update dependent tests, PRD, docs, plan
+
+## Test Strategy
+- Unit: `TestReviewWithoutFindingsPublishesAsAReview`,
+  `TestFindingsReviewPostsNoComment` (direct and 422 fallback),
+  `TestUnreadableResponseDoesNotFailAPublishedReview`.
+- Integration: `TestWebhookToPinnedCheckoutAndPublishedReview` now expects the
+  clean review on `/pulls/7/reviews`.
+- Failure-path tests: 422 fallback, repeated rejection, truncated reply.
+
+## Outcome
+- Result: failing first (`comments=1 reviews=0, want 0 and 1`; `posted 1
+  comments beside the review, want 0`), then `go test ./...` green.

@@ -103,7 +103,7 @@ func TestWebhookToPinnedCheckoutAndPublishedReview(t *testing.T) {
 				case "GET /repos/acme/repo/pulls/7":
 					resolved = true
 					fmt.Fprintf(w, `{"head":{"ref":"feature","sha":%q}}`, latest)
-				case "POST /repos/acme/repo/issues/7/comments":
+				case "POST /repos/acme/repo/pulls/7/reviews":
 					var body struct {
 						Body string `json:"body"`
 					}

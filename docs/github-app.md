@@ -143,10 +143,12 @@ publication: a review, or a failure comment. Both open with a marker line and a
 metadata line naming the reviewed ref and commit, so a consumer can correlate
 output to a specific push rather than to a timestamp.
 
-Findings are published as a pull-request review (`event: COMMENT`) with one
-inline comment per finding, so the standard reply and resolve machinery works
-against them. The review body carries the marker, the metadata line, and the
-summary:
+Every review -- with findings or without -- is published as a pull-request
+review (`event: COMMENT`). Findings become one inline comment each, so the
+standard reply and resolve machinery works against them; a clean review is the
+same review with no threads. Bosun never approves or requests changes, so a
+review from Bosun can never satisfy branch protection. The review body carries
+the marker, the metadata line, and the summary:
 
 ```markdown
 ## Bosun code review
@@ -161,51 +163,34 @@ failure it causes and a remediation.
 
 ### Finding the review
 
-A review lives under `/repos/OWNER/REPO/pulls/N/reviews`; a comment lives under
-`/repos/OWNER/REPO/issues/N/comments`. Listing comments does not return reviews
--- `gh pr view N --json comments` included. A findings review therefore also
-posts one short summary comment, so a plain comment listing shows that the
-review happened and where to read it:
-
-```markdown
-## Bosun code review
-
-<sub>`feature` @ `0123456789abcdef0123456789abcdef01234567`</sub>
-
-**3 findings** — 2 high, 1 low.
-
-[Read the review](https://github.com/OWNER/REPO/pull/7#pullrequestreview-99) —
-findings are inline threads where they could be anchored to the diff, and in the
-review body otherwise. This comment is a pointer; the detail is in the review.
-```
-
-It links the review rather than naming a location, because not every finding is
-a thread: the 422 fallback folds them all into the review body, and a finding
-outside the diff is never anchorable. Severities are listed in the same triage
-order a consumer sorts by, so the summary and the review agree.
-
-The summary is a pointer, not the review: it never repeats a finding's detail,
-and it is not the terminal publication. One review yields exactly one comment
-and exactly one review, so neither listing double-counts. If the summary fails
-to post, the review still stands and the Job still succeeds -- the warning is in
-the worker log.
-
-To answer "did Bosun review this commit" without depending on which surface was
-used, match the commit SHA in both listings:
+Reviews live under `/repos/OWNER/REPO/pulls/N/reviews`; comments live under
+`/repos/OWNER/REPO/issues/N/comments`, and listing one never returns the other.
+Because every review publishes on the same surface, one query answers "did Bosun
+review this commit" -- match the commit SHA in the review bodies:
 
 ```bash
+gh pr view N --json reviews --jq '.reviews[].body'
+# or
 gh api repos/OWNER/REPO/pulls/N/reviews --jq '.[].body'
+```
+
+Failures are the exception: a failure is not a review, so it publishes as an
+issue comment under its own marker. To see every Bosun publication, including
+failures, read both:
+
+```bash
 gh api repos/OWNER/REPO/issues/N/comments --jq '.[].body'
 ```
 
-Two cases fall back to a conversation comment under the same marker, because a
-published review beats a lost one:
+Before 0.3.2, a clean review published as an issue comment and a findings
+review also posted a summary comment pointing at it. Pull requests reviewed by
+an older release still carry those comments.
 
-- the reviewer emitted no machine-readable findings block, so nothing can be
-  anchored;
-- GitHub rejected the review with HTTP 422, which it does for the whole review
-  when any single comment position is invalid. Bosun retries once with every
-  finding folded into the body under a `### Findings` heading.
+A review whose output has no machine-readable findings block still publishes,
+as a review with the reviewer's text as its body. When GitHub rejects a review
+with HTTP 422 -- which it does for the whole review when any single comment
+position is invalid -- Bosun retries once with every finding folded into the
+body under a `### Findings` heading.
 
 Findings on files the pull request does not touch are never sent as inline
 comments; they are folded into the body under `### Findings outside the diff`,
@@ -222,7 +207,7 @@ keeping `path:line` in the text.
 The failure reason is the redacted diagnostic, prefixed with the stage that
 failed (`setup`, `clone`, `provider`, `review`, or `publish`). It reports
 infrastructure failure, not findings. Treat both marker lines as an interface:
-agents select Bosun's comments by them.
+agents select Bosun's reviews and comments by them.
 
 ### Failures the reviewer cannot report
 

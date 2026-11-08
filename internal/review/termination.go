@@ -120,9 +120,10 @@ func PublishTermination(ctx context.Context, apiBaseURL string, client *http.Cli
 // publishedFor reports whether a Bosun publication from this review already
 // names this commit.
 //
-// Both surfaces have to be read. Findings are published as a pull-request
-// review, a no-findings review and every failure as an issue comment, and
-// listing comments does not return reviews.
+// Both surfaces have to be read. Every review is published as a pull-request
+// review and every failure as an issue comment, listing comments does not
+// return reviews, and a pull request reviewed by an older release can carry a
+// clean review as an issue comment.
 func (g githubClient) publishedFor(ctx context.Context, repo string, number int, token, ref, sha string, since time.Time) (bool, error) {
 	want := metadata(ref, sha)
 	for _, path := range []string{
