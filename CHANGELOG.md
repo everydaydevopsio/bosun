@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.3.2] - 2026-11-08
+
+### Highlights
+- Clean review results are now published as GitHub pull request reviews. (#87)
+
+### Fixes
+- No bug fixes in this release.
+
+### Changes
+- Updated the review publishing workflow to support clean results as pull request reviews.
+
 ## [0.3.1] - 2026-11-04
 
 ### Highlights
