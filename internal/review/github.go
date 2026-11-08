@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -333,18 +332,28 @@ func (g githubClient) postComment(ctx context.Context, repo string, number int, 
 	return g.request(ctx, "POST", fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number), token, map[string]string{"body": body}, nil)
 }
 
-// postReview publishes findings as a pull-request review with inline comments.
+// postReview publishes every review, with or without findings, as a
+// pull-request review; findings become inline comments.
 //
 // Review threads are what a consuming agent needs: a conversation comment has
 // nothing to reply to and nothing to resolve, so the record of which findings
 // were handled lives only in that agent's context and cannot survive a fresh
-// session. Output with no parsable findings still publishes as a comment --
-// losing a review because a model skipped the output contract would be a worse
-// failure than publishing it unanchored.
+// session. Output with no parsable findings is still a review -- losing one
+// because a model skipped the output contract would be a worse failure than
+// publishing it unanchored.
+//
+// A clean review goes to the same surface. It used to be an issue comment,
+// which inverted the answer for any check that read only one surface (clean
+// reviews visible, findings hidden), and the fix for that was a pointer comment
+// beside every findings review: two messages for one review. One surface for
+// every outcome needs neither.
 func (g githubClient) postReview(ctx context.Context, repo string, number int, token, ref, sha, output string) error {
 	summary, findings := parseFindings(output)
+	path := fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number)
+	// A clean review has nothing to anchor, so it has no position GitHub can
+	// reject: publish it whole and skip the file lookup.
 	if len(findings) == 0 {
-		return g.postComment(ctx, repo, number, token, reviewMarker+"\n\n"+metadata(ref, sha)+"\n\n"+truncateOutput(summary))
+		return g.request(ctx, "POST", path, token, commentReview(sha, reviewBody(ref, sha, summary, "", nil), nil), nil)
 	}
 	// A finding on a file the pull request does not touch cannot be a thread.
 	// An unavailable file list is not a reason to lose the review: publish
@@ -360,25 +369,13 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 			}
 		}
 	}
-	body := map[string]any{
-		"event": "COMMENT",
-		// Anchor the review to the commit that was actually read. GitHub
-		// defaults this to the pull request's latest commit, so a push landing
-		// mid-review would attach these findings to lines they never
-		// described, under a summary naming a different SHA.
-		"commit_id": sha,
-		"body":      reviewBody(ref, sha, summary, "Findings outside the diff", outside),
-		"comments":  inlineComments(inline),
-	}
-	var published struct {
-		URL string `json:"html_url"`
-	}
-	err := publishedReview(g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published), repo, number)
+	// The reply is never read. GitHub's status says whether the review exists;
+	// decoding the body would let a truncated reply after a 2xx report a
+	// visibly published review as failed, and Worker.Run would then add a
+	// failure comment beside it -- the "never both" that GO-4 forbids.
+	err := g.request(ctx, "POST", path, token, commentReview(sha, reviewBody(ref, sha, summary, "Findings outside the diff", outside), inlineComments(inline)), nil)
 	var status httpError
 	if !errors.As(err, &status) || status.status != http.StatusUnprocessableEntity {
-		if err == nil {
-			g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
-		}
 		return err
 	}
 	// GitHub rejects the whole review when any single comment position is
@@ -389,93 +386,25 @@ func (g githubClient) postReview(ctx context.Context, repo string, number int, t
 	// was read. A rejection because the commit itself left the pull request --
 	// a force-push mid-review -- fails here, and that is the right outcome,
 	// because the push that removed it has already triggered its own review.
-	body["comments"] = []any{}
-	body["body"] = reviewBody(ref, sha, summary, "Findings", findings)
-	if err := publishedReview(g.request(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), token, body, &published), repo, number); err != nil {
-		return err
-	}
-	g.postSummary(ctx, repo, number, token, ref, sha, findings, published.URL)
-	return nil
+	return g.request(ctx, "POST", path, token, commentReview(sha, reviewBody(ref, sha, summary, "Findings", findings), nil), nil)
 }
 
-// publishedReview drops the error from an unreadable response body. The status
-// already said GitHub created the review, and the body is read only for the
-// summary's link. Returning the error here would report a failed publication
-// for a review that is visibly on the pull request, and Worker.Run would then
-// add a failure comment beside it -- the "never both" that GO-4 forbids.
-func publishedReview(err error, repo string, number int) error {
-	var decode decodeError
-	if errors.As(err, &decode) {
-		slog.Warn("read published review response", "repo", repo, "pr", number, "error", decode.Error())
-		return nil
+// commentReview is a COMMENT review anchored to the commit that was read.
+// GitHub defaults commit_id to the pull request's latest commit, so a push
+// landing mid-review would attach the review to lines it never described,
+// under a summary naming a different SHA. The event is never APPROVE or
+// REQUEST_CHANGES: a verdict is not Bosun's to give, and an approval from the
+// App could satisfy branch protection.
+func commentReview(sha, body string, comments []map[string]any) map[string]any {
+	if comments == nil {
+		comments = []map[string]any{}
 	}
-	return err
-}
-
-// postSummary puts a short pointer to a findings review where a plain comment
-// listing will find it.
-//
-// A review and its threads live under /pulls/N/reviews; issue comments live
-// under /issues/N/comments, and the common checks -- `gh pr view --json
-// comments` among them -- read only the latter. A review with no findings
-// already publishes there, so polling comments alone reports a clean review and
-// stays silent about one that found something: the answer is inverted exactly
-// when it matters. This comment closes that gap without becoming a second copy
-// of the review.
-//
-// Failure is deliberately not returned. The review is the artifact and it has
-// already reached the pull request; failing here would report a failed review
-// that is visibly published, and re-running it would spend model credits to
-// produce findings that are already there.
-func (g githubClient) postSummary(ctx context.Context, repo string, number int, token, ref, sha string, findings []Finding, reviewURL string) {
-	// Not every finding becomes a thread: the 422 fallback folds all of them
-	// into the review body, and a finding outside the diff is never anchorable.
-	// Naming a location that only sometimes holds them sends a reader looking
-	// where the findings are not, so point at the review itself -- the one
-	// destination that is correct however it published.
-	destination := "Read the review on this pull request"
-	if reviewURL != "" {
-		destination = "[Read the review](" + reviewURL + ")"
+	return map[string]any{
+		"event":     "COMMENT",
+		"commit_id": sha,
+		"body":      body,
+		"comments":  comments,
 	}
-	body := reviewMarker + "\n\n" + metadata(ref, sha) + "\n\n" +
-		findingCount(findings) + severityBreakdown(findings) + ".\n\n" +
-		destination + " — findings are inline threads where they could be anchored to the diff, " +
-		"and in the review body otherwise. This comment is a pointer; the detail is in the review."
-	if err := g.postComment(ctx, repo, number, token, body); err != nil {
-		slog.Warn("publish review summary comment", "repo", repo, "pr", number, "error", redact(err.Error(), token))
-	}
-}
-
-// findingCount keeps the singular readable: "1 finding", not "1 findings".
-func findingCount(findings []Finding) string {
-	if len(findings) == 1 {
-		return "**1 finding**"
-	}
-	return "**" + strconv.Itoa(len(findings)) + " findings**"
-}
-
-// severityBreakdown orders by the triage rank a consumer already sorts by, so
-// the summary agrees with the review it points at. severities is that single
-// ranking; a second one here sorted blockers last. parseFindings rejects any
-// severity outside it, so every finding that reaches this point is ranked.
-func severityBreakdown(findings []Finding) string {
-	counts := map[string]int{}
-	var order []string
-	for _, f := range findings {
-		if counts[f.Severity] == 0 {
-			order = append(order, f.Severity)
-		}
-		counts[f.Severity]++
-	}
-	sort.SliceStable(order, func(i, j int) bool { return severities[order[i]] < severities[order[j]] })
-	parts := make([]string, 0, len(order))
-	for _, severity := range order {
-		parts = append(parts, strconv.Itoa(counts[severity])+" "+codeSpan(severity))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " — " + strings.Join(parts, ", ")
 }
 
 // prFiles lists the paths the pull request touches.

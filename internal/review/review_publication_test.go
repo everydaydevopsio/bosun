@@ -175,16 +175,33 @@ func TestRepeatedRejectionFailsRatherThanSilentlyDroppingTheReview(t *testing.T)
 	}
 }
 
-// A model that skips the output contract still produced a review.
-func TestReviewWithoutFindingsStaysAConversationComment(t *testing.T) {
+// A clean review publishes on the same surface as one with findings. Splitting
+// them by outcome meant a check that read only one surface got the answer
+// inverted: issue comments showed clean reviews and hid the ones that found
+// something. One surface for every outcome makes "did Bosun review this" a
+// single query, and one review is one publication, with no pointer beside it.
+func TestReviewWithoutFindingsPublishesAsAReview(t *testing.T) {
 	var comments []string
 	api, payloads := reviewStub(t, []string{"a.go"}, nil, &comments)
 	defer api.Close()
 	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, "No findings."); err != nil {
 		t.Fatalf("postReview: %v", err)
 	}
-	if len(comments) != 1 || len(*payloads) != 0 {
-		t.Fatalf("comments=%d reviews=%d, want 1 and 0", len(comments), len(*payloads))
+	if len(comments) != 0 || len(*payloads) != 1 {
+		t.Fatalf("comments=%d reviews=%d, want 0 and 1", len(comments), len(*payloads))
+	}
+	review := (*payloads)[0]
+	if review.Event != "COMMENT" {
+		t.Fatalf("event = %q, want COMMENT: a clean review is not an approval, and an approval can satisfy branch protection", review.Event)
+	}
+	if review.CommitID != testSHA {
+		t.Fatalf("commit_id = %q, want the reviewed commit %q", review.CommitID, testSHA)
+	}
+	if len(review.Comments) != 0 {
+		t.Fatalf("a clean review carried threads: %+v", review.Comments)
+	}
+	if !strings.HasPrefix(review.Body, reviewMarker+"\n") || !strings.Contains(review.Body, "`feature` @ `"+testSHA+"`") || !strings.Contains(review.Body, "No findings.") {
+		t.Fatalf("review body lost the marker, the commit, or the summary: %q", review.Body)
 	}
 }
 
@@ -202,152 +219,29 @@ func TestUnavailableFileListStillPublishes(t *testing.T) {
 	}
 }
 
-// A findings review lands on /pulls/N/reviews, which `gh pr view --json
-// comments` does not return. Without a summary beside it, the cheapest check
-// for "did Bosun review this" succeeds when there was nothing to act on and
-// silently fails when there was -- exactly inverted. That inversion cost a real
-// investigation: three published reviews on PR #69 were read as no review at all.
-func TestFindingsReviewAlsoPostsADiscoverableSummary(t *testing.T) {
-	var comments []string
-	api, payloads := reviewStub(t, []string{"a.go"}, nil, &comments)
-	defer api.Close()
-	output := withFindings(`{"path":"a.go","line":3,"severity":"high","title":"Leaks the token","body":"Impact."},` +
-		`{"path":"a.go","line":9,"severity":"low","title":"Nit","body":"Detail."}`)
-	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
-		t.Fatalf("postReview: %v", err)
-	}
-	if len(*payloads) != 1 {
-		t.Fatalf("posted %d reviews, want 1", len(*payloads))
-	}
-	if len(comments) != 1 {
-		t.Fatalf("posted %d summary comments, want exactly 1", len(comments))
-	}
-	body := comments[0]
-	// Consumers already select Bosun's output by this marker, and the
-	// correlation line is what matches a publication to a push.
-	if !strings.HasPrefix(body, reviewMarker+"\n") {
-		t.Fatalf("summary is not discoverable by the review marker: %q", body)
-	}
-	if !strings.Contains(body, "`feature` @ `"+testSHA+"`") {
-		t.Fatalf("summary does not name the revision: %q", body)
-	}
-	// It must say that findings exist, how many, and where they are, or a
-	// reader who sees only this comment draws the wrong conclusion.
-	for _, want := range []string{"2 findings", "1 high", "1 low", "the detail is in the review"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("summary missing %q: %q", want, body)
-		}
-	}
-	// A pointer, not a second copy: duplicating the findings gives two places
-	// to read and two places to drift.
-	for _, unwanted := range []string{"Leaks the token", "Impact.", "Detail."} {
-		if strings.Contains(body, unwanted) {
-			t.Errorf("summary duplicates finding detail %q: %q", unwanted, body)
-		}
-	}
-}
-
-// The 422 fallback republishes the same review with everything in the body.
-// That is still one review, so it gets one summary, not two.
-func TestRejectedPositionsStillYieldExactlyOneSummary(t *testing.T) {
-	var comments []string
-	api, payloads := reviewStub(t, []string{"a.go"}, func(i int) bool { return i == 0 }, &comments)
-	defer api.Close()
-	output := withFindings(`{"path":"a.go","line":3,"severity":"medium","title":"T"}`)
-	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
-		t.Fatalf("postReview: %v", err)
-	}
-	if len(*payloads) != 2 {
-		t.Fatalf("expected the fallback review, got %d", len(*payloads))
-	}
-	if len(comments) != 1 {
-		t.Fatalf("posted %d summary comments, want exactly 1", len(comments))
-	}
-	if !strings.Contains(comments[0], "1 finding") || strings.Contains(comments[0], "1 findings") {
-		t.Errorf("summary should count one finding in the singular: %q", comments[0])
-	}
-}
-
-// The review is the artifact; the summary is a pointer to it. Losing the
-// pointer must not fail a Job whose review already reached the pull request --
-// that would report failure for a published review and re-run it on retry.
-func TestSummaryFailureDoesNotFailAPublishedReview(t *testing.T) {
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls/7/files"):
-			fmt.Fprint(w, `[{"filename":"a.go"}]`)
-		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/pulls/7/reviews"):
-			w.WriteHeader(200)
-			fmt.Fprint(w, `{}`)
-		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/7/comments"):
-			http.Error(w, "comments are disabled", 403)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer api.Close()
-	output := withFindings(`{"path":"a.go","line":3,"severity":"high","title":"T"}`)
-	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
-		t.Fatalf("a failed summary must not fail the published review: %v", err)
-	}
-}
-
-// Found by Bosun review of this branch. "Each finding is its own thread" is
-// false twice over: the 422 fallback folds every finding into the review body,
-// and findings outside the diff are never threads either. A pointer that names
-// the wrong destination sends a reader looking for threads that do not exist.
-func TestSummaryNeverPromisesThreadsItCannotGuarantee(t *testing.T) {
-	cases := []struct {
+// Every review is one publication. The summary comment that used to sit beside
+// a findings review existed only because clean reviews published elsewhere;
+// with one surface for both it is a duplicate message on the pull request.
+func TestFindingsReviewPostsNoComment(t *testing.T) {
+	for _, tc := range []struct {
 		name   string
-		files  []string
 		reject func(int) bool
 	}{
-		{"inline", []string{"a.go"}, nil},
-		{"422 fallback folds everything into the body", []string{"a.go"}, func(i int) bool { return i == 0 }},
-		{"finding outside the diff is not a thread", []string{"other.go"}, nil},
-	}
-	for _, tc := range cases {
+		{"direct", nil},
+		{"422 fallback", func(i int) bool { return i == 0 }},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var comments []string
-			api, _ := reviewStub(t, tc.files, tc.reject, &comments)
+			api, _ := reviewStub(t, []string{"a.go"}, tc.reject, &comments)
 			defer api.Close()
 			output := withFindings(`{"path":"a.go","line":3,"severity":"high","title":"T"}`)
 			if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
 				t.Fatalf("postReview: %v", err)
 			}
-			if len(comments) != 1 {
-				t.Fatalf("posted %d summary comments, want 1", len(comments))
-			}
-			body := comments[0]
-			// One destination that is correct however the review published.
-			if !strings.Contains(body, reviewURL) {
-				t.Errorf("summary does not link the published review: %q", body)
-			}
-			if strings.Contains(body, "Files changed tab") {
-				t.Errorf("summary promises a tab location it cannot guarantee: %q", body)
+			if len(comments) != 0 {
+				t.Fatalf("posted %d comments beside the review, want 0: %q", len(comments), comments)
 			}
 		})
-	}
-}
-
-// Bosun's severity order lives in findings.go and starts at blocker. A second
-// ranking that omits it sorts the most urgent finding last.
-func TestSummaryOrdersSeveritiesByTriageRank(t *testing.T) {
-	var comments []string
-	api, _ := reviewStub(t, []string{"a.go"}, nil, &comments)
-	defer api.Close()
-	output := withFindings(`{"path":"a.go","line":1,"severity":"low","title":"C"},` +
-		`{"path":"a.go","line":2,"severity":"blocker","title":"A"},` +
-		`{"path":"a.go","line":3,"severity":"medium","title":"B"},` +
-		`{"path":"a.go","line":4,"severity":"high","title":"D"}`)
-	if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
-		t.Fatalf("postReview: %v", err)
-	}
-	if len(comments) != 1 {
-		t.Fatalf("posted %d summary comments, want 1", len(comments))
-	}
-	if !strings.Contains(comments[0], "1 blocker, 1 high, 1 medium, 1 low") {
-		t.Fatalf("severities are not in triage order: %q", comments[0])
 	}
 }
 
@@ -356,7 +250,8 @@ func TestSummaryOrdersSeveritiesByTriageRank(t *testing.T) {
 // read timeout after a 2xx turned a review that GitHub had created into a
 // returned error. Worker.Run would then leave published false and post a
 // failure comment contradicting the review on the pull request -- both
-// publications, which GO-4 forbids. The URL is a nicety; the review is not.
+// publications, which GO-4 forbids. Nothing in the reply is needed, so it is
+// not read.
 func TestUnreadableResponseDoesNotFailAPublishedReview(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -400,12 +295,8 @@ func TestUnreadableResponseDoesNotFailAPublishedReview(t *testing.T) {
 			if err := (githubClient{api.URL, api.Client()}).postReview(context.Background(), "acme/widget", 7, "t", "feature", testSHA, output); err != nil {
 				t.Fatalf("an unreadable response must not fail a created review: %v", err)
 			}
-			// The summary still publishes, naming the review without a link.
-			if len(comments) != 1 {
-				t.Fatalf("posted %d summary comments, want 1", len(comments))
-			}
-			if !strings.Contains(comments[0], "Read the review on this pull request") {
-				t.Errorf("summary should name the review when it has no URL: %q", comments[0])
+			if len(comments) != 0 {
+				t.Fatalf("posted %d comments beside the review, want 0", len(comments))
 			}
 		})
 	}

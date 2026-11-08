@@ -4,7 +4,8 @@ Active and in-flight implementation plans. Each plan graduates to an ADR under `
 
 | Plan | Status |
 | --- | --- |
-| [plan-review-summary-comment.md](plan-review-summary-comment.md) | Implemented |
+| [plan-single-review-surface.md](plan-single-review-surface.md) | Implemented; live verification pending |
+| [plan-review-summary-comment.md](plan-review-summary-comment.md) | Superseded by plan-single-review-surface |
 | [plan-deadline-termination-report.md](plan-deadline-termination-report.md) | In progress |
 | [plan-oom-termination-report.md](plan-oom-termination-report.md) | Implemented; merged in #73 |
 | [plan-review-permissions.md](plan-review-permissions.md) | Implemented; validation pending |

@@ -146,9 +146,9 @@ gh api "repos/$OWNER_REPO/issues/$PR_NUMBER/comments" \
   --jq '.[] | select(.body | startswith("## Bosun code review")) | .user.login'
 ```
 
-Both surfaces are worth querying: findings publish as a review, while a review
-with nothing anchorable to the diff and every failure publish as a conversation
-comment.
+Both surfaces are worth querying: every review publishes as a pull-request
+review, while a failure publishes as a conversation comment. Pull requests
+reviewed before 0.3.2 also carry clean reviews as conversation comments.
 
 Select Bosun's output by the marker lines -- `## Bosun code review` and
 `## Bosun code review failed` -- which are stable across installations. Use the

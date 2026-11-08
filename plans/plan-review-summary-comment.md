@@ -1,6 +1,6 @@
 # Summary comment beside a findings review
 
-Status: Implemented
+Status: Superseded by [plan-single-review-surface.md](plan-single-review-surface.md)
 Branch: feat/summary-comment-with-findings
 Created: 2026-11-03
 Related ADRs: None
