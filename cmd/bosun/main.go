@@ -19,6 +19,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/review"
 	"github.com/everydaydevopsio/bosun/internal/sentinel"
 	"github.com/everydaydevopsio/bosun/internal/server"
+	"github.com/everydaydevopsio/bosun/internal/sweep"
 	"github.com/everydaydevopsio/bosun/internal/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -87,14 +88,38 @@ type submitter struct {
 // user's job, through the token's own scopes.
 func (s submitter) Submit(ctx context.Context, r review.Request, d string) (string, error) {
 	r = resolveIdentity(ctx, r)
-	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
-	if appID == "" || key == "" {
+	issue := appTokenIssuer()
+	if issue == nil {
 		return jobs.Submit(ctx, s.client, s.cfg, r, d)
 	}
-	issue := func(ctx context.Context, repo string) (review.RepositoryToken, error) {
+	return jobs.SubmitAuthenticated(ctx, s.client, s.cfg, r, d, issue)
+}
+
+// appTokenIssuer mints repository-scoped tokens from the GitHub App, or is nil
+// when no App is configured and Jobs read the shared secret instead.
+func appTokenIssuer() jobs.TokenIssuer {
+	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
+	if appID == "" || key == "" {
+		return nil
+	}
+	return func(ctx context.Context, repo string) (review.RepositoryToken, error) {
 		return review.IssueRepositoryToken(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, repo, appID, key)
 	}
-	return jobs.SubmitAuthenticated(ctx, s.client, s.cfg, r, d, issue)
+}
+
+// startDispatcher runs the loop that starts queued reviews as slots free up.
+// Without it a review queued at capacity would wait until it expired.
+func startDispatcher(ctx context.Context, client kubernetes.Interface, cfg config.Config) {
+	if cfg.MaxQueuedReviews <= 0 {
+		slog.Warn("review queue disabled; a delivery arriving while every slot is busy is refused with 503 and GitHub will not redeliver it",
+			"logger", "bosun.queue")
+		return
+	}
+	d := jobs.Dispatcher{
+		Client: client, Config: cfg, Issue: appTokenIssuer(),
+		Interval: time.Duration(cfg.QueueIntervalSeconds) * time.Second,
+	}
+	go d.Run(ctx)
 }
 
 // controllerToken mints a credential the controller can publish with.
@@ -195,6 +220,38 @@ func startSentinel(ctx context.Context, client kubernetes.Interface, cfg config.
 	}
 	go s.Run(ctx)
 }
+
+// sweepLease serializes sweep passes across replicas, so two controllers do not
+// walk every installation at the same moment.
+const sweepLease = "bosun-missed-review-sweep"
+
+// startSweep runs the pass that requests reviews for pull requests whose
+// webhook never became a Job. Without it a delivery lost before it was stored
+// -- during a rollout, or while no controller was ready -- leaves its pull
+// request unreviewed with nothing to say so.
+func startSweep(ctx context.Context, client kubernetes.Interface, cfg config.Config) {
+	if cfg.SweepIntervalSeconds <= 0 {
+		slog.Warn("missed-review sweep disabled; a webhook lost before it was stored leaves its pull request unreviewed",
+			"logger", "bosun.sweep")
+		return
+	}
+	appID, key := os.Getenv("BOSUN_GITHUB_APP_ID"), os.Getenv("BOSUN_GITHUB_PRIVATE_KEY")
+	if appID == "" || key == "" {
+		slog.Warn("missed-review sweep needs a GitHub App to list installations; it is off for this install",
+			"logger", "bosun.sweep")
+		return
+	}
+	s := &sweep.Sweeper{
+		Client: client, Config: cfg,
+		GitHub: review.Scanner{APIBaseURL: os.Getenv("BOSUN_GITHUB_API_URL"), AppID: appID, Key: key},
+		Submit: submitter{client, cfg}.Submit,
+		Lock: func(ctx context.Context, op func(context.Context) error) error {
+			return jobs.Serialize(ctx, client, cfg.Namespace, sweepLease, 4*time.Minute, op)
+		},
+	}
+	go s.Run(ctx)
+}
+
 func kubeClient() (kubernetes.Interface, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
@@ -278,8 +335,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "configure Kubernetes client:", err)
 		os.Exit(1)
 	}
-	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews)
+	slog.Info("bosun starting", "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews, "max_queued_reviews", cfg.MaxQueuedReviews)
 	startSentinel(ctx, client, cfg)
+	startDispatcher(ctx, client, cfg)
+	startSweep(ctx, client, cfg)
 	srv := newWebhookServer(server.Handler{Config: cfg, Submitter: submitter{client, cfg}})
 	drained := make(chan struct{})
 	go func() {
@@ -288,7 +347,7 @@ func main() {
 		// Restore default signal handling so a second interrupt exits now.
 		stop()
 		slog.Info("shutdown requested; draining in-flight deliveries")
-		// Finish inside the default 30s termination grace period: a delivery
+		// Finish inside the chart's termination grace period, after preStop: a delivery
 		// still holding the admission lease must release it before SIGKILL.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()

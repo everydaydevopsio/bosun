@@ -13,6 +13,7 @@ spec:
         {{- include "bosun.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "bosun.fullname" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true
         runAsUser: {{ .Values.securityContext.runAsUser }}
@@ -57,6 +58,20 @@ spec:
               value: {{ .Values.review.terminationSentinel.intervalSeconds | quote }}
             - name: BOSUN_MAX_CONCURRENT_REVIEWS
               value: {{ .Values.review.maxConcurrent | quote }}
+            - name: BOSUN_MAX_QUEUED_REVIEWS
+              value: {{ .Values.review.queue.maxQueued | quote }}
+            - name: BOSUN_QUEUE_INTERVAL_SECONDS
+              value: {{ .Values.review.queue.intervalSeconds | quote }}
+            - name: BOSUN_QUEUE_TIMEOUT_SECONDS
+              value: {{ .Values.review.queue.timeoutSeconds | quote }}
+            - name: BOSUN_SWEEP_INTERVAL_SECONDS
+              value: {{ .Values.review.sweep.intervalSeconds | quote }}
+            - name: BOSUN_SWEEP_LOOKBACK_SECONDS
+              value: {{ .Values.review.sweep.lookbackSeconds | quote }}
+            - name: BOSUN_SWEEP_GRACE_SECONDS
+              value: {{ .Values.review.sweep.graceSeconds | quote }}
+            - name: BOSUN_SWEEP_MAX_PER_PASS
+              value: {{ .Values.review.sweep.maxPerPass | quote }}
             - name: BOSUN_REVIEW_TIMEOUT_SECONDS
               value: {{ .Values.review.timeoutSeconds | quote }}
             - name: BOSUN_LOG_FORMAT
@@ -105,6 +120,12 @@ spec:
             # Development mode has no webhook secret. Signature verification
             # fails closed, so the webhook endpoint rejects every delivery and
             # reviews are driven locally by scripts/review-local.sh instead.
+{{- end }}
+{{- if gt (int .Values.preStopSleepSeconds) 0 }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
 {{- end }}
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }

@@ -310,10 +310,10 @@ and return to publishing nothing when a reviewer is killed.
 A branch push and the pull request opened from it review the same commit, so
 leaving this on makes the ordinary `git push -u` then `gh pr create` flow pay
 for two identical reviews. `review.maxConcurrent` is counted across the
-namespace rather than per repository, so the duplicate can take the last slot
-and leave the pull request opened moments later rejected with 503 -- and GitHub
-does not redeliver a failed webhook, so that review is lost until the next
-push. Enable it when branches are pushed that will not become pull requests
+namespace rather than per repository, so the duplicate takes a slot and the
+pull request opened moments later waits in the review queue behind it. With
+the queue disabled (`review.queue.maxQueued: 0`) it is rejected with 503
+instead, and GitHub does not redeliver a failed webhook. Enable it when branches are pushed that will not become pull requests
 soon; the pull-request triggers already cover the ordinary flow.
 
 When it is on, the review runs before any pull request exists, so there is no

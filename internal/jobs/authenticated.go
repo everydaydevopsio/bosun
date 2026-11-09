@@ -2,16 +2,11 @@ package jobs
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/review"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -32,84 +27,19 @@ type TokenIssuer func(ctx context.Context, repo string) (review.RepositoryToken,
 // can name it as owner; Kubernetes then garbage-collects the credential with
 // the Job instead of leaving it live after the Job's TTL expires. Only once the
 // Secret exists is the Job released to run, so it can never start looking for a
-// credential that is not there yet.
+// credential that is not there yet. When every slot is busy the Job stays
+// suspended in the queue, and the token is minted when the Dispatcher starts
+// it, not here.
 func SubmitAuthenticated(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string, issue TokenIssuer) (string, error) {
 	return withAdmission(ctx, client, cfg.Namespace, func(ctx context.Context) (string, error) {
 		name := Name(req.Repo, req.NameRef(), delivery)
-		if _, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
-			return "", ExistsError{name}
-		} else if !apierrors.IsNotFound(err) {
-			return "", err
-		}
-		active, err := Active(ctx, client, cfg.Namespace)
-		if err != nil {
-			return "", err
-		}
-		if active >= cfg.MaxConcurrentReviews {
-			return "", CapacityError{active, cfg.MaxConcurrentReviews}
-		}
-
-		token, err := issue(ctx, req.Repo)
-		if err != nil {
-			return "", fmt.Errorf("issue repository token: %w", err)
-		}
-		if token.Value == "" {
-			return "", fmt.Errorf("issue repository token: GitHub returned an empty token")
-		}
-		// A token that dies before the review does means paying for the whole
-		// review and then failing to publish it. Refuse now, where it costs
-		// nothing, rather than at the end.
-		deadline := time.Duration(cfg.ReviewTimeoutSeconds+startupAllowanceSeconds) * time.Second
-		if !token.ExpiresAt.IsZero() && time.Until(token.ExpiresAt) < deadline {
-			return "", fmt.Errorf("the repository token expires in %s but this review may run for %s; lower review.timeoutSeconds", time.Until(token.ExpiresAt).Round(time.Minute), deadline)
-		}
-
-		secretName := name + "-github"
 		job, err := build(cfg, req, name)
 		if err != nil {
 			return "", err
 		}
-		useJobToken(job, secretName)
-		job.Spec.Suspend = ptr(true)
-		created, err := client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
-		if apierrors.IsAlreadyExists(err) {
-			return "", ExistsError{name}
-		}
-		if err != nil {
-			return "", err
-		}
-
-		// From here the Job exists but cannot run. Anything that goes wrong
-		// must remove it, or it holds a concurrency slot forever waiting for a
-		// credential that will never arrive.
-		release := func(cause error) (string, error) {
-			_ = client.BatchV1().Jobs(cfg.Namespace).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: ptr(metav1.DeletePropagationBackground)})
-			return "", cause
-		}
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: secretName, Namespace: cfg.Namespace,
-				Labels: map[string]string{"app.kubernetes.io/managed-by": "bosun"},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "batch/v1", Kind: "Job", Name: created.Name, UID: created.UID,
-					Controller: ptr(true), BlockOwnerDeletion: ptr(true),
-				}},
-			},
-			Type: corev1.SecretTypeOpaque,
-			Data: map[string][]byte{"token": []byte(token.Value)},
-		}
-		if _, err := client.CoreV1().Secrets(cfg.Namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-			return release(fmt.Errorf("store repository token: %w", err))
-		}
-
-		// Patch rather than Update: the job controller writes
-		// status.conditions[Suspended] as soon as the suspended Job exists,
-		// which bumps its resourceVersion, so an Update carrying the object
-		// Create returned is already stale and conflicts every time.
-		if _, err := client.BatchV1().Jobs(cfg.Namespace).Patch(ctx, created.Name, types.StrategicMergePatchType, []byte(`{"spec":{"suspend":false}}`), metav1.PatchOptions{}); err != nil {
-			return release(fmt.Errorf("start review: %w", err))
-		}
-		return name, nil
+		useJobToken(job, name+"-github")
+		labelPullRequest(job, req.Repo, req.PRNumber)
+		return admit(ctx, client, cfg, job, startAuthenticated(client, cfg, issue))
 	})
 }
 

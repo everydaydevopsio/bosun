@@ -1468,3 +1468,45 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: failing first (`comments=1 reviews=0, want 0 and 1`; `posted 1
   comments beside the review, want 0`), then `go test ./...` green.
+
+# Task: Queue reviews at capacity instead of refusing them (#82)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-10
+- Mode: Autonomous
+- Plan: plans/plan-review-queue.md
+
+## Scope
+- In scope: queue deliveries that arrive at `maxConcurrent`; dispatcher; log
+  capacity refusals; chart values and docs.
+- Also in scope (added): replicas 2 + preStop sleep; #82 option 3, the
+  missed-review sweep.
+- Out of scope: #82 option 2 (check run on receipt) — remains on #82.
+
+## Acceptance Criteria
+- AC1: A delivery at capacity is accepted and queued as a suspended Job, not refused. ✅
+- AC2: Queued reviews start oldest-first as slots free; running pods never exceed `maxConcurrent`. ✅
+- AC3: A queued review gets its repository token when it starts. ✅
+- AC4: A full queue refuses with 503 and logs at WARN. ✅
+- AC5: An open, non-draft PR whose head has no Bosun publication and no Job gets a review from the sweep. ✅
+- AC6: A rollout keeps a ready controller; terminating pods pause before draining. ✅
+
+## Execution Checklist
+- [x] `internal/jobs/queue.go` with admit + Dispatcher
+- [x] Config, controller wiring, server log
+- [x] Chart values, README, docs
+- [ ] Live verification after release (see plan)
+
+## Test Strategy
+- Unit: `internal/jobs/queue_test.go` (8 tests covering AC1–AC4, supersede,
+  start-failure isolation, expiry, queue disabled); `internal/sweep/sweep_test.go`
+  (AC5, skips, dedupe across passes/replicas, once per commit, per-pass bound,
+  unknown publication state); `internal/review/scan_test.go` (SHA-only match,
+  quoted replies ignored).
+- CI: "Deliveries are not dropped by default" pins AC6 and the queue/sweep defaults.
+- Failure-path tests: token mint failure, full queue, expiry.
+- Note: tests were written alongside the implementation, not strictly first.
+
+## Outcome
+- Result: `go test ./...` green; `golangci-lint run --new-from-rev=main` 0 issues; `helm lint` ok.

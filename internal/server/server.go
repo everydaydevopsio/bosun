@@ -54,6 +54,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch err.(type) {
 		case interface{ Capacity() }:
+			// GitHub does not redeliver a 503, so this review is lost. Say
+			// so: before this line the refusal left no trace anywhere (#82).
+			slog.Warn("review refused at capacity; GitHub will not redeliver it", "logger", "bosun.server",
+				"repo", req.Repo, "ref", req.Ref, "pr", req.PRNumber, "trigger", req.Trigger, "error", err)
 			w.Header().Set("Retry-After", "120")
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		default:

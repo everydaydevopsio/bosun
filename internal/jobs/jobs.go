@@ -13,7 +13,6 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/review"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -65,13 +64,9 @@ func Active(ctx context.Context, client kubernetes.Interface, namespace string) 
 	if err != nil {
 		return 0, err
 	}
-	n := 0
-	for _, j := range list.Items {
-		if j.Status.Succeeded == 0 && j.Status.Failed == 0 {
-			n++
-		}
-	}
-	return n, nil
+	// A queued Job is suspended and has no pod, so it holds no slot.
+	running, _ := tally(list.Items)
+	return running, nil
 }
 func Submit(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string) (string, error) {
 	return withAdmission(ctx, client, cfg.Namespace, func(ctx context.Context) (string, error) {
@@ -80,31 +75,12 @@ func Submit(ctx context.Context, client kubernetes.Interface, cfg config.Config,
 }
 
 func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string) (string, error) {
-	name := Name(req.Repo, req.NameRef(), delivery)
-	if _, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
-		return "", ExistsError{name}
-	} else if !errors.IsNotFound(err) {
-		return "", err
-	}
-	n, err := Active(ctx, client, cfg.Namespace)
+	job, err := build(cfg, req, Name(req.Repo, req.NameRef(), delivery))
 	if err != nil {
 		return "", err
 	}
-	if n >= cfg.MaxConcurrentReviews {
-		return "", CapacityError{n, cfg.MaxConcurrentReviews}
-	}
-	job, err := build(cfg, req, name)
-	if err != nil {
-		return "", err
-	}
-	_, err = client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
-	if errors.IsAlreadyExists(err) {
-		return "", ExistsError{name}
-	}
-	if err != nil {
-		return "", err
-	}
-	return name, nil
+	labelPullRequest(job, req.Repo, req.PRNumber)
+	return admit(ctx, client, cfg, job, nil)
 }
 func ptr[T any](v T) *T { return &v }
 

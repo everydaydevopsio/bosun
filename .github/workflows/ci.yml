@@ -162,6 +162,23 @@ jobs:
           helm template bosun charts/bosun --set review.triggers.branchCreated=true > /tmp/bosun-branch-on.yaml
           grep -A1 'name: BOSUN_REVIEW_BRANCH_CREATED' /tmp/bosun-branch-on.yaml | grep -q 'value: "true"'
 
+      # A delivery GitHub sends while every slot is busy, or while no
+      # controller is listening, is never redelivered (#82). The queue, the
+      # preStop pause, and a grace period long enough for pause plus the
+      # controller's 25s drain are what keep those deliveries; pin them.
+      - name: Deliveries are not dropped by default
+        run: |
+          set -euo pipefail
+          helm template bosun charts/bosun --show-only templates/deployment.yaml > /tmp/bosun-delivery.yaml
+          queued="$(grep -A1 'name: BOSUN_MAX_QUEUED_REVIEWS' /tmp/bosun-delivery.yaml | sed -n 's/.*value: "\([0-9]*\)"/\1/p')"
+          echo "maxQueued=$queued"; [ "$queued" -gt 0 ]
+          grep -q 'name: BOSUN_SWEEP_INTERVAL_SECONDS' /tmp/bosun-delivery.yaml
+          sleep_s="$(sed -n '/preStop:/,/seconds:/s/.*seconds: \([0-9]*\)/\1/p' /tmp/bosun-delivery.yaml)"
+          grace="$(sed -n 's/.*terminationGracePeriodSeconds: \([0-9]*\)/\1/p' /tmp/bosun-delivery.yaml)"
+          echo "preStop=${sleep_s}s grace=${grace}s"
+          [ "$sleep_s" -gt 0 ] && [ "$grace" -ge $((sleep_s + 25)) ]
+          grep -qx '  replicas: 2' /tmp/bosun-delivery.yaml
+
       - name: Reviewer Jobs can be locked down
         run: |
           helm template bosun charts/bosun --set networkPolicy.enabled=true \
