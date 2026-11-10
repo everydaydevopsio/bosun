@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.3.4] - 2026-11-10
+
+### Highlights
+More robust review processing, with receipt-time ordering and resilient pull request sweeps.
+
+### Fixes
+- Review sweeps now continue past an unsearchable pull request instead of stopping there. (#89)
+
+### Changes
+- Review supersession now uses receipt time to determine which review takes precedence. (#89)
+
 ## [0.3.3] - 2026-11-10
 
 ### Highlights
