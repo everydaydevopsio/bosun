@@ -44,7 +44,7 @@ func (f *fakeGitHub) Repositories(context.Context, string) ([]string, error) {
 	return out, nil
 }
 
-func (f *fakeGitHub) OpenPullRequests(_ context.Context, _, repo string) ([]review.OpenPullRequest, error) {
+func (f *fakeGitHub) OpenPullRequests(_ context.Context, _, repo string, _ time.Time) ([]review.OpenPullRequest, error) {
 	return f.prs[repo], nil
 }
 

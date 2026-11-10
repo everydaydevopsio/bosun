@@ -32,7 +32,7 @@ type GitHub interface {
 	Installations(ctx context.Context) ([]review.Installation, error)
 	Token(ctx context.Context, inst review.Installation) (string, error)
 	Repositories(ctx context.Context, token string) ([]string, error)
-	OpenPullRequests(ctx context.Context, token, repo string) ([]review.OpenPullRequest, error)
+	OpenPullRequests(ctx context.Context, token, repo string, since time.Time) ([]review.OpenPullRequest, error)
 	Reviewed(ctx context.Context, token, repo string, number int, sha string) (bool, error)
 }
 
@@ -131,13 +131,17 @@ func (s *Sweeper) now() time.Time {
 }
 
 func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budget int) (int, error) {
-	prs, err := s.GitHub.OpenPullRequests(ctx, token, repo)
-	if err != nil {
-		return 0, err
-	}
 	lookback := time.Duration(s.Config.SweepLookbackSeconds) * time.Second
 	grace := time.Duration(s.Config.SweepGraceSeconds) * time.Second
 	now := s.now()
+	var since time.Time
+	if lookback > 0 {
+		since = now.Add(-lookback)
+	}
+	prs, err := s.GitHub.OpenPullRequests(ctx, token, repo, since)
+	if err != nil {
+		return 0, err
+	}
 	submitted := 0
 	for _, pr := range prs {
 		if submitted >= budget {

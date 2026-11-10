@@ -359,3 +359,26 @@ func queueDirectly(t *testing.T, client kubernetes.Interface, cfg config.Config,
 	}
 	return name
 }
+
+// Bosun review of #88, round 2: a newer request that takes a freed slot
+// before the dispatcher runs must still remove its pull request's queued
+// predecessor, or the obsolete head costs a slot and a model run later.
+func TestAnImmediatelyStartedRequestSupersedesItsQueuedPredecessor(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	cfg := queueConfig()
+
+	running, _ := Submit(ctx, client, cfg, review.Request{Repo: "acme/other", Ref: "x", PRNumber: 1}, "r")
+	stale, _ := Submit(ctx, client, cfg, review.Request{Repo: "acme/repo", Ref: "head", PRNumber: 7, SHA: "1"}, "s1")
+	complete(t, client, running) // a slot frees; the dispatcher has not run
+	fresh, err := Submit(ctx, client, cfg, review.Request{Repo: "acme/repo", Ref: "head", PRNumber: 7, SHA: "2"}, "s2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := getJob(t, client, fresh); isQueued(f) {
+		t.Fatal("the newer request should have taken the free slot")
+	}
+	if _, err := client.BatchV1().Jobs("bosun").Get(ctx, stale, metav1.GetOptions{}); err == nil {
+		t.Error("the superseded queued review survived an immediate start")
+	}
+}

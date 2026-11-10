@@ -126,29 +126,40 @@ func (s Scanner) Repositories(ctx context.Context, token string) ([]string, erro
 	return out, nil
 }
 
-// OpenPullRequests lists a repository's open pull requests, most recently
-// updated first. One page: the sweep only looks back a bounded window, and a
-// repository with more than a hundred pull requests updated inside it is
-// already beyond what a single pass should start reviews for.
-func (s Scanner) OpenPullRequests(ctx context.Context, token, repo string) ([]OpenPullRequest, error) {
+// OpenPullRequests lists a repository's open pull requests updated since the
+// given time, most recently updated first. It pages until a page reaches past
+// that boundary, so an eligible pull request is never hidden behind a hundred
+// newer ones; scanPages still bounds a single call.
+func (s Scanner) OpenPullRequests(ctx context.Context, token, repo string, since time.Time) ([]OpenPullRequest, error) {
 	if !validRepository(repo) {
 		return nil, fmt.Errorf("invalid repository name")
 	}
-	var items []struct {
-		Number    int       `json:"number"`
-		Draft     bool      `json:"draft"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Head      struct {
-			Ref string `json:"ref"`
-			SHA string `json:"sha"`
-		} `json:"head"`
-	}
-	if err := s.client().request(ctx, "GET", "/repos/"+repo+"/pulls?state=open&sort=updated&direction=desc&per_page=100", token, nil, &items); err != nil {
-		return nil, err
-	}
-	out := make([]OpenPullRequest, 0, len(items))
-	for _, p := range items {
-		out = append(out, OpenPullRequest{Repo: repo, Number: p.Number, Ref: p.Head.Ref, SHA: p.Head.SHA, Draft: p.Draft, UpdatedAt: p.UpdatedAt})
+	var out []OpenPullRequest
+	for page := 1; page <= scanPages; page++ {
+		var items []struct {
+			Number    int       `json:"number"`
+			Draft     bool      `json:"draft"`
+			UpdatedAt time.Time `json:"updated_at"`
+			Head      struct {
+				Ref string `json:"ref"`
+				SHA string `json:"sha"`
+			} `json:"head"`
+		}
+		path := fmt.Sprintf("/repos/%s/pulls?state=open&sort=updated&direction=desc&per_page=100&page=%d", repo, page)
+		if err := s.client().request(ctx, "GET", path, token, nil, &items); err != nil {
+			return nil, err
+		}
+		past := false
+		for _, p := range items {
+			if !since.IsZero() && p.UpdatedAt.Before(since) {
+				past = true
+				break
+			}
+			out = append(out, OpenPullRequest{Repo: repo, Number: p.Number, Ref: p.Head.Ref, SHA: p.Head.SHA, Draft: p.Draft, UpdatedAt: p.UpdatedAt})
+		}
+		if past || len(items) < 100 {
+			break
+		}
 	}
 	return out, nil
 }

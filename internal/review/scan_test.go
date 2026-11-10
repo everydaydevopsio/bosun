@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const scanSHA = "abcdefabcdefabcdefabcdefabcdefabcdefabcd"
@@ -67,5 +68,41 @@ func TestReviewedRejectsMalformedInput(t *testing.T) {
 	}
 	if _, err := (Scanner{}).Reviewed(context.Background(), "t", "acme/repo", 1, "main"); err == nil {
 		t.Error("accepted a non-commit")
+	}
+}
+
+// Round 2: an eligible pull request past the first page must not be invisible
+// to every pass. Listing pages until the lookback boundary.
+func TestOpenPullRequestsPagesUntilTheLookbackBoundary(t *testing.T) {
+	now := time.Now()
+	page := func(start int, age time.Duration) []map[string]any {
+		out := []map[string]any{}
+		for i := 0; i < 100; i++ {
+			out = append(out, map[string]any{"number": start + i, "updated_at": now.Add(-age).Format(time.RFC3339), "head": map[string]string{"ref": "b", "sha": scanSHA}})
+		}
+		return out
+	}
+	pages := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_ = json.NewEncoder(w).Encode(page(1, time.Hour))
+		case "2":
+			_ = json.NewEncoder(w).Encode(page(101, 2*time.Hour))
+		default:
+			_ = json.NewEncoder(w).Encode(page(201, 72*time.Hour))
+		}
+	}))
+	defer srv.Close()
+	prs, err := Scanner{APIBaseURL: srv.URL}.OpenPullRequests(context.Background(), "t", "acme/repo", now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 200 {
+		t.Errorf("got %d pull requests, want the 200 inside the window", len(prs))
+	}
+	if pages != 3 {
+		t.Errorf("fetched %d pages, want to stop at the first page past the boundary", pages)
 	}
 }

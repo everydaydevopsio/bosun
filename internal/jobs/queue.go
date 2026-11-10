@@ -96,6 +96,9 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 		return "", err
 	}
 	running, queued := tally(list.Items)
+	// A newer request for the same pull request replaces a queued one that
+	// never started, whichever branch below admits it.
+	stale := superseded(list.Items, job)
 	if running < cfg.MaxConcurrentReviews {
 		// A slot is free. Anything already queued was here first, but the
 		// dispatcher will start it on its next pass if a slot remains; taking
@@ -109,6 +112,7 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 				}
 				return "", err
 			}
+			removeSuperseded(ctx, client, cfg.Namespace, stale, name)
 			return name, nil
 		}
 		// Created as a queue entry and released below. If the release fails
@@ -133,11 +137,11 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 			}
 			return "", err
 		}
+		removeSuperseded(ctx, client, cfg.Namespace, stale, name)
 		return name, nil
 	}
 
 	// Superseded entries do not count against the queue: they are about to go.
-	stale := superseded(list.Items, job)
 	if queued-len(stale) >= cfg.MaxQueuedReviews {
 		if cfg.MaxQueuedReviews <= 0 {
 			return "", CapacityError{running, cfg.MaxConcurrentReviews}
@@ -151,20 +155,24 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 		}
 		return "", err
 	}
-	for _, old := range stale {
-		// A newer request for the same pull request replaces a queued one
-		// that never started: reviewing the older head would only be
-		// overtaken. A running review is never touched.
-		if err := client.BatchV1().Jobs(cfg.Namespace).Delete(ctx, old, metav1.DeleteOptions{PropagationPolicy: ptr(metav1.DeletePropagationBackground)}); err != nil && !apierrors.IsNotFound(err) {
-			slog.Warn("could not remove a superseded queued review", "logger", "bosun.queue", "job", old, "error", err)
-			continue
-		}
-		slog.Info("queued review superseded", "logger", "bosun.queue", "job", old, "by", name)
-	}
+	removeSuperseded(ctx, client, cfg.Namespace, stale, name)
 	slog.Info("review queued: all slots are busy", "logger", "bosun.queue",
 		"job", name, "repo", job.Annotations["bosun/repository"], "pr", job.Labels[pullRequestLabel],
 		"running", running, "max_concurrent", cfg.MaxConcurrentReviews, "position", queued-len(stale)+1)
 	return name, nil
+}
+
+// removeSuperseded deletes queued Jobs a newer submission replaced: reviewing
+// the older head would only be overtaken. A running review is never touched;
+// superseded selects queued entries only.
+func removeSuperseded(ctx context.Context, client kubernetes.Interface, namespace string, stale []string, by string) {
+	for _, old := range stale {
+		if err := client.BatchV1().Jobs(namespace).Delete(ctx, old, metav1.DeleteOptions{PropagationPolicy: ptr(metav1.DeletePropagationBackground)}); err != nil && !apierrors.IsNotFound(err) {
+			slog.Warn("could not remove a superseded queued review", "logger", "bosun.queue", "job", old, "error", err)
+			continue
+		}
+		slog.Info("queued review superseded", "logger", "bosun.queue", "job", old, "by", by)
+	}
 }
 
 // tally counts Jobs holding a slot and Jobs waiting for one.
