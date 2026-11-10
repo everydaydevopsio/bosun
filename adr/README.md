@@ -9,3 +9,4 @@ decision is marked superseded and a new record is added.
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [001](001-cli-owned-cluster-lifecycle.md) | The CLI owns the local cluster and loads local provider credentials | Accepted |
+| [002](002-queue-reviews-and-sweep-for-missed-deliveries.md) | Queue reviews at capacity as suspended Jobs, and sweep for missed deliveries | Accepted |
