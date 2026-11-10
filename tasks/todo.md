@@ -1523,6 +1523,7 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 - AC1: An older request admitted after a newer one for the same PR is dropped and does not delete the newer head's queued review. ✅
 - AC2: A newer request still supersedes an older queued one. ✅
 - AC3: One PR whose publications cannot be searched does not stop the sweep from considering the rest of its repository. ✅
+- AC4 (Bosun review of #89): a sweep request is dated when it read the head, so a webhook for a newer head received mid-pass is not dropped. ✅ (`TestASweepRequestIsDatedWhenItReadTheHead`, failing first with "superseded by newer")
 
 ## Execution Checklist
 - [x] Failing tests first (confirmed failing: `err = <nil>, want … superseded`; `jobs = 0, want one review`)

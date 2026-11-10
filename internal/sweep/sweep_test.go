@@ -262,3 +262,36 @@ func TestOneUnsearchablePullRequestDoesNotHideTheRest(t *testing.T) {
 		t.Errorf("jobs = %d, want one review for the searchable pull request", len(list.Items))
 	}
 }
+
+// Bosun review of #89: the sweep's request must be dated when it read the
+// head, not when it submitted. Otherwise a webhook for a newer head received
+// in between looks older than the sweep's obsolete head and is dropped.
+func TestASweepRequestIsDatedWhenItReadTheHead(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	c := cfg()
+	c.MaxConcurrentReviews = 1
+	t0 := now
+	// Fill the only slot so both requests below queue.
+	if _, err := jobs.Submit(ctx, client, c, review.Request{Repo: "acme/other", Ref: "x", PRNumber: 1}, "busy"); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	s := sweeper(client, &fakeGitHub{prs: map[string][]review.OpenPullRequest{"acme/ballast": {pr(7, sha1, time.Hour)}}}, c)
+	s.Now = func() time.Time { calls++; return t0.Add(time.Duration(calls-1) * 10 * time.Second) }
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The webhook for the newer head arrived while the sweep was checking
+	// publications, after the sweep read the old head.
+	_, err := jobs.Submit(ctx, client, c, review.Request{Repo: "acme/ballast", Ref: "branch", SHA: sha2, PRNumber: 7, ReceivedAt: t0.Add(5 * time.Second)}, "webhook")
+	if err != nil {
+		t.Fatalf("the newer head's webhook was dropped: %v", err)
+	}
+	list, _ := client.BatchV1().Jobs("bosun").List(ctx, metav1.ListOptions{})
+	for _, j := range list.Items {
+		if jobs.ReviewedSHA(&j) == sha1 {
+			t.Error("the sweep's obsolete head is still queued beside the newer one")
+		}
+	}
+}
