@@ -1510,3 +1510,29 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 
 ## Outcome
 - Result: `go test ./...` green; `golangci-lint run --new-from-rev=main` 0 issues; `helm lint` ok.
+
+# Task: Fix the 0.3.3 queue and sweep findings missed before merge (#82)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-10
+- Mode: Autonomous
+- Plan: plans/plan-review-queue.md (0.3.4 follow-up)
+
+## Acceptance Criteria
+- AC1: An older request admitted after a newer one for the same PR is dropped and does not delete the newer head's queued review. ✅
+- AC2: A newer request still supersedes an older queued one. ✅
+- AC3: One PR whose publications cannot be searched does not stop the sweep from considering the rest of its repository. ✅
+
+## Execution Checklist
+- [x] Failing tests first (confirmed failing: `err = <nil>, want … superseded`; `jobs = 0, want one review`)
+- [x] `bosun/requested-at` ordering; `SupersededError`; server and sweep stamp `ReceivedAt`
+- [x] Sweep retains the per-PR error and continues
+
+## Test Strategy
+- Unit: `TestAnOlderRequestAdmittedLastDoesNotReplaceTheNewerOne`,
+  `TestANewerRequestStillSupersedesByReceiptTime`,
+  `TestOneUnsearchablePullRequestDoesNotHideTheRest`.
+
+## Outcome
+- Result: `go test ./...` green; `golangci-lint run --new-from-rev=main` 0 issues.

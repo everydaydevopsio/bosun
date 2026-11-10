@@ -26,6 +26,7 @@ type fakeGitHub struct {
 	prs      map[string][]review.OpenPullRequest
 	reviewed map[string]bool // repo@sha
 	err      error
+	errFor   map[int]error // per pull request
 }
 
 func (f *fakeGitHub) Installations(context.Context) ([]review.Installation, error) {
@@ -48,9 +49,12 @@ func (f *fakeGitHub) OpenPullRequests(_ context.Context, _, repo string, _ time.
 	return f.prs[repo], nil
 }
 
-func (f *fakeGitHub) Reviewed(_ context.Context, _, repo string, _ int, sha string) (bool, error) {
+func (f *fakeGitHub) Reviewed(_ context.Context, _, repo string, number int, sha string) (bool, error) {
 	if f.err != nil {
 		return false, f.err
+	}
+	if err := f.errFor[number]; err != nil {
+		return false, err
 	}
 	return f.reviewed[repo+"@"+sha], nil
 }
@@ -237,5 +241,24 @@ func TestPullRequestsSharingAHeadEachGetAReview(t *testing.T) {
 	}
 	if n := jobCount(t, client); n != 2 {
 		t.Errorf("jobs = %d, want one per pull request", n)
+	}
+}
+
+// Bosun review of 8f6b75a, Medium: one pull request whose publications cannot
+// be searched to the end ended the whole repository's scan, on every pass.
+// The uncertain one is skipped; the rest are still considered.
+func TestOneUnsearchablePullRequestDoesNotHideTheRest(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	gh := &fakeGitHub{
+		prs:    map[string][]review.OpenPullRequest{"acme/ballast": {pr(1, sha1, time.Hour), pr(2, sha2, 2*time.Hour)}},
+		errFor: map[int]error{1: errors.New("could not establish whether Bosun already published")},
+	}
+	err := sweeper(client, gh, cfg()).Sweep(context.Background())
+	if err == nil {
+		t.Error("the unsearchable pull request was not reported")
+	}
+	list, _ := client.BatchV1().Jobs("bosun").List(context.Background(), metav1.ListOptions{})
+	if len(list.Items) != 1 || jobs.ReviewedSHA(&list.Items[0]) != sha2 {
+		t.Errorf("jobs = %d, want one review for the searchable pull request", len(list.Items))
 	}
 }

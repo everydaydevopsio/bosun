@@ -134,6 +134,7 @@ func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budge
 	lookback := time.Duration(s.Config.SweepLookbackSeconds) * time.Second
 	grace := time.Duration(s.Config.SweepGraceSeconds) * time.Second
 	now := s.now()
+	var failed error
 	var since time.Time
 	if lookback > 0 {
 		since = now.Add(-lookback)
@@ -176,12 +177,16 @@ func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budge
 		}
 		reviewed, err := s.GitHub.Reviewed(ctx, token, repo, pr.Number, pr.SHA)
 		if err != nil {
-			return submitted, fmt.Errorf("pull request %d: %w", pr.Number, err)
+			// Unknown is not "unreviewed": skip this one rather than risk a
+			// duplicate, but keep going. Stopping here hid every later pull
+			// request in the repository on every pass.
+			failed = keep(failed, fmt.Errorf("pull request %d: %w", pr.Number, err))
+			continue
 		}
 		if reviewed {
 			continue
 		}
-		req := review.Request{Repo: repo, Ref: pr.Ref, SHA: pr.SHA, PRNumber: pr.Number, Trigger: Trigger}
+		req := review.Request{Repo: repo, Ref: pr.Ref, SHA: pr.SHA, PRNumber: pr.Number, Trigger: Trigger, ReceivedAt: s.now()}
 		// The delivery is derived from the pull request and commit, so the
 		// Job name is too: a second pass, or a second replica, finds the Job
 		// and stops.
@@ -200,7 +205,7 @@ func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budge
 		slog.Warn("requested a review the webhook never delivered", "logger", "bosun.sweep",
 			"repo", repo, "pr", pr.Number, "sha", pr.SHA, "job", name)
 	}
-	return submitted, nil
+	return submitted, failed
 }
 
 // pending reports whether a Job already covers this head, or a Job for the pull

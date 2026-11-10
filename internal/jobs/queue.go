@@ -36,8 +36,13 @@ const (
 	// queuedAtAnnotation orders the queue. creationTimestamp has one-second
 	// resolution, which ties under a burst of deliveries.
 	queuedAtAnnotation = "bosun/queued-at"
-	repositoryJobLabel = "bosun/repository"
-	pullRequestLabel   = "bosun/pr"
+	// requestedAtAnnotation records when Bosun received the request. It, not
+	// admission order, decides which of two requests for one pull request is
+	// newer: tokens are minted before admission, so a slower mint can admit
+	// an older request after a newer one.
+	requestedAtAnnotation = "bosun/requested-at"
+	repositoryJobLabel    = "bosun/repository"
+	pullRequestLabel      = "bosun/pr"
 )
 
 // DefaultQueueInterval paces the dispatcher. A review runs for minutes, so a
@@ -96,6 +101,14 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 		return "", err
 	}
 	running, queued := tally(list.Items)
+	// A request older than one already admitted for its pull request is the
+	// stale one: admitting it would review an obsolete head, and letting it
+	// supersede would delete the current head's review.
+	if newer := newerFor(list.Items, job); newer != "" {
+		slog.Info("request superseded by a newer one already admitted", "logger", "bosun.queue",
+			"job", name, "repo", job.Annotations["bosun/repository"], "pr", job.Labels[pullRequestLabel], "newer", newer)
+		return "", SupersededError{Name: name, By: newer}
+	}
 	// A newer request for the same pull request replaces a queued one that
 	// never started, whichever branch below admits it.
 	stale := superseded(list.Items, job)
@@ -190,21 +203,73 @@ func tally(items []batchv1.Job) (running, queued int) {
 }
 
 // superseded names the queued Jobs a new submission replaces: same repository
-// and same pull request. Requests with no pull request never supersede, since
-// two branch reviews are not known to be about the same thing.
+// and pull request, received no later than it. Requests with no pull request
+// never supersede, since two branch reviews are not known to be about the same
+// thing.
 func superseded(items []batchv1.Job, next *batchv1.Job) []string {
-	pr, repo := next.Labels[pullRequestLabel], next.Labels[repositoryJobLabel]
-	if pr == "" || repo == "" {
-		return nil
-	}
 	var out []string
-	for i := range items {
-		j := &items[i]
-		if isQueued(j) && !finished(j) && j.Name != next.Name && j.Labels[pullRequestLabel] == pr && j.Labels[repositoryJobLabel] == repo {
+	for _, j := range samePullRequest(items, next) {
+		if isQueued(j) && !requestedAt(j).After(requestedAt(next)) {
 			out = append(out, j.Name)
 		}
 	}
 	return out
+}
+
+// newerFor names an unfinished Job, queued or running, for the same pull
+// request that was received after next, or "" when there is none.
+func newerFor(items []batchv1.Job, next *batchv1.Job) string {
+	for _, j := range samePullRequest(items, next) {
+		if requestedAt(j).After(requestedAt(next)) {
+			return j.Name
+		}
+	}
+	return ""
+}
+
+func samePullRequest(items []batchv1.Job, next *batchv1.Job) []*batchv1.Job {
+	pr, repo := next.Labels[pullRequestLabel], next.Labels[repositoryJobLabel]
+	if pr == "" || repo == "" {
+		return nil
+	}
+	var out []*batchv1.Job
+	for i := range items {
+		j := &items[i]
+		if !finished(j) && j.Name != next.Name && j.Labels[pullRequestLabel] == pr && j.Labels[repositoryJobLabel] == repo {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// requestedAt is when Bosun received the request behind a Job. Jobs from
+// before the annotation existed fall back to when they were queued or created.
+func requestedAt(job *batchv1.Job) time.Time {
+	if t, err := time.Parse(time.RFC3339Nano, job.Annotations[requestedAtAnnotation]); err == nil {
+		return t
+	}
+	return queuedAt(job)
+}
+
+// SupersededError means a newer request for the same pull request was already
+// admitted, so this one was dropped. It is a Duplicate: the delivery is
+// answered as handled, because the review it asked for is covered.
+type SupersededError struct{ Name, By string }
+
+func (e SupersededError) Error() string {
+	return "review request " + e.Name + " superseded by newer " + e.By
+}
+func (e SupersededError) Duplicate() {}
+
+// stampRequest records which pull request a Job reviews and when its request
+// was received.
+func stampRequest(job *batchv1.Job, req review.Request) {
+	labelPullRequest(job, req.Repo, req.PRNumber)
+	at := req.ReceivedAt
+	if at.IsZero() {
+		at = time.Now()
+	}
+	job.Annotations[requestedAtAnnotation] = at.UTC().Format(time.RFC3339Nano)
 }
 
 func labelPullRequest(job *batchv1.Job, repo string, pr int) {

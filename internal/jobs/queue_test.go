@@ -382,3 +382,55 @@ func TestAnImmediatelyStartedRequestSupersedesItsQueuedPredecessor(t *testing.T)
 		t.Error("the superseded queued review survived an immediate start")
 	}
 }
+
+// Bosun review of 8f6b75a (shipped in 0.3.3), High: tokens are minted before
+// admission, so an older request whose mint is slower can be admitted after
+// the newer one. Ordering by admission let it delete the newer head's queued
+// review and leave the obsolete one. Requests are ordered by when they were
+// received, and a request older than one already admitted for its pull
+// request is itself the stale one.
+func TestAnOlderRequestAdmittedLastDoesNotReplaceTheNewerOne(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	cfg := queueConfig()
+	t0 := time.Now()
+
+	if _, err := Submit(ctx, client, cfg, review.Request{Repo: "acme/other", Ref: "x", PRNumber: 1}, "r"); err != nil {
+		t.Fatal(err)
+	}
+	newer, err := Submit(ctx, client, cfg, review.Request{Repo: "acme/repo", Ref: "head", PRNumber: 7, SHA: "2", ReceivedAt: t0.Add(time.Second)}, "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Submit(ctx, client, cfg, review.Request{Repo: "acme/repo", Ref: "head", PRNumber: 7, SHA: "1", ReceivedAt: t0}, "o")
+	if _, ok := err.(interface{ Duplicate() }); !ok {
+		t.Fatalf("err = %v, want the stale request answered as superseded", err)
+	}
+	if j := getJob(t, client, newer); !isQueued(j) {
+		t.Error("the newer head's review must stay queued")
+	}
+	if _, err := client.BatchV1().Jobs("bosun").Get(ctx, Name("acme/repo", "head", "o"), metav1.GetOptions{}); err == nil {
+		t.Error("the stale request was admitted")
+	}
+}
+
+// A newer request still replaces an older queued one, now by receipt time.
+func TestANewerRequestStillSupersedesByReceiptTime(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	cfg := queueConfig()
+	t0 := time.Now()
+
+	if _, err := Submit(ctx, client, cfg, review.Request{Repo: "acme/other", Ref: "x", PRNumber: 1}, "r"); err != nil {
+		t.Fatal(err)
+	}
+	older, _ := Submit(ctx, client, cfg, review.Request{Repo: "acme/repo", Ref: "head", PRNumber: 7, SHA: "1", ReceivedAt: t0}, "o")
+	newer, err := Submit(ctx, client, cfg, review.Request{Repo: "acme/repo", Ref: "head", PRNumber: 7, SHA: "2", ReceivedAt: t0.Add(time.Second)}, "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.BatchV1().Jobs("bosun").Get(ctx, older, metav1.GetOptions{}); err == nil {
+		t.Error("the older queued review was not superseded")
+	}
+	getJob(t, client, newer)
+}
