@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.3.3] - 2026-11-10
+
+### Highlights
+- Review requests now wait in a queue when capacity is reached, allowing them to be processed as capacity becomes available.
+
+### Fixes
+- Added a sweep to catch missed review deliveries.
+
+### Changes
+- Improved review scheduling and delivery reliability. (#82, #88)
+
 ## [0.3.2] - 2026-11-08
 
 ### Highlights
