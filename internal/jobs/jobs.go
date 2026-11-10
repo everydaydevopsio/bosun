@@ -79,7 +79,7 @@ func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.C
 	if err != nil {
 		return "", err
 	}
-	labelPullRequest(job, req.Repo, req.PRNumber)
+	stampRequest(job, req)
 	return admit(ctx, client, cfg, job, nil)
 }
 func ptr[T any](v T) *T { return &v }

@@ -50,7 +50,7 @@ func SubmitAuthenticated(ctx context.Context, client kubernetes.Interface, cfg c
 			return "", err
 		}
 		useJobToken(job, name+"-github")
-		labelPullRequest(job, req.Repo, req.PRNumber)
+		stampRequest(job, req)
 		return admit(ctx, client, cfg, job, startWithToken(client, cfg.Namespace, token))
 	})
 }

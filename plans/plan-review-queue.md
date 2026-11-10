@@ -44,6 +44,20 @@ controller restarts and shared by replicas with no new store.
   the Job name dedupes across passes and replicas. At most 10 per pass; each
   commit at most once per controller process.
 
+### 0.3.4 follow-up (added 2026-11-10)
+
+The Bosun review of `8f6b75a` landed before #88 merged and was missed; its two
+findings shipped in 0.3.3:
+
+- **Supersede by receipt time, not admission order.** Tokens are minted before
+  admission, so a slower mint could admit an older request after a newer one
+  and delete the newer head's queued review. Each Job now carries
+  `bosun/requested-at` (stamped when the webhook arrived, or the sweep pass
+  time), and a request older than an unfinished Job for its PR is dropped as
+  superseded (answered 200, duplicate). Clock skew between replicas can only
+  misorder requests received within that skew of each other.
+- **Sweep skips an unsearchable PR instead of ending the repository scan.**
+
 ## Files Affected
 
 - `internal/jobs/queue.go` — admission transaction, starters, Dispatcher
@@ -92,3 +106,4 @@ controller restarts and shared by replicas with no new store.
 | --- | --- |
 | 2026-11-10 | Plan created and implemented |
 | 2026-11-10 | Added replicas/preStop and the missed-review sweep (#82 option 3) to this PR |
+| 2026-11-10 | 0.3.4: supersede by receipt time; sweep continues past an unsearchable PR |

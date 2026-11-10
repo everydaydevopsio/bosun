@@ -3,6 +3,7 @@ package review
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 type Request struct {
@@ -15,6 +16,11 @@ type Request struct {
 	// delivery into two Jobs, two reviews, and two publications. Empty when
 	// nothing was resolved.
 	TriggerRef string
+	// ReceivedAt is when Bosun received the request, stamped before any
+	// GitHub work. It orders requests for the same pull request: admission
+	// order does not, because a slower token mint can admit an older request
+	// after a newer one. Zero means "now" at admission.
+	ReceivedAt time.Time
 }
 
 // NameRef is the ref a Job is named after: stable across resolution, so one

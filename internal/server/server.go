@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
 	"github.com/everydaydevopsio/bosun/internal/review"
@@ -23,6 +24,7 @@ type Handler struct {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	received := time.Now()
 	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 		jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
 		return
@@ -50,6 +52,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusOK, map[string]any{"accepted": false, "reason": "event does not request a review"})
 		return
 	}
+	req.ReceivedAt = received
 	job, err := h.Submitter.Submit(r.Context(), req, header(r, "X-GitHub-Delivery", "manual"))
 	if err != nil {
 		switch err.(type) {
