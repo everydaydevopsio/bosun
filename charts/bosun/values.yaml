@@ -6,7 +6,18 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
-replicaCount: 1
+# Two controllers so a rollout or a lost node never leaves the webhook with no
+# ready endpoint: GitHub does not redeliver a delivery that found nothing
+# listening. Admission, the queue dispatcher, the sentinel and the sweep all
+# coordinate through namespace Leases, so replicas are safe to add.
+replicaCount: 2
+
+# Seconds a terminating controller keeps serving before it begins draining.
+# The ingress keeps routing to a pod for a moment after it starts terminating;
+# without this pause those deliveries hit a closed listener and are lost.
+preStopSleepSeconds: 10
+# Must cover preStopSleepSeconds plus the controller's 25s drain.
+terminationGracePeriodSeconds: 45
 review:
   provider: codex-bosun
   # Empty means image.repository at the chart appVersion.
@@ -25,18 +36,50 @@ review:
     # Off by default. A branch push and the pull request opened from it review
     # the same commit, so `git push -u` followed by `gh pr create` pays for two
     # identical reviews. maxConcurrent below is counted across the namespace,
-    # not per repository, so the duplicate can take the last slot and leave the
-    # pull request opened moments later rejected with 503 -- which GitHub does
-    # not redeliver, losing the review that was actually wanted.
+    # not per repository, so the duplicate takes a slot and delays the review
+    # of the pull request opened moments later, or, with the queue disabled,
+    # leaves it rejected with 503 -- which GitHub does not redeliver.
     #
     # Turn this on when branches are pushed that will not become pull requests
     # soon. Those reviews have no pull request to post to, so they publish as a
     # check run on the commit, which needs the App's optional Checks
     # permission. Without it they are reported at WARN and nothing is posted.
     branchCreated: false
-  # Reviews allowed to run at once. Further requests are rejected with 503
-  # rather than queued, so a busy org cannot exhaust the cluster.
+  # Reviews allowed to run at once, counted across the namespace. This is what
+  # bounds load on the cluster: further requests wait in the queue below
+  # rather than starting a pod.
   maxConcurrent: 3
+  # Reviews that arrive while maxConcurrent are running wait here instead of
+  # being refused. A queued review is a suspended Job with no pod, so it costs
+  # an API object, not node capacity. The controller starts the oldest queued
+  # review as soon as a slot frees, and a newer request for the same pull
+  # request replaces its queued predecessor.
+  queue:
+    # Reviews allowed to wait. When the queue is full a request is refused
+    # with 503, which GitHub does not redeliver. 0 disables queueing and
+    # refuses every request that arrives at capacity.
+    maxQueued: 50
+    # How often the controller looks for a free slot.
+    intervalSeconds: 10
+    # A queued review that has waited this long is dropped and logged at
+    # ERROR. 0 keeps it until a slot frees.
+    timeoutSeconds: 7200
+  # Finds open pull requests whose head commit Bosun never reviewed -- a
+  # webhook lost before it was stored, during a rollout or an outage -- and
+  # requests the review through the normal path. Reads GitHub with a read-only
+  # installation token; needs a GitHub App. Matches Bosun's own publications
+  # (reviews and failure comments) by head commit, so a reviewed commit is
+  # never reviewed twice.
+  sweep:
+    # 0 disables the sweep.
+    intervalSeconds: 300
+    # Only pull requests updated this recently, so turning the sweep on does
+    # not review a backlog.
+    lookbackSeconds: 86400
+    # Pull requests updated more recently than this are left to their webhook.
+    graceSeconds: 300
+    # Most reviews one pass may request; the rest wait for the next pass.
+    maxPerPass: 10
   # How long one review may run. The Job deadline is derived from this.
   timeoutSeconds: 1800
   # A reviewer killed for exceeding resources.limits.memory dies on SIGKILL and

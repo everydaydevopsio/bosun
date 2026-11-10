@@ -37,7 +37,7 @@ flowchart TD
 
 Bosun reviews a pull request when it is opened, on every push to it afterwards, and on `@bosun-review review` comments. A human, CI automation, or another AI agent can request a review without receiving the model credential.
 
-Branch creation is also a trigger, off by default (`review.triggers.branchCreated`). A branch push and the pull request opened from it review the same commit, so enabling it makes the ordinary `git push -u` then `gh pr create` flow pay for two identical reviews — and because `review.maxConcurrent` is counted across the namespace rather than per repository, the duplicate can take the last slot and leave the pull request rejected with 503, which GitHub does not redeliver. Turn it on when branches are pushed that will not become pull requests soon.
+Branch creation is also a trigger, off by default (`review.triggers.branchCreated`). A branch push and the pull request opened from it review the same commit, so enabling it makes the ordinary `git push -u` then `gh pr create` flow pay for two identical reviews — and because `review.maxConcurrent` is counted across the namespace rather than per repository, the duplicate takes a slot and pushes the pull request's own review into the queue behind it. Turn it on when branches are pushed that will not become pull requests soon.
 
 Draft pull requests do not trigger automatic reviews; marking one ready for review does. An explicit `@bosun-review review` comment still works on a draft.
 
@@ -226,7 +226,10 @@ See [docs/setup.md](docs/setup.md) for exact commands, permissions, Helm values,
 
 ## Operations
 
-- `review.maxConcurrent` (default 3) caps simultaneous reviewer Jobs; a namespace-scoped Kubernetes Lease serializes admission across replicas, and further deliveries get a 503 when capacity is full.
+- `review.maxConcurrent` (default 3) caps simultaneous reviewer Jobs; a namespace-scoped Kubernetes Lease serializes admission across replicas.
+- `review.queue.maxQueued` (default 50) lets deliveries that arrive at capacity wait instead of being refused. A queued review is a suspended Job with no pod; the controller starts the oldest one every `review.queue.intervalSeconds` (default 10) when a slot is free, and a newer request for the same pull request replaces its queued predecessor. A review waiting longer than `review.queue.timeoutSeconds` (default 7200) is dropped and logged at ERROR. Only a full queue answers 503, which GitHub does not redeliver, and that refusal is logged at WARN. Set `maxQueued: 0` to restore refusal at capacity.
+- `review.sweep.intervalSeconds` (default 300) runs a pass that lists the open pull requests on every repository the GitHub App is installed on and requests a review for any non-draft head commit Bosun has not published a review or failure for — the safety net for a webhook lost before it was stored. It reads GitHub with a read-only installation token, considers only pull requests updated within `review.sweep.lookbackSeconds` (default 86400) and not within `review.sweep.graceSeconds` (default 300, left to the webhook), requests at most `review.sweep.maxPerPass` (default 10) reviews per pass, and logs each one at WARN. Set `intervalSeconds: 0` to turn it off; it is off automatically without a GitHub App.
+- `replicaCount` (default 2), `preStopSleepSeconds` (default 10) and `terminationGracePeriodSeconds` (default 45) keep a ready controller behind the webhook during rollouts: the terminating pod keeps serving while the ingress stops routing to it, then drains.
 - `review.timeoutSeconds` (default 1800) is the single timeout for a review; the Job deadline is derived from it.
 - `logging.format` (`text` or `json`) and `logging.level` mirror bridgectl's slog setup.
 - Production installs should use a GitHub App rather than a PAT — see [docs/github-app.md](docs/github-app.md).

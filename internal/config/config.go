@@ -34,6 +34,29 @@ type Config struct {
 	// terminations the reviewer could not report itself. Zero disables it,
 	// which returns an OOM-killed review to publishing nothing at all.
 	SentinelIntervalSeconds int
+	// MaxQueuedReviews bounds how many reviews may wait for a slot when
+	// MaxConcurrentReviews are already running. A waiting review is a
+	// suspended Job with no pod, so the bound protects the API server rather
+	// than the nodes. Zero disables the queue: a delivery at capacity is
+	// refused with 503 again, which GitHub does not redeliver.
+	MaxQueuedReviews int
+	// QueueIntervalSeconds paces the dispatcher that starts queued reviews.
+	QueueIntervalSeconds int
+	// QueueTimeoutSeconds drops a queued review that has waited this long.
+	// Zero keeps it until a slot frees.
+	QueueTimeoutSeconds int
+	// SweepIntervalSeconds paces the pass that finds open pull requests whose
+	// head commit Bosun never reviewed -- a webhook lost before it was stored --
+	// and requests the review. Zero disables it. Needs a GitHub App.
+	SweepIntervalSeconds int
+	// SweepLookbackSeconds limits the sweep to pull requests updated this
+	// recently, so enabling it does not review a backlog of old ones.
+	SweepLookbackSeconds int
+	// SweepGraceSeconds leaves a pull request updated this recently to its
+	// webhook, which may still be in flight.
+	SweepGraceSeconds int
+	// SweepMaxPerPass bounds how many reviews one pass may request.
+	SweepMaxPerPass int
 }
 
 // ReviewResources carries the reviewer Job's requests and limits as the
@@ -59,6 +82,13 @@ func Load() Config {
 			MemoryLimit:   os.Getenv("BOSUN_REVIEW_MEMORY_LIMIT"),
 		},
 		SentinelIntervalSeconds: envInt("BOSUN_SENTINEL_INTERVAL_SECONDS", 30),
+		MaxQueuedReviews:        envInt("BOSUN_MAX_QUEUED_REVIEWS", 50),
+		QueueIntervalSeconds:    envInt("BOSUN_QUEUE_INTERVAL_SECONDS", 10),
+		QueueTimeoutSeconds:     envInt("BOSUN_QUEUE_TIMEOUT_SECONDS", 7200),
+		SweepIntervalSeconds:    envInt("BOSUN_SWEEP_INTERVAL_SECONDS", 300),
+		SweepLookbackSeconds:    envInt("BOSUN_SWEEP_LOOKBACK_SECONDS", 86400),
+		SweepGraceSeconds:       envInt("BOSUN_SWEEP_GRACE_SECONDS", 300),
+		SweepMaxPerPass:         envInt("BOSUN_SWEEP_MAX_PER_PASS", 10),
 	}
 }
 

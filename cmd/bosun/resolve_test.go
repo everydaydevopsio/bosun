@@ -150,8 +150,8 @@ func TestResolutionIsBoundedSoTheDeliveryStillGetsAnAnswer(t *testing.T) {
 // writing the reply.
 func TestTheResponseBudgetCoversResolutionAndAdmission(t *testing.T) {
 	srv := newWebhookServer(nil)
-	needed := identityResolveBudget + jobs.AdmissionBudget
+	needed := identityResolveBudget + jobs.MintBudget + jobs.AdmissionBudget
 	if srv.WriteTimeout <= needed {
-		t.Errorf("WriteTimeout %v must exceed resolution plus admission (%v)", srv.WriteTimeout, needed)
+		t.Errorf("WriteTimeout %v must exceed resolution, token minting, and admission (%v)", srv.WriteTimeout, needed)
 	}
 }
