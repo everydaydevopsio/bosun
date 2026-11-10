@@ -1496,7 +1496,7 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 - [x] `internal/jobs/queue.go` with admit + Dispatcher
 - [x] Config, controller wiring, server log
 - [x] Chart values, README, docs
-- [ ] Live verification after release (see plan)
+- [x] Live verification after release: sweep recovered ballast#422; ballast#421 queued 44s then started (2026-11-10, 0.3.3/0.3.4 on mca-cluster). Graduated to ADR-002.
 
 ## Test Strategy
 - Unit: `internal/jobs/queue_test.go` (8 tests covering AC1–AC4, supersede,
