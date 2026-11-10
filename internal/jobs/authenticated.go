@@ -7,6 +7,7 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/review"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -31,15 +32,26 @@ type TokenIssuer func(ctx context.Context, repo string) (review.RepositoryToken,
 // suspended in the queue, and the token is minted when the Dispatcher starts
 // it, not here.
 func SubmitAuthenticated(ctx context.Context, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string, issue TokenIssuer) (string, error) {
+	name := Name(req.Repo, req.NameRef(), delivery)
+	// A redelivery of a Job that exists needs no token; answer it without
+	// paying for a mint.
+	if _, err := client.BatchV1().Jobs(cfg.Namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
+		return "", ExistsError{name}
+	}
+	// Minted before admission, never inside it: see mint. At capacity the
+	// token goes unused and the dispatcher mints a fresh one at start.
+	token, err := mint(ctx, cfg, issue, req.Repo)
+	if err != nil {
+		return "", err
+	}
 	return withAdmission(ctx, client, cfg.Namespace, func(ctx context.Context) (string, error) {
-		name := Name(req.Repo, req.NameRef(), delivery)
 		job, err := build(cfg, req, name)
 		if err != nil {
 			return "", err
 		}
 		useJobToken(job, name+"-github")
 		labelPullRequest(job, req.Repo, req.PRNumber)
-		return admit(ctx, client, cfg, job, startAuthenticated(client, cfg, issue))
+		return admit(ctx, client, cfg, job, startWithToken(client, cfg.Namespace, token))
 	})
 }
 

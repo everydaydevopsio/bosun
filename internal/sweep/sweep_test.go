@@ -226,3 +226,16 @@ func TestAnUnknownPublicationStateRequestsNothing(t *testing.T) {
 		t.Errorf("jobs = %d, want 0", n)
 	}
 }
+
+// Bosun review of #88, finding 3: two pull requests can share a head commit
+// (the same branch proposed against two bases). Each is owed its own review.
+func TestPullRequestsSharingAHeadEachGetAReview(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	gh := &fakeGitHub{prs: map[string][]review.OpenPullRequest{"acme/ballast": {pr(10, sha1, time.Hour), pr(11, sha1, time.Hour)}}}
+	if err := sweeper(client, gh, cfg()).Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := jobCount(t, client); n != 2 {
+		t.Errorf("jobs = %d, want one per pull request", n)
+	}
+}

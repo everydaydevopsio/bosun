@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/everydaydevopsio/bosun/internal/config"
+	"github.com/everydaydevopsio/bosun/internal/review"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -110,7 +111,11 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 			}
 			return name, nil
 		}
-		job.Spec.Suspend = ptr(true)
+		// Created as a queue entry and released below. If the release fails
+		// and the cleanup fails too, what is left is an ordinary queued
+		// review the dispatcher retries or expires -- never a suspended Job
+		// counted as running that nothing will ever start or remove.
+		markQueued(job, time.Now())
 		created, err := client.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
 			return "", ExistsError{name}
@@ -119,7 +124,13 @@ func admit(ctx context.Context, client kubernetes.Interface, cfg config.Config, 
 			return "", err
 		}
 		if err := start(ctx, created); err != nil {
-			_ = client.BatchV1().Jobs(cfg.Namespace).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: ptr(metav1.DeletePropagationBackground)})
+			// The transaction's context may be what failed; clean up on one
+			// of its own.
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), admissionOperationTimeout)
+			defer cancel()
+			if derr := client.BatchV1().Jobs(cfg.Namespace).Delete(cleanup, name, metav1.DeleteOptions{PropagationPolicy: ptr(metav1.DeletePropagationBackground)}); derr != nil && !apierrors.IsNotFound(derr) {
+				slog.Warn("could not remove a review that failed to start; it stays queued for the dispatcher", "logger", "bosun.queue", "job", name, "error", derr)
+			}
 			return "", err
 		}
 		return name, nil
@@ -205,30 +216,37 @@ func startShared(client kubernetes.Interface, namespace string) starter {
 	}
 }
 
-// startAuthenticated mints the Job's repository token, stores it in a Secret
-// the Job owns, and only then releases the Job. Minting at start rather than
-// at submission means a review that waited in the queue still gets a token
-// with its full lifetime ahead of it.
-func startAuthenticated(client kubernetes.Interface, cfg config.Config, issue TokenIssuer) starter {
+// mint issues the repository token a review will run with. It talks to
+// GitHub, so it runs outside the admission lease and on a budget of its own:
+// inside the lease it would spend the transaction's few seconds, and a slow
+// mint would leave that transaction -- and its cleanup -- with nothing.
+func mint(ctx context.Context, cfg config.Config, issue TokenIssuer, repo string) (review.RepositoryToken, error) {
+	ctx, cancel := context.WithTimeout(ctx, mintBudget)
+	defer cancel()
+	token, err := issue(ctx, repo)
+	if err != nil {
+		return review.RepositoryToken{}, fmt.Errorf("issue repository token: %w", err)
+	}
+	if token.Value == "" {
+		return review.RepositoryToken{}, fmt.Errorf("issue repository token: GitHub returned an empty token")
+	}
+	// A token that dies before the review does means paying for the whole
+	// review and then failing to publish it. Refuse now, where it costs
+	// nothing, rather than at the end.
+	deadline := time.Duration(cfg.ReviewTimeoutSeconds+startupAllowanceSeconds) * time.Second
+	if !token.ExpiresAt.IsZero() && time.Until(token.ExpiresAt) < deadline {
+		return review.RepositoryToken{}, fmt.Errorf("the repository token expires in %s but this review may run for %s; lower review.timeoutSeconds", time.Until(token.ExpiresAt).Round(time.Minute), deadline)
+	}
+	return token, nil
+}
+
+// startWithToken stores an already-minted token in a Secret the Job owns, and
+// only then releases the Job. Both are local API calls, safe under the lease.
+func startWithToken(client kubernetes.Interface, namespace string, token review.RepositoryToken) starter {
 	return func(ctx context.Context, job *batchv1.Job) error {
-		repo := job.Annotations["bosun/repository"]
-		token, err := issue(ctx, repo)
-		if err != nil {
-			return fmt.Errorf("issue repository token: %w", err)
-		}
-		if token.Value == "" {
-			return fmt.Errorf("issue repository token: GitHub returned an empty token")
-		}
-		// A token that dies before the review does means paying for the whole
-		// review and then failing to publish it. Refuse now, where it costs
-		// nothing, rather than at the end.
-		deadline := time.Duration(cfg.ReviewTimeoutSeconds+startupAllowanceSeconds) * time.Second
-		if !token.ExpiresAt.IsZero() && time.Until(token.ExpiresAt) < deadline {
-			return fmt.Errorf("the repository token expires in %s but this review may run for %s; lower review.timeoutSeconds", time.Until(token.ExpiresAt).Round(time.Minute), deadline)
-		}
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: job.Name + "-github", Namespace: cfg.Namespace,
+				Name: job.Name + "-github", Namespace: namespace,
 				Labels: map[string]string{"app.kubernetes.io/managed-by": "bosun"},
 				OwnerReferences: []metav1.OwnerReference{{
 					APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID,
@@ -238,20 +256,19 @@ func startAuthenticated(client kubernetes.Interface, cfg config.Config, issue To
 			Type: corev1.SecretTypeOpaque,
 			Data: map[string][]byte{"token": []byte(token.Value)},
 		}
-		// A retry after a failed patch finds its own Secret already there.
-		// The token in it is the earlier one; replace it so the review gets
-		// the full lifetime.
-		if _, err := client.CoreV1().Secrets(cfg.Namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
-			if err := client.CoreV1().Secrets(cfg.Namespace).Delete(ctx, secret.Name, metav1.DeleteOptions{}); err != nil {
+		// A retry after a failed release finds its own Secret already there,
+		// holding the earlier token. Replace it so the review gets this one.
+		if _, err := client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
+			if err := client.CoreV1().Secrets(namespace).Delete(ctx, secret.Name, metav1.DeleteOptions{}); err != nil {
 				return fmt.Errorf("store repository token: %w", err)
 			}
-			if _, err := client.CoreV1().Secrets(cfg.Namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+			if _, err := client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
 				return fmt.Errorf("store repository token: %w", err)
 			}
 		} else if err != nil {
 			return fmt.Errorf("store repository token: %w", err)
 		}
-		if _, err := client.BatchV1().Jobs(cfg.Namespace).Patch(ctx, job.Name, types.StrategicMergePatchType, unqueue, metav1.PatchOptions{}); err != nil {
+		if _, err := client.BatchV1().Jobs(namespace).Patch(ctx, job.Name, types.StrategicMergePatchType, unqueue, metav1.PatchOptions{}); err != nil {
 			return fmt.Errorf("start review: %w", err)
 		}
 		return nil
@@ -292,20 +309,13 @@ func (d Dispatcher) Run(ctx context.Context) {
 	}
 }
 
-// Dispatch makes one pass: expire entries that waited too long, then start the
-// oldest queued Jobs while slots remain.
+// Dispatch makes one pass in two halves. Outside the lease it picks the
+// oldest queued reviews that look like they fit and mints each one's token on
+// a budget of its own, so a repository whose mint is slow costs one budget
+// and the next entry is tried with a fresh one. Under the lease it expires
+// entries that waited too long and starts the prepared ones that still fit,
+// using only local API calls.
 func (d Dispatcher) Dispatch(ctx context.Context) error {
-	_, err := withAdmission(ctx, d.Client, d.Config.Namespace, func(ctx context.Context) (string, error) {
-		return "", d.dispatchLocked(ctx)
-	})
-	return err
-}
-
-func (d Dispatcher) dispatchLocked(ctx context.Context) error {
-	now := time.Now
-	if d.Now != nil {
-		now = d.Now
-	}
 	ns := d.Config.Namespace
 	list, err := d.Client.BatchV1().Jobs(ns).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=bosun," + QueuedLabel + "=true"})
 	if err != nil {
@@ -318,49 +328,109 @@ func (d Dispatcher) dispatchLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	queue := list.Items
-	sort.SliceStable(queue, func(i, j int) bool {
-		a, b := queuedAt(&queue[i]), queuedAt(&queue[j])
+	queue := oldestFirst(list.Items)
+	var ready []prepared
+	for i := range queue {
+		job := &queue[i]
+		if running+len(ready) >= d.Config.MaxConcurrentReviews {
+			break
+		}
+		if finished(job) || d.expired(job) {
+			continue
+		}
+		start := startShared(d.Client, ns)
+		if d.Issue != nil {
+			token, err := mint(ctx, d.Config, d.Issue, job.Annotations["bosun/repository"])
+			if err != nil {
+				// Leave it queued and try the next: one repository must not
+				// hold up every other review. The queue timeout bounds how
+				// long a persistent failure retries.
+				slog.Error("could not prepare a queued review; will retry", "logger", "bosun.queue",
+					"job", job.Name, "repo", job.Annotations["bosun/repository"], "error", err)
+				continue
+			}
+			start = startWithToken(d.Client, ns, token)
+		}
+		ready = append(ready, prepared{name: job.Name, start: start})
+	}
+	_, err = withAdmission(ctx, d.Client, ns, func(ctx context.Context) (string, error) {
+		return "", d.startLocked(ctx, ready)
+	})
+	return err
+}
+
+type prepared struct {
+	name  string
+	start starter
+}
+
+func oldestFirst(items []batchv1.Job) []batchv1.Job {
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := queuedAt(&items[i]), queuedAt(&items[j])
 		if a.Equal(b) {
-			return queue[i].Name < queue[j].Name
+			return items[i].Name < items[j].Name
 		}
 		return a.Before(b)
 	})
-	start := startShared(d.Client, ns)
-	if d.Issue != nil {
-		start = startAuthenticated(d.Client, d.Config, d.Issue)
+	return items
+}
+
+func (d Dispatcher) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
 	}
+	return time.Now()
+}
+
+func (d Dispatcher) expired(job *batchv1.Job) bool {
 	timeout := time.Duration(d.Config.QueueTimeoutSeconds) * time.Second
-	for i := range queue {
-		job := &queue[i]
-		if finished(job) {
+	return timeout > 0 && d.now().Sub(queuedAt(job)) > timeout
+}
+
+func (d Dispatcher) startLocked(ctx context.Context, ready []prepared) error {
+	ns := d.Config.Namespace
+	list, err := d.Client.BatchV1().Jobs(ns).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=bosun"})
+	if err != nil {
+		return fmt.Errorf("list reviews: %w", err)
+	}
+	queued := map[string]*batchv1.Job{}
+	for i := range list.Items {
+		job := &list.Items[i]
+		if !isQueued(job) || finished(job) {
 			continue
 		}
-		waited := now().Sub(queuedAt(job))
-		if timeout > 0 && waited > timeout {
+		if d.expired(job) {
 			if err := d.Client.BatchV1().Jobs(ns).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: ptr(metav1.DeletePropagationBackground)}); err != nil && !apierrors.IsNotFound(err) {
 				slog.Warn("could not remove an expired queued review", "logger", "bosun.queue", "job", job.Name, "error", err)
 				continue
 			}
 			slog.Error("queued review expired before a slot freed; it will not run", "logger", "bosun.queue",
 				"job", job.Name, "repo", job.Annotations["bosun/repository"], "pr", job.Labels[pullRequestLabel],
-				"waited", waited.Round(time.Second).String(), "queue_timeout_seconds", d.Config.QueueTimeoutSeconds)
+				"waited", d.now().Sub(queuedAt(job)).Round(time.Second).String(), "queue_timeout_seconds", d.Config.QueueTimeoutSeconds)
 			continue
 		}
+		queued[job.Name] = job
+	}
+	running, _ := tally(list.Items)
+	for _, p := range ready {
 		if running >= d.Config.MaxConcurrentReviews {
+			break
+		}
+		// Re-read under the lease: another replica may have started or
+		// superseded it since it was prepared.
+		job, ok := queued[p.name]
+		if !ok {
 			continue
 		}
-		if err := start(ctx, job); err != nil {
-			// Leave it queued and try the next: a failure minting one
-			// repository's token must not hold up every other review. The
-			// queue timeout bounds how long a persistent failure retries.
+		if err := p.start(ctx, job); err != nil {
 			slog.Error("could not start a queued review; will retry", "logger", "bosun.queue",
 				"job", job.Name, "repo", job.Annotations["bosun/repository"], "error", err)
 			continue
 		}
 		running++
 		slog.Info("queued review started", "logger", "bosun.queue", "job", job.Name,
-			"repo", job.Annotations["bosun/repository"], "pr", job.Labels[pullRequestLabel], "waited", waited.Round(time.Second).String())
+			"repo", job.Annotations["bosun/repository"], "pr", job.Labels[pullRequestLabel],
+			"waited", d.now().Sub(queuedAt(job)).Round(time.Second).String())
 	}
 	return nil
 }
@@ -385,3 +455,10 @@ func ReviewedSHA(job *batchv1.Job) string {
 	}
 	return ""
 }
+
+// MintBudget bounds one repository-token mint. Minting talks to GitHub, so it
+// runs outside the admission lease with a budget of its own.
+const MintBudget = 10 * time.Second
+
+// mintBudget is MintBudget, variable so tests can shorten it.
+var mintBudget = MintBudget

@@ -171,9 +171,9 @@ func TestAQueuedAuthenticatedReviewGetsItsTokenWhenItStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if minted != 1 {
-		t.Errorf("minted %d tokens at submission, want 1: a queued review must not hold a token", minted)
-	}
+	// Submission mints before admission and discards the token when the
+	// review is queued; what matters is that nothing durable holds it.
+	minted = 0
 	if _, err := client.CoreV1().Secrets("bosun").Get(ctx, queued+"-github", metav1.GetOptions{}); err == nil {
 		t.Error("a queued review already has a credential Secret")
 	}
@@ -192,6 +192,9 @@ func TestAQueuedAuthenticatedReviewGetsItsTokenWhenItStarts(t *testing.T) {
 	if suspended(getJob(t, client, queued)) {
 		t.Error("the queued review was not released")
 	}
+	if minted != 1 {
+		t.Errorf("minted %d tokens at start, want a fresh one", minted)
+	}
 }
 
 // One repository whose token cannot be minted must not block the queue.
@@ -206,9 +209,9 @@ func TestAStartFailureLeavesTheReviewQueuedAndTriesTheNext(t *testing.T) {
 		return review.RepositoryToken{Value: "ghs", ExpiresAt: time.Now().Add(time.Hour)}, nil
 	}
 	running, _ := SubmitAuthenticated(ctx, client, cfg, review.Request{Repo: "acme/a", Ref: "x"}, "1", issue)
-	broken, _ := SubmitAuthenticated(ctx, client, cfg, review.Request{Repo: "acme/broken", Ref: "y"}, "2", issue)
-	time.Sleep(2 * time.Millisecond)
-	healthy, _ := SubmitAuthenticated(ctx, client, cfg, review.Request{Repo: "acme/c", Ref: "z"}, "3", issue)
+	// Queued while its installation was healthy, broken by the time it starts.
+	broken := queueDirectly(t, client, cfg, review.Request{Repo: "acme/broken", Ref: "y"}, "2", time.Now().Add(-time.Minute))
+	healthy := queueDirectly(t, client, cfg, review.Request{Repo: "acme/c", Ref: "z"}, "3", time.Now())
 
 	complete(t, client, running)
 	if err := (Dispatcher{Client: client, Config: cfg, Issue: issue}).Dispatch(ctx); err != nil {
@@ -256,4 +259,103 @@ func TestAZeroQueueRefusesAtCapacity(t *testing.T) {
 	if _, ok := err.(CapacityError); !ok {
 		t.Fatalf("err = %v, want CapacityError", err)
 	}
+}
+
+// Bosun review of #88, finding 1: the token used to be minted inside the
+// admission transaction's five-second budget. A slow mint expired that budget,
+// the cleanup Delete ran on the same dead context, and an unlabelled suspended
+// Job was left holding a slot forever. Minting now happens before the Job
+// exists, so a slow or failing issuer leaves nothing behind.
+func TestASlowTokenMintLeavesNoJobBehind(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	cfg := queueConfig()
+	slow := func(ctx context.Context, _ string) (review.RepositoryToken, error) {
+		<-ctx.Done()
+		return review.RepositoryToken{}, ctx.Err()
+	}
+	withMintBudget(t, 50*time.Millisecond)
+
+	started := time.Now()
+	if _, err := SubmitAuthenticated(ctx, client, cfg, review.Request{Repo: "acme/a", Ref: "x", PRNumber: 1}, "1", slow); err == nil {
+		t.Fatal("a mint that never returned was reported as success")
+	}
+	// Bounded by the mint budget, not the admission transaction's: a mint
+	// that eats the transaction's budget is what left Jobs behind. (The fake
+	// client ignores contexts, so the leftover itself cannot be reproduced
+	// here; the budget it came from can.)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Errorf("a slow mint held the submission for %v; it must give up within its own budget", elapsed)
+	}
+	list, _ := client.BatchV1().Jobs("bosun").List(ctx, metav1.ListOptions{})
+	if len(list.Items) != 0 {
+		t.Fatalf("jobs = %d: a failed mint must not leave a Job holding a slot", len(list.Items))
+	}
+	if n, _ := Active(ctx, client, "bosun"); n != 0 {
+		t.Errorf("active = %d", n)
+	}
+}
+
+// Finding 2: one dispatch pass shared one five-second budget, so a slow oldest
+// entry starved every healthy entry behind it. Each mint now has its own
+// budget, outside the lease.
+func TestASlowOldestEntryDoesNotStarveTheQueue(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	cfg := queueConfig()
+	cfg.MaxConcurrentReviews = 2
+	withMintBudget(t, 50*time.Millisecond)
+	issue := func(ctx context.Context, repo string) (review.RepositoryToken, error) {
+		if repo == "acme/slow" {
+			<-ctx.Done()
+			return review.RepositoryToken{}, ctx.Err()
+		}
+		// A real HTTP call fails on a context the slow entry already spent.
+		if err := ctx.Err(); err != nil {
+			return review.RepositoryToken{}, err
+		}
+		return review.RepositoryToken{Value: "ghs", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}
+	a, _ := SubmitAuthenticated(ctx, client, cfg, review.Request{Repo: "acme/a", Ref: "x"}, "1", issue)
+	b, _ := SubmitAuthenticated(ctx, client, cfg, review.Request{Repo: "acme/b", Ref: "x"}, "2", issue)
+	// Queue the slow entry first, then a healthy one behind it.
+	slow := queueDirectly(t, client, cfg, review.Request{Repo: "acme/slow", Ref: "y"}, "3", time.Now().Add(-time.Minute))
+	healthy := queueDirectly(t, client, cfg, review.Request{Repo: "acme/c", Ref: "z"}, "4", time.Now())
+	complete(t, client, a)
+	complete(t, client, b)
+
+	if err := (Dispatcher{Client: client, Config: cfg, Issue: issue}).Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s := getJob(t, client, slow); !isQueued(s) {
+		t.Error("the slow entry should stay queued for a retry")
+	}
+	if h := getJob(t, client, healthy); isQueued(h) || suspended(h) {
+		t.Error("a healthy entry behind a slow one did not start")
+	}
+}
+
+func withMintBudget(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := mintBudget
+	mintBudget = d
+	t.Cleanup(func() { mintBudget = old })
+}
+
+// queueDirectly places an authenticated review in the queue as admission would
+// at capacity, with a chosen queue time.
+func queueDirectly(t *testing.T, client kubernetes.Interface, cfg config.Config, req review.Request, delivery string, at time.Time) string {
+	t.Helper()
+	name := Name(req.Repo, req.NameRef(), delivery)
+	job, err := build(cfg, req, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useJobToken(job, name+"-github")
+	labelPullRequest(job, req.Repo, req.PRNumber)
+	markQueued(job, at)
+	if _, err := client.BatchV1().Jobs(cfg.Namespace).Create(context.Background(), job, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	return name
 }

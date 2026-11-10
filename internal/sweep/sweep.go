@@ -157,7 +157,9 @@ func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budge
 		if now.Sub(pr.UpdatedAt) < grace {
 			continue
 		}
-		key := repo + "@" + pr.SHA
+		// Per pull request, not per commit: one branch proposed against two
+		// bases is two pull requests, each owed its own review.
+		key := fmt.Sprintf("%s#%d@%s", repo, pr.Number, pr.SHA)
 		if s.tried(key) {
 			continue
 		}
@@ -176,9 +178,10 @@ func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budge
 			continue
 		}
 		req := review.Request{Repo: repo, Ref: pr.Ref, SHA: pr.SHA, PRNumber: pr.Number, Trigger: Trigger}
-		// The delivery is derived from the commit, so the Job name is too:
-		// a second pass, or a second replica, finds the Job and stops.
-		name, err := s.Submit(ctx, req, "sweep-"+pr.SHA)
+		// The delivery is derived from the pull request and commit, so the
+		// Job name is too: a second pass, or a second replica, finds the Job
+		// and stops.
+		name, err := s.Submit(ctx, req, fmt.Sprintf("sweep-%d-%s", pr.Number, pr.SHA))
 		if _, dup := err.(interface{ Duplicate() }); dup {
 			s.mark(key)
 			continue

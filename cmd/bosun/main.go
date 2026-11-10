@@ -269,15 +269,16 @@ func kubeClient() (kubernetes.Interface, error) {
 // or a slow body and exhaust the pod's file descriptors before any
 // authentication runs.
 //
-// WriteTimeout sits above the 35s admission wait in internal/jobs: a shorter
-// one would cut off a delivery that is still legitimately queued for capacity.
+// WriteTimeout sits above identity resolution, the repository-token mint, and
+// the 35s admission wait in internal/jobs combined: a shorter one would cut off
+// a delivery that is still legitimately being admitted.
 func newWebhookServer(handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              ":8080",
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		WriteTimeout:      75 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 }
