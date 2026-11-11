@@ -295,3 +295,24 @@ func TestASweepRequestIsDatedWhenItReadTheHead(t *testing.T) {
 		}
 	}
 }
+
+// #96: the sweep reviews a pull request against its own base.
+func TestASweptReviewCarriesThePullRequestBase(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	p := pr(425, sha1, time.Hour)
+	p.BaseSHA = sha2
+	gh := &fakeGitHub{prs: map[string][]review.OpenPullRequest{"acme/ballast": {p}}}
+	if err := sweeper(client, gh, cfg()).Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := client.BatchV1().Jobs("bosun").List(context.Background(), metav1.ListOptions{})
+	if len(list.Items) != 1 {
+		t.Fatalf("jobs = %d, want 1", len(list.Items))
+	}
+	for _, v := range list.Items[0].Spec.Template.Spec.Containers[0].Env {
+		if v.Name == "BOSUN_BASE_SHA" && v.Value == sha2 {
+			return
+		}
+	}
+	t.Error("the swept job does not carry the pull request's base")
+}

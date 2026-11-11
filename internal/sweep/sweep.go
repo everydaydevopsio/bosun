@@ -189,7 +189,7 @@ func (s *Sweeper) sweepRepository(ctx context.Context, token, repo string, budge
 		// Dated when the head was read, before listing: a webhook for a newer
 		// head received while this pass was checking publications must still
 		// order after it, or that newer review would be dropped as stale.
-		req := review.Request{Repo: repo, Ref: pr.Ref, SHA: pr.SHA, PRNumber: pr.Number, Trigger: Trigger, ReceivedAt: now}
+		req := review.Request{Repo: repo, Ref: pr.Ref, SHA: pr.SHA, PRNumber: pr.Number, BaseSHA: pr.BaseSHA, Trigger: Trigger, ReceivedAt: now}
 		// The delivery is derived from the pull request and commit, so the
 		// Job name is too: a second pass, or a second replica, finds the Job
 		// and stops.

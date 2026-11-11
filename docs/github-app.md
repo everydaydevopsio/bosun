@@ -175,6 +175,17 @@ The read counts come from the reviewer's tool calls and are a lower bound. See
 [Review coverage](local-development.md#review-coverage-and-residual-risks) for
 the fields.
 
+### What a review compares against
+
+A pull-request review compares the head with its merge base against the pull
+request's **base commit** (`base.sha`), not the repository's default branch, so
+a pull request into `release/1.x` is reviewed as that change alone. The base
+comes from the webhook payload, from `GET /pulls/N` for a comment-triggered
+review, or from the pull-request listing for a sweep, and reaches the reviewer
+Job as `BOSUN_BASE_SHA`. If the clone cannot fetch that commit, the review falls
+back to the default branch with a warning in the worker log rather than failing.
+A branch review with no pull request always uses the default branch.
+
 ### Finding the review
 
 Reviews live under `/repos/OWNER/REPO/pulls/N/reviews`; comments live under

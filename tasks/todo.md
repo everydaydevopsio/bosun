@@ -1592,3 +1592,25 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: stopgap in place; revert tracked in #99.
 - Evidence links/commands: `docker build --platform linux/amd64 --build-arg UBUNTU_SNAPSHOT=live .` and the same without the arg.
+
+# Task: Hosted reviews compare against the pull request's base (#96)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-12
+- Mode: Autonomous
+- Requirement IDs: #96
+
+## Acceptance Criteria
+- AC1: A hosted review of a PR into a non-default branch reviews, and sizes, only that PR's changes.
+- AC2: Every entry point (webhook, comment, sweep) carries the base; an unfetchable base falls back rather than failing.
+
+## Execution Checklist
+- [x] Failing tests: webhook payload, sweep listing and Job, comment resolution, Job env, end-to-end hosted release-branch review, unfetchable base
+- [x] `BaseSHA` carried end to end; clone fetches it; prompt and coverage use it
+- [x] Docs updated
+- [x] `go test ./...`, `node --test`, `make lint` green
+
+## Outcome
+- Result: implemented; see plans/plan-hosted-pr-base.md.
+- Evidence links/commands: `go test ./internal/review/ -run HostedReview`

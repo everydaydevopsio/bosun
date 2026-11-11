@@ -9,6 +9,10 @@ import (
 type Request struct {
 	Repo, Ref, SHA, Trigger string
 	PRNumber                int
+	// BaseSHA is the pull request's base commit (#96). The reviewer compares
+	// against its merge base with the head; empty means the repository's
+	// default branch, which is wrong for a pull request into another branch.
+	BaseSHA string
 	// TriggerRef is the ref the trigger carried, kept when Ref is replaced by
 	// a resolved one. A Job's name is the deduplication key for a webhook
 	// delivery, and it is derived from the ref: if resolution fails on one
@@ -57,6 +61,9 @@ func FromWebhook(event string, payload json.RawMessage, command string, allowed 
 				Ref string `json:"ref"`
 				SHA string `json:"sha"`
 			} `json:"head"`
+			Base struct {
+				SHA string `json:"sha"`
+			} `json:"base"`
 		} `json:"pull_request"`
 		Issue struct {
 			Number      int             `json:"number"`
@@ -86,7 +93,7 @@ func FromWebhook(event string, payload json.RawMessage, command string, allowed 
 		if p.PullRequest.Draft && p.Action != "ready_for_review" {
 			return Request{}, false
 		}
-		return Request{Repo: p.Repository.FullName, Ref: p.PullRequest.Head.Ref, SHA: p.PullRequest.Head.SHA, PRNumber: p.PullRequest.Number, Trigger: "pull-request-" + p.Action}, true
+		return Request{Repo: p.Repository.FullName, Ref: p.PullRequest.Head.Ref, SHA: p.PullRequest.Head.SHA, PRNumber: p.PullRequest.Number, BaseSHA: validBase(p.PullRequest.Base.SHA), Trigger: "pull-request-" + p.Action}, true
 	}
 	if (event == "issue_comment" || event == "pull_request_review_comment") && p.Action == "created" {
 		if p.Sender.Type == "Bot" || !strings.Contains(strings.ToLower(p.Comment.Body), command) || !allowed[strings.ToUpper(p.Comment.AuthorAssociation)] {
@@ -119,4 +126,14 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// validBase returns sha when it is a full commit SHA, and "" otherwise. The
+// value reaches git as a fetch argument, so anything else is dropped rather
+// than passed on; the review then falls back to the default branch.
+func validBase(sha string) string {
+	if commitPattern.MatchString(sha) {
+		return sha
+	}
+	return ""
 }

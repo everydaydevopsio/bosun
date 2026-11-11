@@ -202,3 +202,26 @@ func TestAnUnresolvedRequestNamesItselfByItsOwnRef(t *testing.T) {
 		t.Fatalf("NameRef() = %q, want the request's own ref", got)
 	}
 }
+
+// #96: a hosted Job carries the pull request's base, and one without a base
+// (a branch review) carries none rather than an empty override.
+func TestHostedJobCarriesThePullRequestBase(t *testing.T) {
+	const base = "2222222222222222222222222222222222222222"
+	env := func(req review.Request) map[string]string {
+		job, err := build(config.Config{ReviewTimeoutSeconds: 60}, req, "review-base")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, v := range job.Spec.Template.Spec.Containers[0].Env {
+			out[v.Name] = v.Value
+		}
+		return out
+	}
+	if got := env(review.Request{Repo: "acme/widget", PRNumber: 7, BaseSHA: base})["BOSUN_BASE_SHA"]; got != base {
+		t.Fatalf("BOSUN_BASE_SHA = %q", got)
+	}
+	if _, ok := env(review.Request{Repo: "acme/widget"})["BOSUN_BASE_SHA"]; ok {
+		t.Fatal("a request without a base set BOSUN_BASE_SHA")
+	}
+}
