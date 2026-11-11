@@ -28,17 +28,35 @@ Bosun mints one per review. When `BOSUN_GITHUB_APP_ID` and
 | --- | --- | --- |
 | **Contents** | Read-only | clone the ref under review |
 | **Pull requests** | Read & write | post the review comment |
+| **Issues** | Read-only | receive comments on a pull request's Conversation tab |
 | **Metadata** | Read-only | mandatory, granted automatically |
 | **Checks** | Read & write | *optional* — gives a branch-only review a home when no pull request exists |
 
-Grant nothing else. Bosun never writes code, pushes, merges, or approves.
+Grant only these permissions. Bosun never writes code, pushes, merges, or approves.
+
+The **Issues: Read-only** permission is easy to miss: GitHub uses the `issue_comment`
+event for comments on a pull request's Conversation tab. GitHub hides the **Issue
+comment** event subscription until the App has at least read access to Issues.
+Add the permission first, save, then reopen **Permissions & events** and select
+**Issue comment**. If this is an existing installation, its owner must accept
+the new permission request before GitHub sends the new event.
 
 ### Subscribe to events
 
-- **Create** — branch creation, needed only when `review.triggers.branchCreated` is on
-- **Pull request**
-- **Issue comment**
-- **Pull request review comment**
+Select the event checkboxes in **Permissions & events**. Each checkbox
+subscribes the App to that event; Bosun filters the actions it handles.
+
+| Event | What it triggers | Required permission |
+| --- | --- | --- |
+| **Pull request** | Automatic review when a PR is opened, reopened, synchronized, or marked ready for review | Pull requests: Read or higher |
+| **Issue comment** | `@bosun-review review` on a PR's Conversation tab | Issues: Read or higher; this checkbox is hidden until permission is granted |
+| **Pull request review comment** | `@bosun-review review` on an inline diff comment | Pull requests: Read or higher |
+| **Create** | Review a newly created branch when `review.triggers.branchCreated` is enabled | Contents: Read or higher |
+
+For the usual PR and comment review flow, select the first three events. Select
+**Create** only when branch-created reviews are enabled. The **Pull request
+review** and **Pull request review thread** events are not needed for these
+triggers.
 
 ### Where can this App be installed?
 
@@ -56,6 +74,10 @@ downloads a `.pem` once — it cannot be retrieved later.
 **Install App → choose the account → Only select repositories**, and pick the
 repositories Bosun may review. This selection is the real security boundary:
 Bosun can only mint tokens for repositories where the App is installed.
+
+When you add a permission to an existing App, GitHub asks each installation
+owner to accept the updated permissions. Until accepted, the installation
+continues to use its previous permissions.
 
 ## 4. Store the credentials
 
@@ -104,7 +126,14 @@ spending the model budget and then failing to publish.
 
 ## 5. Verify
 
-Comment `@bosun-review review` on a test pull request and watch the reviewer Job:
+Open **Developer settings → GitHub Apps → your App → Advanced** and check
+**Recent Deliveries** if an event does not reach Bosun. A `2xx` response means
+the webhook reached the service; `401` usually means the webhook secret does
+not match. Confirm the installed App has accepted the latest permissions and
+that the event appears in the delivery details.
+
+Then comment `@bosun-review review` on a test pull request's Conversation tab
+and watch the reviewer Job:
 
 ```bash
 kubectl -n bosun logs -l app.kubernetes.io/name=bosun-review --tail=50
