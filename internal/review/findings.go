@@ -255,26 +255,31 @@ func findingsPayload(output string) (int, int, string) {
 }
 
 func markerLine(output string) (int, int, string) {
-	start := strings.LastIndex(output, FindingsMarker)
-	if start < 0 {
-		return 0, 0, ""
+	// The last line that starts with the marker, so the word appearing in
+	// prose -- or inside the payload itself, as a residual risk that names
+	// the marker -- is not mistaken for the payload or allowed to hide it.
+	search := len(output)
+	for search > 0 {
+		start := strings.LastIndex(output[:search], FindingsMarker)
+		if start < 0 {
+			return 0, 0, ""
+		}
+		search = start
+		if start > 0 && output[start-1] != '\n' {
+			continue
+		}
+		rest := output[start+len(FindingsMarker):]
+		end := strings.IndexByte(rest, '\n')
+		if end < 0 {
+			end = len(rest)
+		}
+		inner := strings.TrimSpace(rest[:end])
+		if inner == "" {
+			continue
+		}
+		return start, start + len(FindingsMarker) + end, inner
 	}
-	// Only at the start of a line, so the word appearing in prose -- or in
-	// this file's own documentation, quoted back by a reviewer -- is not
-	// mistaken for the payload.
-	if start > 0 && output[start-1] != '\n' {
-		return 0, 0, ""
-	}
-	rest := output[start+len(FindingsMarker):]
-	end := strings.IndexByte(rest, '\n')
-	if end < 0 {
-		end = len(rest)
-	}
-	inner := strings.TrimSpace(rest[:end])
-	if inner == "" {
-		return 0, 0, ""
-	}
-	return start, start + len(FindingsMarker) + end, inner
+	return 0, 0, ""
 }
 
 func lastJSONBlock(output string) (int, int, string) {

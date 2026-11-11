@@ -191,7 +191,8 @@ func TestWorkerEmitsCoverageWithoutAFindingsBlock(t *testing.T) {
 	t.Setenv("BOSUN_REF", "refs/heads/feature")
 	var events, out bytes.Buffer
 	w := Worker{PromptPath: prompt, Events: &events, Output: &out, Agent: func(context.Context, string, string, string, time.Duration) (string, error) {
-		return sampleReads + "\nProse review with no findings line.\n", nil
+		reads := strings.Replace(sampleReads, `"full_diff":true,`, `"full_diff":true,"diff_ranges":["`+base+`...HEAD"],`, 1)
+		return reads + "\nProse review with no findings line.\n", nil
 	}}
 	if err := w.Run(context.Background(), config.Config{ReviewProvider: "codex-bosun", ReviewTimeoutSeconds: 60}); err != nil {
 		t.Fatalf("run: %v", err)
@@ -269,5 +270,72 @@ func TestDirectoryPathspecCoversChangedFilesBeneathIt(t *testing.T) {
 	c := buildCoverage(stats, nil, &readRecord{Source: "claude", Method: "tool_calls", Diffed: []string{"internal/review"}})
 	if r := c.Reads; r.ChangedFilesDiffed != 1 || strings.Join(r.UnexaminedPaths, ",") != "c.go,internal/reviewer/b.go" {
 		t.Fatalf("reads = %+v", r)
+	}
+}
+
+// Third self-review of #93, R2: "full diff read" is a claim about the change
+// under review, so the worker checks the revisions the reviewer diffed against
+// the merge base instead of trusting that some revision diff ran.
+func TestFullDiffIsVerifiedAgainstTheMergeBase(t *testing.T) {
+	dir, base := coverageRepo(t)
+	stats, err := diffStats(context.Background(), dir, base, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{
+		base + "...HEAD":    true,
+		base[:12] + " HEAD": true,
+		"main..HEAD":        true,
+		"main":              true,
+		"HEAD~1":            true, // one commit on the branch, so HEAD~1 is the merge base
+		"HEAD":              false,
+		"feature...HEAD":    false,
+		"--output=/tmp/x":   false,
+		"nonexistent":       false,
+	}
+	for ranges, want := range cases {
+		if got := verifiedFullDiff(context.Background(), dir, stats.MergeBase, []string{ranges}); got != want {
+			t.Errorf("%q: got %v, want %v", ranges, got, want)
+		}
+	}
+}
+
+// R1: sizing an untracked file must not follow a symlink, which could point
+// at a FIFO that blocks the worker forever or at a huge file outside the repo.
+func TestUntrackedSymlinksAreNotFollowed(t *testing.T) {
+	dir, base := coverageRepo(t)
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := exec.Command("mkfifo", fifo).Run(); err != nil {
+		t.Skip("mkfifo unavailable")
+	}
+	if err := os.Symlink(fifo, filepath.Join(dir, "pipe")); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *DiffStats, 1)
+	go func() {
+		stats, _ := diffStats(context.Background(), dir, base, true)
+		done <- stats
+	}()
+	select {
+	case stats := <-done:
+		// app.ts (+2 -1), util.ts (+1), old.ts (-1), and the symlink as one line
+		if stats == nil || stats.Reviewable.Files != 4 || stats.Reviewable.Additions != 4 {
+			t.Fatalf("stats = %+v", stats)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("sizing blocked on an untracked symlink to a FIFO")
+	}
+}
+
+// R3: `git config --local` alone does not follow include.path, but the diff
+// that follows does, so the guard must read included config too.
+func TestFilterDriversFromIncludedConfigAreRefused(t *testing.T) {
+	dir, base := coverageRepo(t)
+	included := filepath.Join(t.TempDir(), "extra.config")
+	writeTree(t, included, "[filter \"evil\"]\n\tclean = touch /tmp/never\n")
+	gitRun(t, dir, "config", "include.path", included)
+	writeTree(t, filepath.Join(dir, "src", "app.ts"), "changed\n")
+	if _, err := diffStats(context.Background(), dir, base, true); err == nil || !strings.Contains(err.Error(), "filter") {
+		t.Fatalf("err = %v", err)
 	}
 }

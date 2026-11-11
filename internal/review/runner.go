@@ -337,8 +337,12 @@ func reviewCoverage(ctx context.Context, workspace string, local bool, meter *us
 	workingTree := local && os.Getenv("BOSUN_COMMITTED_ONLY") != "1"
 	stats, err := diffStats(ctx, workspace, os.Getenv("BOSUN_BASE_SHA"), workingTree)
 	var reads *readRecord
-	if meter != nil {
-		reads = meter.reads
+	if meter != nil && meter.reads != nil {
+		copied := *meter.reads
+		reads = &copied
+		// The adapter only knows a revision diff ran; whether it showed the
+		// change under review takes the merge base, which only this side has.
+		reads.FullDiff = stats != nil && verifiedFullDiff(ctx, workspace, stats.MergeBase, reads.DiffRanges)
 	}
 	return buildCoverage(stats, err, reads)
 }

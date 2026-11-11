@@ -1,6 +1,6 @@
 # Plan: Review depth evidence (coverage and residual risks)
 
-- **Status:** In progress
+- **Status:** Implemented; PR pending
 - **Branch:** `issue-93-review-depth-evidence`
 - **Created:** 2026-11-11
 - **Issue:** #93 (proposals 1, 2, 4). Proposal 3 (effort scaling) split to #95.
@@ -60,11 +60,11 @@ runtime, visual behaviour), which is the most useful output for an upgrade.
 
 ## Phases
 
-- [ ] Explore: transport, result storage, prompt contract
-- [ ] Failing tests (JS tracker, Go parse, diff stats, recorder, coverage, result doc)
-- [ ] Core implementation
-- [ ] Docs, skill, Dockerfile
-- [ ] Verification: `make test`, `make lint`, `node --test`, image build
+- [x] Explore: transport, result storage, prompt contract
+- [x] Failing tests (JS tracker, Go parse, diff stats, recorder, coverage, result doc)
+- [x] Core implementation
+- [x] Docs, skill, Dockerfile
+- [x] Verification: `make test`, `make lint`, `node --test`, image build
 
 ## Verification
 
@@ -91,3 +91,7 @@ runtime, visual behaviour), which is the most useful output for an upgrade.
 | Date | Change |
 | --- | --- |
 | 2026-11-11 | Plan created |
+| 2026-11-11 | Self-review 1 (Codex): full diff needs a revision and a patch; `||` earns no credit; budget in UTF-8 bytes |
+| 2026-11-11 | A host capture of Claude's tool calls showed it never uses Read and diffs by directory; directory pathspecs now cover files beneath them |
+| 2026-11-11 | Self-review 2 (Claude): binary files excluded; fsmonitor disabled and filter drivers refused for working-tree sizing; hosted PR base filed as #96 |
+| 2026-11-11 | Self-review 3 (Claude): `markerLine` now takes the last marker at a line start (a residual risk naming the marker hid the payload); full diff verified against the merge base; untracked symlinks not followed; `--includes` |

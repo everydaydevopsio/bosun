@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,13 +33,16 @@ const pathListLimit = 50
 // readRecord is what an adapter observed the reviewer read: repository-relative
 // paths, never content. It is a lower bound -- see scripts/provider-reads.js.
 type readRecord struct {
-	Source    string   `json:"source"`
-	Method    string   `json:"method"`
-	Commands  int      `json:"commands"`
-	FullDiff  bool     `json:"full_diff"`
-	Opened    []string `json:"opened"`
-	Diffed    []string `json:"diffed"`
-	Truncated bool     `json:"truncated"`
+	Source   string `json:"source"`
+	Method   string `json:"method"`
+	Commands int    `json:"commands"`
+	FullDiff bool   `json:"full_diff"`
+	// DiffRanges are the revision operands of whole-diff commands, verified
+	// against the merge base before FullDiffViewed is reported.
+	DiffRanges []string `json:"diff_ranges"`
+	Opened     []string `json:"opened"`
+	Diffed     []string `json:"diffed"`
+	Truncated  bool     `json:"truncated"`
 }
 
 // Coverage is measured evidence of how the change was examined, for a reader
@@ -171,7 +176,8 @@ func diffStats(ctx context.Context, dir, base string, workingTree bool) (*DiffSt
 	if workingTree {
 		// Comparing against the working tree runs clean filters on modified
 		// files. Two commits compare blob to blob and run none.
-		if drivers, _ := coverageGit(ctx, dir, nil, "config", "--local", "--name-only", "--get-regexp", `^filter\.`); len(bytes.TrimSpace(drivers)) > 0 {
+		// --includes: the diff below follows include.path, so the guard must too.
+		if drivers, _ := coverageGit(ctx, dir, nil, "config", "--local", "--includes", "--name-only", "--get-regexp", `^filter\.`); len(bytes.TrimSpace(drivers)) > 0 {
 			return nil, errors.New("working-tree sizing skipped: the checkout configures filter drivers, which comparing against the working tree would run")
 		}
 	}
@@ -279,14 +285,26 @@ func markGenerated(ctx context.Context, dir string, files []changedFile) error {
 }
 
 // countLines counts an untracked file's lines, reporting binary content (a NUL
-// in the first 8 KiB) the way git does.
+// in the first 8 KiB) the way git does. It never follows a symlink -- git counts
+// one as a single line, and its target may be a FIFO that blocks forever or a
+// file outside the repository -- and reads at most countLimit bytes.
 func countLines(name string) (int, bool) {
+	info, err := os.Lstat(name)
+	if err != nil {
+		return 0, false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return 1, false
+	}
+	if !info.Mode().IsRegular() {
+		return 0, false
+	}
 	f, err := os.Open(name)
 	if err != nil {
 		return 0, false
 	}
 	defer func() { _ = f.Close() }()
-	reader := bufio.NewReader(f)
+	reader := bufio.NewReader(io.LimitReader(f, countLimit))
 	if head, _ := reader.Peek(8192); bytes.IndexByte(head, 0) >= 0 {
 		return 0, true
 	}
@@ -307,6 +325,61 @@ func countLines(name string) (int, bool) {
 		lines++
 	}
 	return lines, false
+}
+
+const countLimit = 64 << 20
+
+// revisionPattern admits the revision syntax a reviewer diffs with and
+// nothing that git could read as an option.
+var revisionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@{}^~-]{0,199}$`)
+
+// verifiedFullDiff reports whether any whole-diff command the reviewer ran
+// compared the merge base with HEAD: `A...HEAD`, `A..HEAD`, `A HEAD`, or `A`
+// alone, where A shares the reviewed merge base with HEAD. `git diff HEAD`
+// and `git diff HEAD~1` on a longer branch run, but do not show the change.
+func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []string) bool {
+	resolve := func(rev string) string {
+		if !revisionPattern.MatchString(rev) {
+			return ""
+		}
+		out, err := coverageGit(ctx, dir, nil, "rev-parse", "--verify", "--quiet", "--end-of-options", rev+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	head := resolve("HEAD")
+	if head == "" || mergeBase == "" {
+		return false
+	}
+	for _, rng := range ranges {
+		var left, right string
+		fields := strings.Fields(rng)
+		switch {
+		case len(fields) == 2:
+			left, right = fields[0], fields[1]
+		case len(fields) == 1 && strings.Contains(fields[0], "..."):
+			left, right, _ = strings.Cut(fields[0], "...")
+		case len(fields) == 1 && strings.Contains(fields[0], ".."):
+			left, right, _ = strings.Cut(fields[0], "..")
+		case len(fields) == 1:
+			left = fields[0]
+		default:
+			continue
+		}
+		if right != "" && resolve(right) != head {
+			continue
+		}
+		a := resolve(left)
+		if a == "" {
+			continue
+		}
+		out, err := coverageGit(ctx, dir, nil, "merge-base", a, head)
+		if err == nil && strings.TrimSpace(string(out)) == mergeBase {
+			return true
+		}
+	}
+	return false
 }
 
 // buildCoverage joins the measured diff with the adapter's read record. Either
@@ -427,6 +500,16 @@ func parseReadsRecord(body []byte, source string) (*readRecord, bool) {
 		r.Method = "unknown"
 	}
 	r.Opened, r.Diffed = cleanPaths(r.Opened), cleanPaths(r.Diffed)
+	var ranges []string
+	for _, rng := range r.DiffRanges {
+		if len(ranges) == 20 {
+			break
+		}
+		if len(rng) <= 200 {
+			ranges = append(ranges, rng)
+		}
+	}
+	r.DiffRanges = ranges
 	return &r, true
 }
 

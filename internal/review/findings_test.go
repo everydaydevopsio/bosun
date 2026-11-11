@@ -397,3 +397,19 @@ func TestPromptRequiresChangeSpecificResidualRisks(t *testing.T) {
 		}
 	}
 }
+
+// Found live in #93: a payload whose own text names the marker -- a residual
+// risk about "the BOSUN-FINDINGS line" -- hid the whole payload, because the
+// last occurrence of the marker was inside it rather than at a line start.
+func TestPayloadThatMentionsTheMarkerIsStillParsed(t *testing.T) {
+	output := "Summary mentions `BOSUN-FINDINGS` in prose.\n" +
+		`BOSUN-FINDINGS {"findings":[{"path":"a.go","line":1,"severity":"low","title":"T"}],"residual_risks":[{"risk":"The footer follows the BOSUN-FINDINGS line."}]}` +
+		"\n"
+	summary, findings, reported, _ := parseReview(output)
+	if !reported || len(findings) != 1 || len(parseResidualRisks(output)) != 1 {
+		t.Fatalf("reported=%v findings=%+v", reported, findings)
+	}
+	if strings.Contains(summary, `"findings"`) {
+		t.Fatalf("payload left in the summary: %q", summary)
+	}
+}

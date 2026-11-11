@@ -1557,17 +1557,17 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 - AC4: The bosun-review skill triages `findings: []` from coverage and residual risks, not elapsed time or tokens.
 
 ## Execution Checklist
-- [ ] Failing tests written and confirmed failing
-- [ ] Adapters track reads and emit `BOSUN_READS_V1`
-- [ ] Worker computes diff stats and coverage, emits `coverage` event, hosted footer
-- [ ] `review-result` shows coverage and residual risks
-- [ ] Prompt, skill, docs updated
-- [ ] `go test ./...`, `node --test`, `make lint` green
+- [x] Failing tests written and confirmed failing
+- [x] Adapters track reads and emit `BOSUN_READS_V1`
+- [x] Worker computes diff stats and coverage, emits `coverage` event, hosted footer
+- [x] `review-result` shows coverage and residual risks
+- [x] Prompt, skill, docs updated
+- [x] `go test ./...`, `node --test`, `make lint` green
 
 ## Test Strategy
 - Unit: JS tracker command parsing; Go parse of residual risks, diff stats on a temp repo, recorder stripping, coverage join, result document.
 - Failure-path tests: no base resolvable, reads line missing, malformed/oversized reads line, impersonated marker in review text, paths outside the workspace.
 
 ## Outcome
-- Result:
-- Evidence links/commands:
+- Result: coverage and residual risks reported end to end for Codex and Claude. Three local Bosun reviews of this branch found eight issues, all fixed (see the plan's change log). Hosted PR base gap filed as #96; effort scaling is #95.
+- Evidence links/commands: `go test ./...`, `node --test scripts/*.test.js` (39 pass), `make lint`, `docker build` (in-image adapter tests pass), local reviews on Kind with `--provider codex-bosun` and `claude-bosun` show `coverage` and `residual_risks` in `bosun review-result --json`.

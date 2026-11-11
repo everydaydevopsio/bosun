@@ -89,6 +89,9 @@ function createReadTracker(root = process.cwd()) {
   const opened = new Set();
   const diffed = new Set();
   let fullDiff = false;
+  // The revision operands of every whole-diff command. The worker checks
+  // them against the merge base; `git diff HEAD` is a revision diff too.
+  const ranges = [];
   let commands = 0;
 
   // relative returns the repository-relative path of target, or '' when it
@@ -151,7 +154,11 @@ function createReadTracker(root = process.cwd()) {
     // `git diff` is the working tree against the index, which on a committed
     // checkout is empty.
     const revisions = operands.filter((word, index) => !named[index]);
-    if (paths.length === 0 && revisions.length > 0) fullDiff = true;
+    if (paths.length === 0 && revisions.length > 0) {
+      fullDiff = true;
+      const range = revisions.join(' ');
+      if (ranges.length < 20 && range.length <= 200 && !ranges.includes(range)) ranges.push(range);
+    }
     for (const rel of paths) diffed.add(rel);
   }
 
@@ -190,7 +197,7 @@ function createReadTracker(root = process.cwd()) {
       if (rel) opened.add(rel);
     },
     record(source, method) {
-      return { source, method, commands, full_diff: fullDiff, opened: [...opened].sort(), diffed: [...diffed].sort(), truncated: false };
+      return { source, method, commands, full_diff: fullDiff, diff_ranges: [...ranges], opened: [...opened].sort(), diffed: [...diffed].sort(), truncated: false };
     },
   };
 }

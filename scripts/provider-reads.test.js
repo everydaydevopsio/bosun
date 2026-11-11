@@ -132,3 +132,11 @@ test('a pathspec naming the repository root is the full diff', () => {
     assert.equal(tracker.record('claude', 'tool_calls').full_diff, true, command);
   }
 });
+
+test('a revision diff reports its operands for the worker to verify', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('git diff e098e24...HEAD');
+  tracker.command('git diff -U5 base HEAD');
+  tracker.command('git diff --stat base...HEAD');
+  assert.deepEqual(tracker.record('claude', 'tool_calls').diff_ranges, ['e098e24...HEAD', 'base HEAD']);
+});

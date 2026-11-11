@@ -446,22 +446,25 @@ closely or skimmed, and elapsed time, tokens, and `turns` are poor proxies
 | `diff.reviewable` | files, additions, and deletions a reviewer has to read |
 | `diff.generated`, `diff.generated_paths` | lockfiles, vendored, and generated files (by name, or the repository's `linguist-generated`/`linguist-vendored` attributes), counted separately |
 | `reads.method` | `tool_calls` (Claude's Read tool plus parsed git commands) or `command_parsing` (Codex shell commands) |
-| `reads.full_diff_viewed` | a command printing the whole diff ran; a provider may truncate very long output |
+| `reads.full_diff_viewed` | a command printed the whole change: Bosun checks the revisions it compared against the merge base, so `git diff HEAD` does not count. A provider may still truncate very long output |
 | `reads.changed_files_opened` / `changed_files` | reviewable changed files opened, of those with text content left to open (deleted and binary files are excluded) |
 | `reads.changed_files_diffed` | changed files whose own diff was requested by path |
 | `reads.unexamined_paths` | changed files neither opened nor diffed by path (up to 50) |
 | `reads.context_files_opened` | files outside the diff read for context |
 
 Read counts are a lower bound: a file read through a tool the adapter does not
-recognise is not counted. The adapters record paths only, never file content.
+recognise is not counted, and neither is a search (`grep`, `rg`, Claude's Grep
+tool) that printed matching lines. A directory pathspec such as
+`git diff A B -- internal/review/` covers the changed files beneath it. The adapters record paths only, never file content.
 When either half is unavailable, `diff_note` or `reads_note` says why instead of
 reporting zeros.
 
 Sizing runs git in the reviewed checkout, so it runs nothing the checkout
 configures: hooks, fsmonitor, external diff, and textconv drivers are disabled,
 and a working-tree review whose `.git/config` defines filter drivers is not
-sized (`diff_note` says so) because comparing against the working tree would
-run them. Hosted reviews currently size against `origin/HEAD`, as the reviewer
+sized (`diff_note` says so, including drivers pulled in by `include.path`)
+because comparing against the working tree would run them. Untracked symlinks
+count as one line and are never followed. Hosted reviews currently size against `origin/HEAD`, as the reviewer
 does; see #96.
 
 `residual_risks` comes from the reviewer: risks specific to this change that
