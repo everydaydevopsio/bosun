@@ -19,7 +19,7 @@ const maxCommands = 100000;
 const readers = new Set(['cat', 'nl', 'head', 'tail', 'sed', 'awk', 'less', 'more', 'bat', 'batcat', 'view']);
 const shells = new Set(['sh', 'bash', 'zsh', 'dash']);
 // Diff options that print names or numbers but no content.
-const noContent = /^--(stat|numstat|shortstat|name-only|name-status|summary|dirstat|compact-summary|quiet|raw)(=|$)/;
+const noContent = /^(-s|--(stat|numstat|shortstat|name-only|name-status|summary|dirstat|compact-summary|quiet|raw|no-patch)(=|$))/;
 
 // tokenize splits a shell script into simple commands of words. It handles
 // quotes, backslashes, and the separators ; & | and newlines. It is not a shell:
@@ -30,8 +30,11 @@ function tokenize(script) {
   let word = '';
   let inWord = false;
   let quote = '';
+  // A command after || runs only when the one before it failed, and a
+  // successful exit says nothing about whether it ran, so it earns no credit.
+  let skipped = false;
   const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
-  const endCommand = () => { endWord(); if (words.length) commands.push(words); words = []; };
+  const endCommand = () => { endWord(); if (words.length && !skipped) commands.push(words); words = []; skipped = false; };
   for (let i = 0; i < script.length; i++) {
     const c = script[i];
     if (quote === "'") {
@@ -46,6 +49,7 @@ function tokenize(script) {
     }
     if (c === "'" || c === '"') { quote = c; inWord = true; continue; }
     if (c === '\\' && i + 1 < script.length) { word += script[++i]; inWord = true; continue; }
+    if (c === '|' && script[i + 1] === '|') { endCommand(); skipped = true; i++; continue; }
     if (c === ';' || c === '&' || c === '|' || c === '\n') { endCommand(); continue; }
     if (c === ' ' || c === '\t' || c === '\r') { endWord(); continue; }
     word += c;
@@ -140,9 +144,14 @@ function createReadTracker(root = process.cwd()) {
     }
     if (verb !== 'diff') return;
     if (before.some(word => noContent.test(word))) return;
-    const paths = [...pathspec.map(word => relative(word, cwd)),
-      ...before.filter(word => !word.startsWith('-')).map(word => existing(word, cwd))].filter(Boolean);
-    if (paths.length === 0) fullDiff = true;
+    const operands = before.filter(word => !word.startsWith('-'));
+    const named = operands.map(word => existing(word, cwd));
+    const paths = [...pathspec.map(word => relative(word, cwd)), ...named].filter(Boolean);
+    // Only a comparison against a revision shows the change: a bare
+    // `git diff` is the working tree against the index, which on a committed
+    // checkout is empty.
+    const revisions = operands.filter((word, index) => !named[index]);
+    if (paths.length === 0 && revisions.length > 0) fullDiff = true;
     for (const rel of paths) diffed.add(rel);
   }
 
@@ -189,12 +198,14 @@ function createReadTracker(root = process.cwd()) {
 // readsLine renders the record as the control line the worker strips, trimming
 // path lists to the transport budget and saying so rather than failing.
 function readsLine(record) {
+  // The worker limits the line in bytes, so count bytes, not UTF-16 units.
+  const bytes = text => Buffer.byteLength(text, 'utf8');
   const out = { ...record, opened: [], diffed: [] };
-  let size = prefix.length + JSON.stringify(out).length + 1;
+  let size = bytes(prefix) + bytes(JSON.stringify(out)) + 1;
   const queues = [['opened', record.opened || []], ['diffed', record.diffed || []]];
   for (const [key, paths] of queues) {
     for (const entry of paths) {
-      const cost = JSON.stringify(entry).length + 1;
+      const cost = bytes(JSON.stringify(entry)) + 1;
       if (size + cost > budget) { out.truncated = true; break; }
       out[key].push(entry);
       size += cost;

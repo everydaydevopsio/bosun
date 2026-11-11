@@ -93,3 +93,34 @@ test('malformed input never throws', () => {
   }
   assert.equal(tracker.record('codex', 'command_parsing').opened.length, 0);
 });
+
+// Bosun self-review of #93, F1: only a comparison against a revision shows the
+// change; a bare `git diff` is worktree-vs-index, and -s/--no-patch print none.
+test('a full diff needs a revision and a patch', () => {
+  for (const command of ['git diff', 'git diff --no-patch base...HEAD', 'git diff -s base...HEAD', 'git diff --cached']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  for (const command of ['git diff base...HEAD', 'git diff abc123', 'git diff -U10 main HEAD']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+});
+
+// F2: a command after || may never have run, so it earns no read credit.
+test('a command skipped by || is not credited', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('bash -lc "true || cat src/app.ts; cat README.md && cat package.json"');
+  assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md', 'package.json']);
+});
+
+// F3: the worker limits the line in bytes, so the budget must count bytes.
+test('the reads line budget counts UTF-8 bytes', () => {
+  const tracker = createReadTracker(workspace());
+  for (let i = 0; i < 3000; i++) tracker.command(`git show HEAD:目录/${'文'.repeat(60)}-${i}.ts`);
+  const line = readsLine(tracker.record('codex', 'command_parsing'));
+  assert.ok(Buffer.byteLength(line, 'utf8') < 60 * 1024, `line is ${Buffer.byteLength(line, 'utf8')} bytes`);
+  assert.equal(JSON.parse(line.slice('BOSUN_READS_V1 '.length)).truncated, true);
+});
