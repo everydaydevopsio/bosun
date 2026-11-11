@@ -98,3 +98,4 @@ runtime, visual behaviour), which is the most useful output for an upgrade.
 | 2026-11-11 | Self-review 4 (Codex): path diffs credited only through a verified range; endpoint forms (`A..HEAD`, `A HEAD`, `A`) need A to be the merge base; only commands a successful exit proves ran are credited. This run reported 0 unexamined changed files |
 | 2026-11-11 | Hosted review of #97: content-filtering diff options earn no credit; a dirty working-tree review needs a diff against the working tree |
 | 2026-11-11 | Hosted review of #97 @ a1c0445: a chain containing `||` credits only its first unit; `--cached`/`--staged` diffs earn no credit |
+| 2026-11-11 | Hosted review of #97 @ 4871910: untracked files earn no path-diff credit; `--output` diffs earn no credit |

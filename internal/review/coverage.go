@@ -116,6 +116,8 @@ type changedFile struct {
 	binary    bool
 	deleted   bool
 	generated bool
+	// untracked files appear in no git diff, so only opening them counts.
+	untracked bool
 }
 
 // lockfiles are rewritten wholesale by tools; their diff is not reviewed line
@@ -238,7 +240,7 @@ func diffStats(ctx context.Context, dir, base string, workingTree bool) (*DiffSt
 				continue
 			}
 			lines, binary := countLines(filepath.Join(dir, filepath.FromSlash(p)))
-			files = append(files, changedFile{path: p, additions: lines, binary: binary})
+			files = append(files, changedFile{path: p, additions: lines, binary: binary, untracked: true})
 		}
 	}
 	if err := markGenerated(ctx, dir, files); err != nil {
@@ -479,7 +481,7 @@ func buildCoverage(diff *DiffStats, diffErr error, reads *readRecord) Coverage {
 		switch {
 		case opened[f.path]:
 			r.ChangedFilesOpened++
-		case diffedBy(diffed, f.path):
+		case !f.untracked && diffedBy(diffed, f.path):
 			r.ChangedFilesDiffed++
 		default:
 			r.ChangedFilesUnexamined++

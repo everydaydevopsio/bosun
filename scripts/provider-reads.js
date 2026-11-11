@@ -19,10 +19,10 @@ const maxCommands = 100000;
 const readers = new Set(['cat', 'nl', 'head', 'tail', 'sed', 'awk', 'less', 'more', 'bat', 'batcat', 'view']);
 const shells = new Set(['sh', 'bash', 'zsh', 'dash']);
 // Diff options that print names or numbers but no content.
-// Diff options that print only some files or hunks, or compare the index
-// rather than the working tree. Such a diff did not show the change, so it
-// earns no credit at all.
-const filtered = /^(-[SG]|--(cached|staged|diff-filter|relative|find-object|skip-to|rotate-to|pickaxe-all|pickaxe-regex)(=|$))/;
+// Diff options that print only some files or hunks, compare the index rather
+// than the working tree, or write the patch to a file instead of the output.
+// Such a diff did not show the change, so it earns no credit at all.
+const filtered = /^(-[SG]|--(output|cached|staged|diff-filter|relative|find-object|skip-to|rotate-to|pickaxe-all|pickaxe-regex)(=|$))/;
 const noContent = /^(-s|--(stat|numstat|shortstat|name-only|name-status|summary|dirstat|compact-summary|quiet|raw|no-patch)(=|$))/;
 
 // tokenize splits a shell script into the simple commands a successful exit

@@ -194,3 +194,15 @@ test('index-only diffs earn no credit', () => {
     assert.deepEqual(record.diffed, [], command);
   }
 });
+
+// Bosun review of #97 @ 4871910, F2: --output writes the patch to a file the
+// reviewer may never open.
+test('a diff written to a file earns no credit', () => {
+  for (const command of ['git diff --output=/tmp/p.patch base...HEAD', 'git diff --output /tmp/p.patch base...HEAD -- src/app.ts']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    const record = tracker.record('codex', 'command_parsing');
+    assert.equal(record.full_diff, false, command);
+    assert.deepEqual(record.diffed, [], command);
+  }
+});

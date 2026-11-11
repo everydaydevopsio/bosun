@@ -403,3 +403,20 @@ func TestDirtyWorkingTreeNeedsAWorkingTreeDiff(t *testing.T) {
 		t.Fatal("a committed-only review rejected a merge-base diff")
 	}
 }
+
+// Bosun review of #97 @ 4871910, F1: git diff never prints untracked files, so
+// a directory diff above one does not examine it.
+func TestUntrackedFilesGetNoPathDiffCredit(t *testing.T) {
+	dir, base := coverageRepo(t)
+	writeTree(t, filepath.Join(dir, "src", "new.ts"), "n\n")
+	stats, err := diffStats(context.Background(), dir, base, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := &readRecord{Source: "claude", Method: "tool_calls", Diffed: []pathDiff{{Range: base, Paths: []string{"src"}}}}
+	verifyReads(context.Background(), dir, stats, reads)
+	c := buildCoverage(stats, nil, reads)
+	if r := c.Reads; strings.Join(r.UnexaminedPaths, ",") != "src/new.ts" {
+		t.Fatalf("reads = %+v", r)
+	}
+}
