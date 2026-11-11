@@ -124,3 +124,11 @@ test('the reads line budget counts UTF-8 bytes', () => {
   assert.ok(Buffer.byteLength(line, 'utf8') < 60 * 1024, `line is ${Buffer.byteLength(line, 'utf8')} bytes`);
   assert.equal(JSON.parse(line.slice('BOSUN_READS_V1 '.length)).truncated, true);
 });
+
+test('a pathspec naming the repository root is the full diff', () => {
+  for (const command of ['git diff base...HEAD -- .', 'git diff base HEAD -- ./']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('claude', 'tool_calls').full_diff, true, command);
+  }
+});

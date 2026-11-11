@@ -218,3 +218,56 @@ func TestWorkerEmitsCoverageWithoutAFindingsBlock(t *testing.T) {
 		t.Fatalf("coverage = %+v", c)
 	}
 }
+
+// Bosun self-review of #93, F2: nobody opens a binary file with cat or Read,
+// so binaries must not count as unexamined.
+func TestBinaryFilesAreNotCountedAsUnexamined(t *testing.T) {
+	stats := &DiffStats{changed: []changedFile{{path: "logo.png", binary: true}, {path: "a.go", additions: 3}}}
+	c := buildCoverage(stats, nil, &readRecord{Source: "claude", Method: "tool_calls", Opened: []string{"a.go"}})
+	if r := c.Reads; r.ChangedFiles != 1 || r.ChangedFilesUnexamined != 0 || r.ChangedFilesOpened != 1 {
+		t.Fatalf("reads = %+v", r)
+	}
+}
+
+// F3: sizing a working tree must not run code the checkout configures. The
+// reviewer ran in that checkout with write access just before.
+func TestWorkingTreeSizingRunsNoRepositoryCode(t *testing.T) {
+	dir, base := coverageRepo(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	hook := filepath.Join(t.TempDir(), "hook.sh")
+	writeTree(t, hook, "#!/bin/sh\ntouch "+marker+"\n")
+	if err := os.Chmod(hook, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, dir, "config", "core.fsmonitor", hook)
+	writeTree(t, filepath.Join(dir, "src", "app.ts"), "changed\n")
+	if _, err := diffStats(context.Background(), dir, base, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("core.fsmonitor ran during coverage sizing")
+	}
+
+	gitRun(t, dir, "config", "filter.evil.clean", "touch "+marker)
+	_, err := diffStats(context.Background(), dir, base, true)
+	if err == nil || !strings.Contains(err.Error(), "filter") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a clean filter ran during coverage sizing")
+	}
+	// A committed-only diff compares two commits and runs no filters.
+	if _, err := diffStats(context.Background(), dir, base, false); err != nil {
+		t.Fatalf("committed sizing refused: %v", err)
+	}
+}
+
+// Claude diffs by directory (`git diff A B -- internal/localreview/`), as the
+// #93 tool-call capture showed; a directory pathspec covers the files under it.
+func TestDirectoryPathspecCoversChangedFilesBeneathIt(t *testing.T) {
+	stats := &DiffStats{changed: []changedFile{{path: "internal/review/a.go"}, {path: "internal/reviewer/b.go"}, {path: "c.go"}}}
+	c := buildCoverage(stats, nil, &readRecord{Source: "claude", Method: "tool_calls", Diffed: []string{"internal/review"}})
+	if r := c.Reads; r.ChangedFilesDiffed != 1 || strings.Join(r.UnexaminedPaths, ",") != "c.go,internal/reviewer/b.go" {
+		t.Fatalf("reads = %+v", r)
+	}
+}

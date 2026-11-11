@@ -129,11 +129,13 @@ func generatedByName(p string) bool {
 	return false
 }
 
-// coverageGit runs a read-only git command in the workspace. Callers pass
-// --no-ext-diff and --no-textconv to diff: the repository under review
-// configures those drivers, and they would run its code.
+// coverageGit runs a read-only git command in the workspace. The checkout's
+// own config is untrusted -- the reviewer ran there with write access just
+// before -- so nothing it configures may run: hooks and fsmonitor are disabled
+// here, callers pass --no-ext-diff and --no-textconv to diff, and diffStats
+// refuses a working-tree comparison when clean filters are configured.
 func coverageGit(ctx context.Context, dir string, stdin []byte, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-pager", "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if stdin != nil {
@@ -166,6 +168,13 @@ func diffStats(ctx context.Context, dir, base string, workingTree bool) (*DiffSt
 		return nil, fmt.Errorf("no merge base between the base commit and HEAD: %w", err)
 	}
 	mergeBase := strings.TrimSpace(string(out))
+	if workingTree {
+		// Comparing against the working tree runs clean filters on modified
+		// files. Two commits compare blob to blob and run none.
+		if drivers, _ := coverageGit(ctx, dir, nil, "config", "--local", "--name-only", "--get-regexp", `^filter\.`); len(bytes.TrimSpace(drivers)) > 0 {
+			return nil, errors.New("working-tree sizing skipped: the checkout configures filter drivers, which comparing against the working tree would run")
+		}
+	}
 	diff := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "-z"}
 	tail := []string{mergeBase, "HEAD"}
 	if workingTree {
@@ -328,14 +337,16 @@ func buildCoverage(diff *DiffStats, diffErr error, reads *readRecord) Coverage {
 	changed := map[string]bool{}
 	for _, f := range diff.changed {
 		changed[f.path] = true
-		if f.generated || f.deleted {
+		// Nobody opens a binary file to review it, and a deleted file has no
+		// content left to open; neither counts against coverage.
+		if f.generated || f.deleted || f.binary {
 			continue
 		}
 		r.ChangedFiles++
 		switch {
 		case opened[f.path]:
 			r.ChangedFilesOpened++
-		case diffed[f.path]:
+		case diffedBy(diffed, f.path):
 			r.ChangedFilesDiffed++
 		default:
 			r.ChangedFilesUnexamined++
@@ -351,6 +362,21 @@ func buildCoverage(diff *DiffStats, diffErr error, reads *readRecord) Coverage {
 	}
 	sort.Strings(r.UnexaminedPaths)
 	return c
+}
+
+// diffedBy reports whether a path's diff was requested, by its own name or by
+// a directory pathspec above it.
+func diffedBy(diffed map[string]bool, p string) bool {
+	for {
+		if diffed[p] {
+			return true
+		}
+		i := strings.LastIndex(p, "/")
+		if i < 0 {
+			return false
+		}
+		p = p[:i]
+	}
 }
 
 func setOf(paths []string) map[string]bool {

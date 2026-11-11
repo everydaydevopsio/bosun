@@ -447,7 +447,7 @@ closely or skimmed, and elapsed time, tokens, and `turns` are poor proxies
 | `diff.generated`, `diff.generated_paths` | lockfiles, vendored, and generated files (by name, or the repository's `linguist-generated`/`linguist-vendored` attributes), counted separately |
 | `reads.method` | `tool_calls` (Claude's Read tool plus parsed git commands) or `command_parsing` (Codex shell commands) |
 | `reads.full_diff_viewed` | a command printing the whole diff ran; a provider may truncate very long output |
-| `reads.changed_files_opened` / `changed_files` | reviewable changed files opened in full, of those that still exist |
+| `reads.changed_files_opened` / `changed_files` | reviewable changed files opened, of those with text content left to open (deleted and binary files are excluded) |
 | `reads.changed_files_diffed` | changed files whose own diff was requested by path |
 | `reads.unexamined_paths` | changed files neither opened nor diffed by path (up to 50) |
 | `reads.context_files_opened` | files outside the diff read for context |
@@ -456,6 +456,13 @@ Read counts are a lower bound: a file read through a tool the adapter does not
 recognise is not counted. The adapters record paths only, never file content.
 When either half is unavailable, `diff_note` or `reads_note` says why instead of
 reporting zeros.
+
+Sizing runs git in the reviewed checkout, so it runs nothing the checkout
+configures: hooks, fsmonitor, external diff, and textconv drivers are disabled,
+and a working-tree review whose `.git/config` defines filter drivers is not
+sized (`diff_note` says so) because comparing against the working tree would
+run them. Hosted reviews currently size against `origin/HEAD`, as the reviewer
+does; see #96.
 
 `residual_risks` comes from the reviewer: risks specific to this change that
 reading cannot settle, each with an `area`, the `risk`, and a `verify` step.
