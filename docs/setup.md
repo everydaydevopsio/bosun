@@ -82,20 +82,31 @@ The webhook endpoint is `https://bosun.example.com/webhooks/github`.
 
 ## 4. Configure GitHub
 
-In each repository, or at the organization level, add a webhook:
+For a **GitHub App**, configure one App-level webhook under the App's **General
+→ Webhook** settings; do not create a separate repository webhook for every
+installed repository. Set the payload URL to
+`https://bosun.example.com/webhooks/github`, use `application/json`, enter the
+same secret stored in `bosun-webhook`, and keep SSL verification enabled.
+Then, under **Permissions & events**, select **Pull request**, **Issue comment**,
+and **Pull request review comment**.
+The **Issue comment** checkbox is hidden until the App has **Issues: Read-only**
+permission. Add that permission, save, reopen the settings, and then select the
+event. Each installation owner must accept newly requested permissions before
+the installation uses them. See [github-app.md](github-app.md) for the full
+permission and event table.
 
-- Payload URL: `https://bosun.example.com/webhooks/github`
-- Content type: `application/json`
-- Secret: the same value stored in `bosun-webhook`
-- Events: **Branch or tag creation**, **Pull requests**, **Issue comments**, and **Pull request review comments**
-- SSL verification: enabled
+For a **repository-level webhook** used with a token, create the webhook in each
+repository (or at the organization level) with the same URL, content type,
+secret, and event subscriptions.
 
 Bosun verifies `X-Hub-Signature-256` before accepting an event.
 
 A review starts when:
-- a branch is created;
 - a PR is opened, reopened, synchronized, or marked ready for review; or
 - an owner, member, or collaborator comments `@bosun-review review` on a pull request.
+
+Branch creation starts a review only when `review.triggers.branchCreated` is
+enabled and the App is also subscribed to **Create**.
 
 Draft pull requests are skipped. A draft that is opened or pushed to does not
 start a review; marking it ready for review does. Commenting `@bosun-review
