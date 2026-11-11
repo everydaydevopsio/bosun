@@ -95,3 +95,4 @@ runtime, visual behaviour), which is the most useful output for an upgrade.
 | 2026-11-11 | A host capture of Claude's tool calls showed it never uses Read and diffs by directory; directory pathspecs now cover files beneath them |
 | 2026-11-11 | Self-review 2 (Claude): binary files excluded; fsmonitor disabled and filter drivers refused for working-tree sizing; hosted PR base filed as #96 |
 | 2026-11-11 | Self-review 3 (Claude): `markerLine` now takes the last marker at a line start (a residual risk naming the marker hid the payload); full diff verified against the merge base; untracked symlinks not followed; `--includes` |
+| 2026-11-11 | Self-review 4 (Codex): path diffs credited only through a verified range; endpoint forms (`A..HEAD`, `A HEAD`, `A`) need A to be the merge base; only commands a successful exit proves ran are credited. This run reported 0 unexamined changed files |

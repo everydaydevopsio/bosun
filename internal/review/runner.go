@@ -339,10 +339,15 @@ func reviewCoverage(ctx context.Context, workspace string, local bool, meter *us
 	var reads *readRecord
 	if meter != nil && meter.reads != nil {
 		copied := *meter.reads
+		copied.Diffed = append([]pathDiff(nil), meter.reads.Diffed...)
 		reads = &copied
-		// The adapter only knows a revision diff ran; whether it showed the
-		// change under review takes the merge base, which only this side has.
-		reads.FullDiff = stats != nil && verifiedFullDiff(ctx, workspace, stats.MergeBase, reads.DiffRanges)
+		// The adapter only knows which revisions a diff compared; whether that
+		// showed the change under review takes the merge base, which only this
+		// side has. Without it nothing is verified.
+		reads.FullDiff = false
+		if stats != nil {
+			verifyReads(ctx, workspace, stats.MergeBase, reads)
+		}
 	}
 	return buildCoverage(stats, err, reads)
 }

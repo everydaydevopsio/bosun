@@ -21,20 +21,18 @@ const shells = new Set(['sh', 'bash', 'zsh', 'dash']);
 // Diff options that print names or numbers but no content.
 const noContent = /^(-s|--(stat|numstat|shortstat|name-only|name-status|summary|dirstat|compact-summary|quiet|raw|no-patch)(=|$))/;
 
-// tokenize splits a shell script into simple commands of words. It handles
-// quotes, backslashes, and the separators ; & | and newlines. It is not a shell:
-// expansions are kept literally, which only ever makes a path not match.
+// tokenize splits a shell script into the simple commands a successful exit
+// proves ran. It handles quotes, backslashes, and the operators ; & && || | and
+// newlines. It is not a shell: expansions are kept literally, which only ever
+// makes a path not match.
 function tokenize(script) {
-  const commands = [];
+  const items = [];
   let words = [];
   let word = '';
   let inWord = false;
   let quote = '';
-  // A command after || runs only when the one before it failed, and a
-  // successful exit says nothing about whether it ran, so it earns no credit.
-  let skipped = false;
   const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
-  const endCommand = () => { endWord(); if (words.length && !skipped) commands.push(words); words = []; skipped = false; };
+  const endCommand = sep => { endWord(); if (words.length) items.push({ words, sep }); words = []; };
   for (let i = 0; i < script.length; i++) {
     const c = script[i];
     if (quote === "'") {
@@ -49,14 +47,43 @@ function tokenize(script) {
     }
     if (c === "'" || c === '"') { quote = c; inWord = true; continue; }
     if (c === '\\' && i + 1 < script.length) { word += script[++i]; inWord = true; continue; }
-    if (c === '|' && script[i + 1] === '|') { endCommand(); skipped = true; i++; continue; }
-    if (c === ';' || c === '&' || c === '|' || c === '\n') { endCommand(); continue; }
+    // `2>&1` and `<&3` are redirections, not background operators.
+    if (c === '&' && (script[i - 1] === '>' || script[i - 1] === '<')) { word += c; inWord = true; continue; }
+    if ((c === '&' || c === '|') && script[i + 1] === c) { endCommand(c + c); i++; continue; }
+    if (c === ';' || c === '&' || c === '|' || c === '\n') { endCommand(c); continue; }
     if (c === ' ' || c === '\t' || c === '\r') { endWord(); continue; }
     word += c;
     inWord = true;
   }
-  endCommand();
-  return commands;
+  endCommand(null);
+  return certain(items);
+}
+
+// certain keeps the commands that must have run for the whole script to exit
+// successfully. A script's status is its last statement's, so every command of
+// the last statement up to an || ran; in an earlier statement only the first
+// unit is certain, because a failure there skips the rest of its && chain and
+// the script still succeeds. Pipelines run as one unit.
+function certain(items) {
+  const statements = [];
+  let current = [];
+  for (const item of items) {
+    current.push(item);
+    if (item.sep === ';' || item.sep === '&' || item.sep === '\n' || item.sep === null) {
+      statements.push(current);
+      current = [];
+    }
+  }
+  if (current.length) statements.push(current);
+  const out = [];
+  statements.forEach((statement, index) => {
+    const last = index === statements.length - 1;
+    for (const item of statement) {
+      out.push(item.words);
+      if (item.sep === '||' || (!last && item.sep === '&&')) break;
+    }
+  });
+  return out;
 }
 
 // splitCommand turns a provider's command (a string, or an argv array) into
@@ -87,7 +114,8 @@ function splitCommand(command, depth = 0) {
 function createReadTracker(root = process.cwd()) {
   const workspace = path.resolve(root);
   const opened = new Set();
-  const diffed = new Set();
+  // range -> paths diffed by that comparison
+  const diffed = new Map();
   let fullDiff = false;
   // The revision operands of every whole-diff command. The worker checks
   // them against the merge base; `git diff HEAD` is a revision diff too.
@@ -136,12 +164,11 @@ function createReadTracker(root = process.cwd()) {
     const before = dash < 0 ? args : args.slice(0, dash);
     const pathspec = dash < 0 ? [] : args.slice(dash + 1);
     if (verb === 'show' || verb === 'cat-file') {
+      // `REV:path` prints the file. `git show REV -- path` prints one commit's
+      // change to it, which on a longer branch is not the change under review.
       for (const word of before) {
         const rel = blob(word);
         if (rel) opened.add(rel);
-      }
-      if (verb === 'show' && !before.some(word => noContent.test(word))) {
-        for (const word of pathspec) { const rel = relative(word, cwd); if (rel) diffed.add(rel); }
       }
       return;
     }
@@ -152,14 +179,21 @@ function createReadTracker(root = process.cwd()) {
     const paths = [...pathspec.map(word => relative(word, cwd)), ...named].filter(Boolean);
     // Only a comparison against a revision shows the change: a bare
     // `git diff` is the working tree against the index, which on a committed
-    // checkout is empty.
+    // checkout is empty. The worker checks each range against the merge base.
     const revisions = operands.filter((word, index) => !named[index]);
-    if (paths.length === 0 && revisions.length > 0) {
+    if (revisions.length === 0) return;
+    const range = revisions.join(' ');
+    if (range.length > 200) return;
+    if (paths.length === 0) {
       fullDiff = true;
-      const range = revisions.join(' ');
-      if (ranges.length < 20 && range.length <= 200 && !ranges.includes(range)) ranges.push(range);
+      if (ranges.length < 20 && !ranges.includes(range)) ranges.push(range);
+      return;
     }
-    for (const rel of paths) diffed.add(rel);
+    if (!diffed.has(range)) {
+      if (diffed.size >= 50) return;
+      diffed.set(range, new Set());
+    }
+    for (const rel of paths) diffed.get(range).add(rel);
   }
 
   function simple(words, state) {
@@ -197,7 +231,9 @@ function createReadTracker(root = process.cwd()) {
       if (rel) opened.add(rel);
     },
     record(source, method) {
-      return { source, method, commands, full_diff: fullDiff, diff_ranges: [...ranges], opened: [...opened].sort(), diffed: [...diffed].sort(), truncated: false };
+      return { source, method, commands, full_diff: fullDiff, diff_ranges: [...ranges], opened: [...opened].sort(),
+        diffed: [...diffed].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([range, paths]) => ({ range, paths: [...paths].sort() })),
+        truncated: false };
     },
   };
 }
@@ -209,13 +245,22 @@ function readsLine(record) {
   const bytes = text => Buffer.byteLength(text, 'utf8');
   const out = { ...record, opened: [], diffed: [] };
   let size = bytes(prefix) + bytes(JSON.stringify(out)) + 1;
-  const queues = [['opened', record.opened || []], ['diffed', record.diffed || []]];
-  for (const [key, paths] of queues) {
+  const fits = cost => {
+    if (size + cost > budget) { out.truncated = true; return false; }
+    size += cost;
+    return true;
+  };
+  for (const entry of record.opened || []) {
+    if (!fits(bytes(JSON.stringify(entry)) + 1)) break;
+    out.opened.push(entry);
+  }
+  for (const { range, paths } of record.diffed || []) {
+    const kept = { range, paths: [] };
+    if (!fits(bytes(JSON.stringify(kept)) + 1)) break;
+    out.diffed.push(kept);
     for (const entry of paths) {
-      const cost = bytes(JSON.stringify(entry)) + 1;
-      if (size + cost > budget) { out.truncated = true; break; }
-      out[key].push(entry);
-      size += cost;
+      if (!fits(bytes(JSON.stringify(entry)) + 1)) break;
+      kept.paths.push(entry);
     }
   }
   return prefix + JSON.stringify(out) + '\n';

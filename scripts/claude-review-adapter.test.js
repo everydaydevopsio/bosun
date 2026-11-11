@@ -238,7 +238,7 @@ test('#93: Claude records Read and successful git calls, not denied ones', () =>
   assert.equal(reads.source, 'claude');
   assert.equal(reads.method, 'tool_calls');
   assert.deepEqual(reads.opened, ['a.go']);
-  assert.deepEqual(reads.diffed, ['b.go']);
+  assert.deepEqual(reads.diffed, [{ range: 'main...HEAD', paths: ['b.go'] }]);
   assert.equal(reads.commands, 2);
   assert.doesNotMatch(JSON.stringify(reads), /private/);
 });

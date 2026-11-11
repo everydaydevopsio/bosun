@@ -39,10 +39,19 @@ type readRecord struct {
 	FullDiff bool   `json:"full_diff"`
 	// DiffRanges are the revision operands of whole-diff commands, verified
 	// against the merge base before FullDiffViewed is reported.
-	DiffRanges []string `json:"diff_ranges"`
-	Opened     []string `json:"opened"`
-	Diffed     []string `json:"diffed"`
-	Truncated  bool     `json:"truncated"`
+	DiffRanges []string   `json:"diff_ranges"`
+	Opened     []string   `json:"opened"`
+	Diffed     []pathDiff `json:"diffed"`
+	Truncated  bool       `json:"truncated"`
+}
+
+// pathDiff is one `git diff <range> -- <paths>` the reviewer ran. Its paths
+// are credited only once the range is verified to compare the merge base with
+// HEAD; a diff of something else does not show the change under review.
+type pathDiff struct {
+	Range    string   `json:"range"`
+	Paths    []string `json:"paths"`
+	verified bool
 }
 
 // Coverage is measured evidence of how the change was examined, for a reader
@@ -333,10 +342,12 @@ const countLimit = 64 << 20
 // nothing that git could read as an option.
 var revisionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@{}^~-]{0,199}$`)
 
-// verifiedFullDiff reports whether any whole-diff command the reviewer ran
-// compared the merge base with HEAD: `A...HEAD`, `A..HEAD`, `A HEAD`, or `A`
-// alone, where A shares the reviewed merge base with HEAD. `git diff HEAD`
-// and `git diff HEAD~1` on a longer branch run, but do not show the change.
+// verifiedFullDiff reports whether any of the reviewer's diff ranges compared
+// the merge base with HEAD, the change under review. `A...HEAD` compares the
+// merge base of A and HEAD with HEAD, so A only has to share the merge base.
+// `A..HEAD`, `A HEAD`, and `A` alone compare A's own tree, so A has to be the
+// merge base: once the base branch moves on, `main..HEAD` also shows its
+// changes reversed. `git diff HEAD`, and `HEAD~1` on a longer branch, fail.
 func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []string) bool {
 	resolve := func(rev string) string {
 		if !revisionPattern.MatchString(rev) {
@@ -354,12 +365,14 @@ func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []strin
 	}
 	for _, rng := range ranges {
 		var left, right string
+		threeDot := false
 		fields := strings.Fields(rng)
 		switch {
 		case len(fields) == 2:
 			left, right = fields[0], fields[1]
 		case len(fields) == 1 && strings.Contains(fields[0], "..."):
 			left, right, _ = strings.Cut(fields[0], "...")
+			threeDot = true
 		case len(fields) == 1 && strings.Contains(fields[0], ".."):
 			left, right, _ = strings.Cut(fields[0], "..")
 		case len(fields) == 1:
@@ -374,12 +387,35 @@ func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []strin
 		if a == "" {
 			continue
 		}
+		if !threeDot {
+			if a == mergeBase {
+				return true
+			}
+			continue
+		}
 		out, err := coverageGit(ctx, dir, nil, "merge-base", a, head)
 		if err == nil && strings.TrimSpace(string(out)) == mergeBase {
 			return true
 		}
 	}
 	return false
+}
+
+// verifyReads replaces the adapter's claims with what the merge base
+// supports: full_diff only for a verified whole-diff range, and path credit
+// only through a verified range.
+func verifyReads(ctx context.Context, dir, mergeBase string, reads *readRecord) {
+	reads.FullDiff = verifiedFullDiff(ctx, dir, mergeBase, reads.DiffRanges)
+	checked := map[string]bool{}
+	for i := range reads.Diffed {
+		rng := reads.Diffed[i].Range
+		ok, seen := checked[rng]
+		if !seen {
+			ok = verifiedFullDiff(ctx, dir, mergeBase, []string{rng})
+			checked[rng] = ok
+		}
+		reads.Diffed[i].verified = ok
+	}
 }
 
 // buildCoverage joins the measured diff with the adapter's read record. Either
@@ -401,7 +437,14 @@ func buildCoverage(diff *DiffStats, diffErr error, reads *readRecord) Coverage {
 		FullDiffViewed: reads.FullDiff, Truncated: reads.Truncated}
 	c.Reads = r
 	opened := setOf(reads.Opened)
-	diffed := setOf(reads.Diffed)
+	diffed := map[string]bool{}
+	for _, d := range reads.Diffed {
+		if d.verified {
+			for _, p := range d.Paths {
+				diffed[p] = true
+			}
+		}
+	}
 	if diff == nil {
 		r.ContextFilesOpened = len(opened)
 		c.ReadsNote = "without the diff, opened files cannot be compared with changed files"
@@ -499,7 +542,17 @@ func parseReadsRecord(body []byte, source string) (*readRecord, bool) {
 	if r.Method != "tool_calls" && r.Method != "command_parsing" {
 		r.Method = "unknown"
 	}
-	r.Opened, r.Diffed = cleanPaths(r.Opened), cleanPaths(r.Diffed)
+	r.Opened = cleanPaths(r.Opened)
+	var diffs []pathDiff
+	for _, d := range r.Diffed {
+		if len(diffs) == 50 {
+			break
+		}
+		if d.Range != "" && len(d.Range) <= 200 {
+			diffs = append(diffs, pathDiff{Range: d.Range, Paths: cleanPaths(d.Paths)})
+		}
+	}
+	r.Diffed = diffs
 	var ranges []string
 	for _, rng := range r.DiffRanges {
 		if len(ranges) == 20 {

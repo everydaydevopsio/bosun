@@ -48,7 +48,7 @@ test('git commands distinguish a full diff, a path diff, a stat, and a blob read
   tracker.command('git show HEAD:README.md');
   tracker.command('git cat-file -p HEAD:src/deleted.ts');
   record = tracker.record('codex', 'command_parsing');
-  assert.deepEqual(record.diffed, ['src/util.ts']);
+  assert.deepEqual(record.diffed, [{ range: 'abc...HEAD', paths: ['src/util.ts'] }]);
   assert.deepEqual(record.opened, ['README.md', 'src/deleted.ts']);
   assert.equal(record.full_diff, false);
   tracker.command('git diff abc...HEAD');
@@ -139,4 +139,22 @@ test('a revision diff reports its operands for the worker to verify', () => {
   tracker.command('git diff -U5 base HEAD');
   tracker.command('git diff --stat base...HEAD');
   assert.deepEqual(tracker.record('claude', 'tool_calls').diff_ranges, ['e098e24...HEAD', 'base HEAD']);
+});
+
+// Final self-review of #93, F3: overall success proves only some commands ran.
+// In a statement that is not the last, only its first unit is certain.
+test('only commands that a successful exit proves ran are credited', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('bash -lc "false && cat src/app.ts; cat README.md | head; cat src/util.ts && cat package.json"');
+  assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md', 'package.json', 'src/util.ts']);
+});
+
+// F1: a path diff is credited only with the revisions it compared, for the
+// worker to verify; one with no revision is worktree-vs-index and earns none.
+test('path diffs carry their range; a path diff with no revision earns nothing', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('git diff -- src/');
+  tracker.command('git diff base...HEAD -- src/app.ts package.json');
+  tracker.command('git show abc123 -- src/util.ts');
+  assert.deepEqual(tracker.record('claude', 'tool_calls').diffed, [{ range: 'base...HEAD', paths: ['package.json', 'src/app.ts'] }]);
 });

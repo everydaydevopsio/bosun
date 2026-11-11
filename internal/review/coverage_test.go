@@ -119,7 +119,7 @@ func TestCoverageJoinsReadsWithTheDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	reads := &readRecord{Source: "codex", Method: "command_parsing", Commands: 4,
-		Opened: []string{"src/app.ts", "README.md", "docs/a.md"}, Diffed: []string{"package-lock.json"}}
+		Opened: []string{"src/app.ts", "README.md", "docs/a.md"}, Diffed: []pathDiff{{Range: "x", Paths: []string{"package-lock.json"}}}}
 	c := buildCoverage(stats, nil, reads)
 	r := c.Reads
 	if r == nil || c.Diff == nil {
@@ -146,7 +146,7 @@ func TestCoverageSaysWhatIsMissingInsteadOfGuessing(t *testing.T) {
 	}
 }
 
-const sampleReads = `BOSUN_READS_V1 {"source":"codex","method":"command_parsing","commands":3,"full_diff":true,"opened":["a.go","../etc/passwd","/abs","ok/b.go"],"diffed":[],"truncated":false}`
+const sampleReads = `BOSUN_READS_V1 {"source":"codex","method":"command_parsing","commands":3,"full_diff":true,"opened":["a.go","../etc/passwd","/abs","ok/b.go"],"diffed":[{"range":"x","paths":["../no","c.go"]}],"truncated":false}`
 
 // The reads line is a control line like the usage line: recorded, never
 // published, and never accepted from the wrong provider.
@@ -267,9 +267,25 @@ func TestWorkingTreeSizingRunsNoRepositoryCode(t *testing.T) {
 // #93 tool-call capture showed; a directory pathspec covers the files under it.
 func TestDirectoryPathspecCoversChangedFilesBeneathIt(t *testing.T) {
 	stats := &DiffStats{changed: []changedFile{{path: "internal/review/a.go"}, {path: "internal/reviewer/b.go"}, {path: "c.go"}}}
-	c := buildCoverage(stats, nil, &readRecord{Source: "claude", Method: "tool_calls", Diffed: []string{"internal/review"}})
+	c := buildCoverage(stats, nil, &readRecord{Source: "claude", Method: "tool_calls", Diffed: []pathDiff{{Range: "base...HEAD", Paths: []string{"internal/review"}, verified: true}}})
 	if r := c.Reads; r.ChangedFilesDiffed != 1 || strings.Join(r.UnexaminedPaths, ",") != "c.go,internal/reviewer/b.go" {
 		t.Fatalf("reads = %+v", r)
+	}
+}
+
+// Final self-review of #93, F2: once the base branch has diverged, `main HEAD`
+// and `main..HEAD` compare tips, not the change; only `main...HEAD` does.
+func TestEndpointDiffsAgainstADivergedBaseAreNotTheChange(t *testing.T) {
+	dir, base := coverageRepo(t)
+	gitRun(t, dir, "checkout", "-q", "main")
+	writeTree(t, filepath.Join(dir, "other.txt"), "moved on\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "main moves")
+	gitRun(t, dir, "checkout", "-q", "feature")
+	for ranges, want := range map[string]bool{"main...HEAD": true, "main..HEAD": false, "main HEAD": false, "main": false, base + "..HEAD": true, base: true} {
+		if got := verifiedFullDiff(context.Background(), dir, base, []string{ranges}); got != want {
+			t.Errorf("%q: got %v, want %v", ranges, got, want)
+		}
 	}
 }
 
@@ -337,5 +353,22 @@ func TestFilterDriversFromIncludedConfigAreRefused(t *testing.T) {
 	writeTree(t, filepath.Join(dir, "src", "app.ts"), "changed\n")
 	if _, err := diffStats(context.Background(), dir, base, true); err == nil || !strings.Contains(err.Error(), "filter") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// F1: a path diff whose range does not compare the merge base with HEAD earns
+// no credit; one that does credits its paths.
+func TestPathDiffsAreCreditedOnlyThroughAVerifiedRange(t *testing.T) {
+	dir, base := coverageRepo(t)
+	stats, err := diffStats(context.Background(), dir, base, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := &readRecord{Source: "codex", Method: "command_parsing",
+		Diffed: []pathDiff{{Range: "HEAD", Paths: []string{"src/app.ts"}}, {Range: base + "...HEAD", Paths: []string{"src/util.ts"}}}}
+	verifyReads(context.Background(), dir, stats.MergeBase, reads)
+	c := buildCoverage(stats, nil, reads)
+	if r := c.Reads; r.ChangedFilesDiffed != 1 || strings.Join(r.UnexaminedPaths, ",") != "src/app.ts" {
+		t.Fatalf("reads = %+v", r)
 	}
 }
