@@ -258,32 +258,38 @@ func IssueRepositoryToken(ctx context.Context, apiBaseURL string, client *http.C
 	}
 	return RepositoryToken{Value: response.Token, ExpiresAt: response.ExpiresAt}, nil
 }
-func (g githubClient) resolvePR(ctx context.Context, repo string, number int, token string) (string, string, error) {
+func (g githubClient) resolvePR(ctx context.Context, repo string, number int, token string) (ref, sha, base string, err error) {
 	var pr struct {
 		Head struct {
 			Ref string `json:"ref"`
 			SHA string `json:"sha"`
 		} `json:"head"`
+		Base struct {
+			SHA string `json:"sha"`
+		} `json:"base"`
 	}
 	if err := g.request(ctx, "GET", fmt.Sprintf("/repos/%s/pulls/%d", repo, number), token, nil, &pr); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if pr.Head.Ref == "" || !commitPattern.MatchString(pr.Head.SHA) {
-		return "", "", fmt.Errorf("GitHub returned an invalid pull request head")
+		return "", "", "", fmt.Errorf("GitHub returned an invalid pull request head")
 	}
-	return pr.Head.Ref, pr.Head.SHA, nil
+	// An unusable base is not fatal: the review falls back to the default
+	// branch, as every review did before #96.
+	return pr.Head.Ref, pr.Head.SHA, validBase(pr.Base.SHA), nil
 }
 
-// ResolvePullRequest returns a pull request's head branch and commit.
+// ResolvePullRequest returns a pull request's head branch and commit, and its
+// base commit ("" when GitHub did not return a usable one).
 //
 // A comment-triggered review is created knowing only a pull-request number, so
 // the identity has to be looked up before anything can name what was reviewed.
 // The reviewer does this for itself; the controller does it too, so the Job it
 // creates records the same answer rather than leaving it in the reviewer's
 // memory where nothing else can reach it.
-func ResolvePullRequest(ctx context.Context, apiBaseURL string, client *http.Client, repo string, number int, token string) (string, string, error) {
+func ResolvePullRequest(ctx context.Context, apiBaseURL string, client *http.Client, repo string, number int, token string) (string, string, string, error) {
 	if !validRepository(repo) {
-		return "", "", fmt.Errorf("invalid repository name")
+		return "", "", "", fmt.Errorf("invalid repository name")
 	}
 	if apiBaseURL == "" {
 		apiBaseURL = "https://api.github.com"

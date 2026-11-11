@@ -36,25 +36,28 @@ func redact(text string, extra ...string) string {
 	}
 	return text
 }
-func cloneRepository(ctx context.Context, base, workspace string, req Request, token string) (string, error) {
+
+// cloneRepository checks out the reviewed commit and reports whether the pull
+// request's base commit, when one was given, is available to compare against.
+func cloneRepository(ctx context.Context, base, workspace string, req Request, token string) (string, bool, error) {
 	if !validRepository(req.Repo) {
-		return "", fmt.Errorf("invalid repository name")
+		return "", false, fmt.Errorf("invalid repository name")
 	}
 	if req.SHA != "" && !commitPattern.MatchString(req.SHA) {
-		return "", fmt.Errorf("invalid commit SHA")
+		return "", false, fmt.Errorf("invalid commit SHA")
 	}
 	if req.PRNumber < 0 {
-		return "", fmt.Errorf("invalid pull request number")
+		return "", false, fmt.Errorf("invalid pull request number")
 	}
 	helper, err := os.MkdirTemp("", "bosun-git-")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer os.RemoveAll(helper)
 	askpass := filepath.Join(helper, "askpass")
 	script := "#!/bin/sh\ncase \"$1\" in\n  Username*) printf '%s\\n' x-access-token ;;\n  *) printf '%s\\n' \"$BOSUN_GIT_TOKEN\" ;;\nesac\n"
 	if err = os.WriteFile(askpass, []byte(script), 0700); err != nil {
-		return "", err
+		return "", false, err
 	}
 	// Ignore inherited Git overrides and credential helpers during authentication.
 	var env []string
@@ -77,27 +80,49 @@ func cloneRepository(ctx context.Context, base, workspace string, req Request, t
 		return strings.TrimSpace(string(output)), nil
 	}
 	if _, err = git("", "clone", "--no-checkout", "--no-tags", "--", strings.TrimRight(base, "/")+"/"+req.Repo+".git", workspace); err != nil {
-		return "", err
+		return "", false, err
 	}
 	fetchRef := "refs/heads/" + req.Ref
 	if req.PRNumber > 0 {
 		fetchRef = fmt.Sprintf("refs/pull/%d/head", req.PRNumber)
 	} else if _, err = git(workspace, "check-ref-format", fetchRef); err != nil {
-		return "", fmt.Errorf("invalid branch ref")
+		return "", false, fmt.Errorf("invalid branch ref")
 	}
 	if _, err = git(workspace, "fetch", "--no-tags", "origin", fetchRef); err != nil {
-		return "", err
+		return "", false, err
 	}
 	revision := "FETCH_HEAD"
 	if req.SHA != "" {
 		// Pin the event's exact commit even if the branch/PR advanced meanwhile.
 		if _, err = git(workspace, "fetch", "--no-tags", "origin", req.SHA); err != nil {
-			return "", err
+			return "", false, err
 		}
 		revision = req.SHA
 	}
 	if _, err = git(workspace, "checkout", "--detach", revision); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return git(workspace, "rev-parse", "HEAD")
+	head, err := git(workspace, "rev-parse", "HEAD")
+	if err != nil {
+		return "", false, err
+	}
+	return head, fetchBase(git, workspace, req.BaseSHA), nil
+}
+
+// fetchBase makes the pull request's base commit available (#96). The clone
+// already has every branch, so this is usually a no-op; a base branch that was
+// force-pushed since the event is fetched by SHA, as the head is. It reports
+// false rather than failing: the caller falls back to the default branch.
+func fetchBase(git func(string, ...string) (string, error), workspace, sha string) bool {
+	if sha == "" || !commitPattern.MatchString(sha) {
+		return false
+	}
+	if _, err := git(workspace, "cat-file", "-e", sha+"^{commit}"); err == nil {
+		return true
+	}
+	if _, err := git(workspace, "fetch", "--no-tags", "origin", sha); err != nil {
+		return false
+	}
+	_, err := git(workspace, "cat-file", "-e", sha+"^{commit}")
+	return err == nil
 }

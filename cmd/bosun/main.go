@@ -178,9 +178,14 @@ func resolveIdentity(ctx context.Context, r review.Request) review.Request {
 	ctx = resolveCtx
 	token, err := controllerToken(ctx, r.Repo)
 	if err == nil {
-		var ref, sha string
-		ref, sha, err = review.ResolvePullRequest(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, r.Repo, r.PRNumber, token)
+		var ref, sha, base string
+		ref, sha, base, err = review.ResolvePullRequest(ctx, os.Getenv("BOSUN_GITHUB_API_URL"), nil, r.Repo, r.PRNumber, token)
 		if err == nil {
+			// The same lookup names the pull request's base (#96), so a
+			// comment-triggered review compares against it like any other.
+			if r.BaseSHA == "" {
+				r.BaseSHA = base
+			}
 			// Keep the ref the trigger carried: the Job's name derives from
 			// it and is the deduplication key for this delivery, so a
 			// resolution that succeeds on a redelivery after failing once

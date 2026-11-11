@@ -35,6 +35,7 @@ type OpenPullRequest struct {
 	Repo      string
 	Number    int
 	Ref, SHA  string
+	BaseSHA   string
 	Draft     bool
 	UpdatedAt time.Time
 }
@@ -144,6 +145,9 @@ func (s Scanner) OpenPullRequests(ctx context.Context, token, repo string, since
 				Ref string `json:"ref"`
 				SHA string `json:"sha"`
 			} `json:"head"`
+			Base struct {
+				SHA string `json:"sha"`
+			} `json:"base"`
 		}
 		path := fmt.Sprintf("/repos/%s/pulls?state=open&sort=updated&direction=desc&per_page=100&page=%d", repo, page)
 		if err := s.client().request(ctx, "GET", path, token, nil, &items); err != nil {
@@ -155,7 +159,7 @@ func (s Scanner) OpenPullRequests(ctx context.Context, token, repo string, since
 				past = true
 				break
 			}
-			out = append(out, OpenPullRequest{Repo: repo, Number: p.Number, Ref: p.Head.Ref, SHA: p.Head.SHA, Draft: p.Draft, UpdatedAt: p.UpdatedAt})
+			out = append(out, OpenPullRequest{Repo: repo, Number: p.Number, Ref: p.Head.Ref, SHA: p.Head.SHA, BaseSHA: validBase(p.Base.SHA), Draft: p.Draft, UpdatedAt: p.UpdatedAt})
 		}
 		if past || len(items) < 100 {
 			break

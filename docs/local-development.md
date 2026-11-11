@@ -466,8 +466,8 @@ configures: hooks, fsmonitor, external diff, and textconv drivers are disabled,
 and a working-tree review whose `.git/config` defines filter drivers is not
 sized (`diff_note` says so, including drivers pulled in by `include.path`)
 because comparing against the working tree would run them. Untracked symlinks
-count as one line and are never followed. Hosted reviews currently size against `origin/HEAD`, as the reviewer
-does; see #96.
+count as one line and are never followed. Hosted reviews size against the pull
+request's base, as the reviewer does.
 
 `residual_risks` comes from the reviewer: risks specific to this change that
 reading cannot settle, each with an `area`, the `risk`, and a `verify` step.

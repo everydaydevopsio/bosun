@@ -12,7 +12,10 @@ import (
 	"github.com/everydaydevopsio/bosun/internal/review"
 )
 
-const resolvedSHA = "4ce5baee84d7cfb5fe5d2cb8c6726e83871c47f1"
+const (
+	resolvedSHA  = "4ce5baee84d7cfb5fe5d2cb8c6726e83871c47f1"
+	resolvedBase = "9a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+)
 
 func pullRequestStub(t *testing.T, calls *int) *httptest.Server {
 	t.Helper()
@@ -25,6 +28,7 @@ func pullRequestStub(t *testing.T, calls *int) *httptest.Server {
 		*calls++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"head": map[string]string{"ref": "feature", "sha": resolvedSHA},
+			"base": map[string]string{"ref": "release/1.x", "sha": resolvedBase},
 		})
 	}))
 }
@@ -50,6 +54,10 @@ func TestACommentTriggeredRequestIsResolvedBeforeSubmission(t *testing.T) {
 
 	if got.Ref != "feature" || got.SHA != resolvedSHA {
 		t.Fatalf("request was not resolved: Ref=%q SHA=%q", got.Ref, got.SHA)
+	}
+	// #96: the comment-triggered review compares against the PR's own base.
+	if got.BaseSHA != resolvedBase {
+		t.Fatalf("base not resolved: %q", got.BaseSHA)
 	}
 	if calls != 1 {
 		t.Errorf("want one lookup, got %d", calls)

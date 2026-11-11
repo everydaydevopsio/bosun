@@ -106,3 +106,16 @@ func TestOpenPullRequestsPagesUntilTheLookbackBoundary(t *testing.T) {
 		t.Errorf("fetched %d pages, want to stop at the first page past the boundary", pages)
 	}
 }
+
+// #96: a swept pull request is reviewed against its own base, like a webhook one.
+func TestOpenPullRequestsCarryTheirBase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"number": 1, "updated_at": time.Now().Format(time.RFC3339),
+			"head": map[string]string{"ref": "b", "sha": scanSHA}, "base": map[string]string{"ref": "release", "sha": scanSHA}}})
+	}))
+	defer srv.Close()
+	prs, err := Scanner{APIBaseURL: srv.URL}.OpenPullRequests(context.Background(), "t", "acme/repo", time.Time{})
+	if err != nil || len(prs) != 1 || prs[0].BaseSHA != scanSHA {
+		t.Fatalf("prs = %+v, err = %v", prs, err)
+	}
+}

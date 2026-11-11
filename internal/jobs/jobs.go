@@ -86,6 +86,11 @@ func ptr[T any](v T) *T { return &v }
 
 func env(cfg config.Config, req review.Request) []corev1.EnvVar {
 	base := []corev1.EnvVar{{Name: "BOSUN_REPO", Value: req.Repo}, {Name: "BOSUN_REF", Value: req.Ref}, {Name: "BOSUN_SHA", Value: req.SHA}, {Name: "BOSUN_TRIGGER", Value: req.Trigger}, {Name: "BOSUN_REVIEW_PROVIDER", Value: cfg.ReviewProvider}, {Name: "BOSUN_REVIEW_TIMEOUT_SECONDS", Value: fmt.Sprint(cfg.ReviewTimeoutSeconds)}, {Name: "BOSUN_PR_NUMBER", Value: fmt.Sprint(req.PRNumber)}}
+	// The pull request's base (#96). Absent, not empty, when unknown: the
+	// reviewer then compares against the default branch.
+	if req.BaseSHA != "" {
+		base = append(base, corev1.EnvVar{Name: "BOSUN_BASE_SHA", Value: req.BaseSHA})
+	}
 
 	// GitHub credentials are how the reviewer clones and posts, so they are not
 	// provider-scoped.

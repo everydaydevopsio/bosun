@@ -98,3 +98,19 @@ func TestPullRequestTriggersAreUnaffectedByTheBranchSetting(t *testing.T) {
 		}
 	}
 }
+
+// #96: a pull request names its own base. Without it the reviewer compares
+// against the default branch, which is the wrong diff for a PR into a release
+// branch.
+func TestPullRequestCarriesItsBase(t *testing.T) {
+	const base = "1111111111111111111111111111111111111111"
+	payload := []byte(`{"action":"synchronize","repository":{"full_name":"acme/widget"},"pull_request":{"number":7,"head":{"ref":"feature/x","sha":"abc123"},"base":{"ref":"release/1.x","sha":"` + base + `"}}}`)
+	r, ok := FromWebhook("pull_request", payload, "@bosun-review review", nil, false)
+	if !ok || r.BaseSHA != base {
+		t.Fatalf("base not carried: %#v, %v", r, ok)
+	}
+	bad := []byte(`{"action":"synchronize","repository":{"full_name":"acme/widget"},"pull_request":{"number":7,"head":{"ref":"feature/x","sha":"abc123"},"base":{"sha":"--upload-pack=x"}}}`)
+	if r, _ := FromWebhook("pull_request", bad, "@bosun-review review", nil, false); r.BaseSHA != "" {
+		t.Fatalf("accepted an invalid base: %q", r.BaseSHA)
+	}
+}

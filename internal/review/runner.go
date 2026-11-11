@@ -51,7 +51,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	if runID == "" {
 		runID = uuid.NewString()
 	}
-	req := Request{Repo: os.Getenv("BOSUN_REPO"), Ref: os.Getenv("BOSUN_REF"), SHA: os.Getenv("BOSUN_SHA"), Trigger: os.Getenv("BOSUN_TRIGGER")}
+	req := Request{Repo: os.Getenv("BOSUN_REPO"), Ref: os.Getenv("BOSUN_REF"), SHA: os.Getenv("BOSUN_SHA"), Trigger: os.Getenv("BOSUN_TRIGGER"), BaseSHA: os.Getenv("BOSUN_BASE_SHA")}
 	meter := newUsageRecorder(cfg.ReviewProvider)
 	ctx = context.WithValue(ctx, usageKey{}, meter)
 	credential := credentialMode(cfg.ReviewProvider)
@@ -207,9 +207,13 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		// publish under that, and leave the commit the Job recorded naming a
 		// different review.
 		if req.PRNumber > 0 && req.SHA == "" {
-			req.Ref, req.SHA, err = github.resolvePR(ctx, req.Repo, req.PRNumber, token)
+			var base string
+			req.Ref, req.SHA, base, err = github.resolvePR(ctx, req.Repo, req.PRNumber, token)
 			if err != nil {
 				return fail(StageClone, err)
+			}
+			if req.BaseSHA == "" {
+				req.BaseSHA = base
 			}
 		}
 		workspace, err = makeHostedWorkspace()
@@ -220,11 +224,18 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		// Assign only on success: a failed clone returns an empty SHA, and
 		// overwriting the commit the webhook supplied would leave the failure
 		// comment unable to name what it tried to review.
-		cloned, err := cloneRepository(ctx, w.CloneBaseURL, workspace, req, token)
+		cloned, haveBase, err := cloneRepository(ctx, w.CloneBaseURL, workspace, req, token)
 		if err != nil {
 			return fail(StageClone, err)
 		}
 		req.SHA = cloned
+		if req.BaseSHA != "" && !haveBase {
+			// Not fatal: comparing against the default branch, as every
+			// review did before #96, is better than losing the review.
+			slog.Warn("the pull request base is not available in the clone; comparing against the default branch",
+				"repo", req.Repo, "pr", req.PRNumber, "base", req.BaseSHA)
+			req.BaseSHA = ""
+		}
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
 		return failf(StageSetup, "review path is not a git repository: %w", err)
@@ -237,8 +248,8 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		return failf(StageSetup, "read review prompt: %w", err)
 	}
 	prompt := fmt.Sprintf("%s\nRepository: %s\nBranch: %s\nCommit: %s\n", instructions, req.Repo, req.Ref, req.SHA)
-	if base := os.Getenv("BOSUN_BASE_SHA"); base != "" {
-		prompt += "Compare the merge base of " + base + " and HEAD to HEAD. Base commit: " + base + "\n"
+	if req.BaseSHA != "" {
+		prompt += "Compare the merge base of " + req.BaseSHA + " and HEAD to HEAD. Base commit: " + req.BaseSHA + "\n"
 	}
 	if local && os.Getenv("BOSUN_COMMITTED_ONLY") != "1" {
 		prompt += "Include staged, unstaged, and untracked working-tree changes in this local review.\n"
@@ -264,7 +275,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	output = withoutMarker(output)
 	// Measured after the provider finished, from the same checkout it read.
 	// A failure here only makes the coverage say so; it never fails a review.
-	coverage := reviewCoverage(ctx, workspace, local, meter)
+	coverage := reviewCoverage(ctx, workspace, req.BaseSHA, local, meter)
 	if !local {
 		// A hosted review has no `review-result` to ask, so the measured
 		// coverage travels with the published review itself (#93).
@@ -333,9 +344,9 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 
 // reviewCoverage measures how the change was examined: the diff the reviewer
 // was asked to review, joined with the adapter's read evidence.
-func reviewCoverage(ctx context.Context, workspace string, local bool, meter *usageRecorder) Coverage {
+func reviewCoverage(ctx context.Context, workspace, base string, local bool, meter *usageRecorder) Coverage {
 	workingTree := local && os.Getenv("BOSUN_COMMITTED_ONLY") != "1"
-	stats, err := diffStats(ctx, workspace, os.Getenv("BOSUN_BASE_SHA"), workingTree)
+	stats, err := diffStats(ctx, workspace, base, workingTree)
 	var reads *readRecord
 	if meter != nil && meter.reads != nil {
 		copied := *meter.reads
