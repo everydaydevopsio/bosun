@@ -48,14 +48,21 @@ type resultDocument struct {
 	// FindingsReported separates "the reviewer found nothing" from "the
 	// reviewer did not report findings in a form this can read". Both have an
 	// empty findings list and they mean opposite things.
-	FindingsReported bool                 `json:"findings_reported"`
-	Findings         []review.Finding     `json:"findings"`
-	Note             string               `json:"note,omitempty"`
-	Failure          string               `json:"failure,omitempty"`
-	Markdown         string               `json:"markdown,omitempty"`
-	Revision         *revision            `json:"revision,omitempty"`
-	Usage            *review.UsageSummary `json:"usage"`
-	UsageNote        string               `json:"usage_note,omitempty"`
+	FindingsReported bool             `json:"findings_reported"`
+	Findings         []review.Finding `json:"findings"`
+	// ResidualRisks is what the reviewer says reading could not settle. Null
+	// means it was not reported, which is not the same as an empty list.
+	ResidualRisks []review.ResidualRisk `json:"residual_risks"`
+	// Coverage is measured, not reported: the diff size and which changed
+	// files the reviewer opened. Null when this review predates it.
+	Coverage     *review.Coverage     `json:"coverage"`
+	CoverageNote string               `json:"coverage_note,omitempty"`
+	Note         string               `json:"note,omitempty"`
+	Failure      string               `json:"failure,omitempty"`
+	Markdown     string               `json:"markdown,omitempty"`
+	Revision     *revision            `json:"revision,omitempty"`
+	Usage        *review.UsageSummary `json:"usage"`
+	UsageNote    string               `json:"usage_note,omitempty"`
 }
 
 func document(r record) resultDocument {
@@ -87,6 +94,14 @@ func document(r record) resultDocument {
 			d.UsageNote = "stored usage is unreadable or uses an unsupported schema; cost remains unknown"
 		}
 	}
+	if r.Coverage != "" {
+		var coverage review.Coverage
+		if err := json.Unmarshal([]byte(r.Coverage), &coverage); err == nil && coverage.SchemaVersion == review.CoverageSchemaVersion {
+			d.Coverage = &coverage
+		} else {
+			d.CoverageNote = "stored coverage is unreadable or uses an unsupported schema"
+		}
+	}
 	if !r.Finished.IsZero() && !r.Started.IsZero() {
 		d.ElapsedSeconds = r.Finished.Sub(r.Started).Seconds()
 	}
@@ -95,6 +110,7 @@ func document(r record) resultDocument {
 		if json.Unmarshal([]byte(r.Structured), &parsed) == nil {
 			d.FindingsReported = true
 			d.Note = parsed.Note
+			d.ResidualRisks = parsed.ResidualRisks
 			if parsed.Findings != nil {
 				d.Findings = parsed.Findings
 			}
@@ -163,6 +179,9 @@ func renderResult(d resultDocument, summaryOnly bool, out io.Writer) {
 	if d.Note != "" {
 		fmt.Fprintln(out, d.Note)
 	}
+	if d.Outcome == "completed" {
+		renderCoverage(d, out)
+	}
 	if d.Failure != "" {
 		fmt.Fprintln(out, "Failure:", d.Failure)
 	}
@@ -179,6 +198,63 @@ func renderResult(d resultDocument, summaryOnly bool, out io.Writer) {
 	}
 	if !summaryOnly && d.Markdown != "" {
 		fmt.Fprintf(out, "\n%s\n", d.Markdown)
+	}
+}
+
+// renderCoverage prints how the change was examined and what is left to
+// check. It says "not recorded" rather than omitting the lines, so a reader
+// does not mistake an older review's silence for a clean bill.
+func renderCoverage(d resultDocument, out io.Writer) {
+	c := d.Coverage
+	switch {
+	case c == nil && d.CoverageNote != "":
+		fmt.Fprintln(out, "Coverage:", d.CoverageNote)
+	case c == nil:
+		fmt.Fprintln(out, "Coverage: not recorded (this review predates coverage reporting)")
+	default:
+		if c.Diff != nil {
+			line := fmt.Sprintf("Diff: %d files (+%d/−%d)", c.Diff.Reviewable.Files, c.Diff.Reviewable.Additions, c.Diff.Reviewable.Deletions)
+			if g := c.Diff.Generated; g.Files > 0 {
+				line += fmt.Sprintf("; %d generated or lockfile (+%d/−%d) not counted", g.Files, g.Additions, g.Deletions)
+			}
+			fmt.Fprintln(out, line)
+		} else {
+			fmt.Fprintln(out, "Diff:", c.DiffNote)
+		}
+		if r := c.Reads; r != nil {
+			var parts []string
+			if r.FullDiffViewed {
+				parts = append(parts, "full diff read")
+			}
+			if c.Diff != nil {
+				parts = append(parts, fmt.Sprintf("%d of %d changed files opened, %d diffed by path, %d not examined individually",
+					r.ChangedFilesOpened, r.ChangedFiles, r.ChangedFilesDiffed, r.ChangedFilesUnexamined))
+			}
+			parts = append(parts, fmt.Sprintf("%d context files", r.ContextFilesOpened))
+			fmt.Fprintf(out, "Examined: %s (%s, a lower bound)\n", strings.Join(parts, "; "), r.Method)
+		} else {
+			fmt.Fprintln(out, "Examined:", c.ReadsNote)
+		}
+	}
+	switch {
+	case !d.FindingsReported:
+	case d.ResidualRisks == nil:
+		fmt.Fprintln(out, "Residual risks: not reported")
+	case len(d.ResidualRisks) == 0:
+		fmt.Fprintln(out, "Residual risks: none stated")
+	default:
+		fmt.Fprintln(out, "Residual risks:")
+		for _, risk := range d.ResidualRisks {
+			line := "  - "
+			if risk.Area != "" {
+				line += "[" + risk.Area + "] "
+			}
+			line += risk.Risk
+			if risk.Verify != "" {
+				line += " — verify: " + risk.Verify
+			}
+			fmt.Fprintln(out, line)
+		}
 	}
 }
 

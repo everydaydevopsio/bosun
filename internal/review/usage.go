@@ -76,6 +76,8 @@ type usageKey struct{}
 type usageRecorder struct {
 	usage ProviderUsage
 	seen  bool
+	// reads is the adapter's read evidence (#93); nil when none arrived.
+	reads *readRecord
 	// partial holds a trailing fragment that could still become the reserved
 	// marker once the rest of the line arrives.
 	partial string
@@ -123,7 +125,14 @@ func (r *usageRecorder) flushPartial() string {
 
 // maybeMarkerStart reports whether s is a strict prefix of the reserved marker,
 // so it may still grow into one once more of the line arrives.
-func maybeMarkerStart(s string) bool { return s != "" && strings.HasPrefix(usagePrefix, s) }
+func maybeMarkerStart(s string) bool {
+	return s != "" && (strings.HasPrefix(usagePrefix, s) || strings.HasPrefix(readsPrefix, s))
+}
+
+// hasMarker reports whether a line is one of the adapters' control lines.
+func hasMarker(line string) bool {
+	return strings.HasPrefix(line, usagePrefix) || strings.HasPrefix(line, readsPrefix)
+}
 
 // consumeMarker reads one usage record from a line already known to carry the
 // reserved prefix. It records a valid aggregate and returns any bytes that
@@ -131,6 +140,18 @@ func maybeMarkerStart(s string) bool { return s != "" && strings.HasPrefix(usage
 // incomplete distinguishes a record truncated mid-transport, which more input
 // may finish, from a malformed one, which never will.
 func (r *usageRecorder) consumeMarker(line string) (rest string, parsed, incomplete bool) {
+	if strings.HasPrefix(line, readsPrefix) {
+		body := strings.TrimPrefix(line, readsPrefix)
+		decoder := json.NewDecoder(strings.NewReader(body))
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return "", false, errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF)
+		}
+		if reads, ok := parseReadsRecord(raw, r.usage.Source); ok && r.reads == nil {
+			r.reads = reads
+		}
+		return body[decoder.InputOffset():], true, false
+	}
 	body := strings.TrimPrefix(line, usagePrefix)
 	decoder := json.NewDecoder(strings.NewReader(body))
 	var u ProviderUsage
@@ -158,7 +179,7 @@ func (r *usageRecorder) scan(raw string, final bool) string {
 		// Oversized input is never buffered, so a fragment cannot grow without
 		// bound while it waits for a terminator that may never come.
 		holdable := !final && terminator == "" && len(line) <= 64*1024
-		if strings.HasPrefix(body, usagePrefix) {
+		if hasMarker(body) {
 			if len(line) > 64*1024 {
 				continue
 			}

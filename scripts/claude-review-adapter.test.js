@@ -215,3 +215,30 @@ test('Claude preserves recognized cost bases and labels damaged streams partial'
     assert.equal(collector.usage().provider_reported_cost_usd, 0.2);
   }
 });
+
+test('#93: Claude records Read and successful git calls, not denied ones', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bosun-claude-'));
+  fs.writeFileSync(path.join(root, 'a.go'), 'package a\n');
+  fs.writeFileSync(path.join(root, 'b.go'), 'package b\n');
+  const collector = createCollector(root);
+  collector.accept(JSON.stringify({ type: 'assistant', message: { content: [
+    { type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: path.join(root, 'a.go') } },
+    { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'cat b.go' } },
+    { type: 'tool_use', id: 'g1', name: 'Bash', input: { command: 'git diff main...HEAD -- b.go' } },
+  ] } }));
+  collector.accept(JSON.stringify({ type: 'user', message: { content: [
+    { type: 'tool_result', tool_use_id: 'r1', content: 'private source' },
+    { type: 'tool_result', tool_use_id: 'b1', is_error: true, content: 'Permission denied' },
+    { type: 'tool_result', tool_use_id: 'g1', content: 'diff --git private' },
+  ] } }));
+  const reads = collector.reads();
+  assert.equal(reads.source, 'claude');
+  assert.equal(reads.method, 'tool_calls');
+  assert.deepEqual(reads.opened, ['a.go']);
+  assert.deepEqual(reads.diffed, ['b.go']);
+  assert.equal(reads.commands, 2);
+  assert.doesNotMatch(JSON.stringify(reads), /private/);
+});

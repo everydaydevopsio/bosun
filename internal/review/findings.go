@@ -114,7 +114,53 @@ func parseReview(output string) (string, []Finding, bool, string) {
 type Result struct {
 	SchemaVersion int       `json:"schema_version"`
 	Findings      []Finding `json:"findings"`
-	Note          string    `json:"note,omitempty"`
+	// ResidualRisks is what reading the code could not settle (#93). Null
+	// means the reviewer did not report them -- an older prompt, or one it
+	// ignored -- and is not the same claim as an empty list.
+	ResidualRisks []ResidualRisk `json:"residual_risks"`
+	Note          string         `json:"note,omitempty"`
+}
+
+// ResidualRisk is a risk specific to this change that a reader of the code
+// cannot confirm or rule out, with how to check it by other means.
+type ResidualRisk struct {
+	Area   string `json:"area,omitempty"`
+	Risk   string `json:"risk"`
+	Verify string `json:"verify,omitempty"`
+}
+
+// residualRiskLimit bounds the list the way findingLimit bounds findings.
+const residualRiskLimit = 20
+
+// parseResidualRisks reads the residual risks from the findings payload. It
+// returns nil when the payload is absent or does not carry the field, and an
+// empty, non-nil list when the reviewer said there were none.
+func parseResidualRisks(output string) []ResidualRisk {
+	_, _, inner := findingsPayload(output)
+	if inner == "" {
+		return nil
+	}
+	var parsed struct {
+		Findings      []Finding       `json:"findings"`
+		ResidualRisks *[]ResidualRisk `json:"residual_risks"`
+	}
+	if json.Unmarshal([]byte(inner), &parsed) != nil || parsed.Findings == nil || parsed.ResidualRisks == nil {
+		return nil
+	}
+	risks := []ResidualRisk{}
+	for _, r := range *parsed.ResidualRisks {
+		r.Area = truncate(strings.TrimSpace(r.Area), titleLimit)
+		r.Risk = truncate(strings.TrimSpace(r.Risk), fieldLimit)
+		r.Verify = truncate(strings.TrimSpace(r.Verify), fieldLimit)
+		if r.Risk == "" {
+			continue
+		}
+		risks = append(risks, r)
+		if len(risks) == residualRiskLimit {
+			break
+		}
+	}
+	return risks
 }
 
 // ResultSchemaVersion is bumped when the shape above changes incompatibly.
@@ -131,7 +177,7 @@ func StructuredResult(output string) string {
 	if findings == nil {
 		findings = []Finding{}
 	}
-	payload, err := json.Marshal(Result{SchemaVersion: ResultSchemaVersion, Findings: findings, Note: note})
+	payload, err := json.Marshal(Result{SchemaVersion: ResultSchemaVersion, Findings: findings, ResidualRisks: parseResidualRisks(output), Note: note})
 	if err != nil {
 		return ""
 	}

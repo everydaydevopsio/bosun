@@ -6,13 +6,15 @@ const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const { count, sum, emptyUsage, status, safeReview, usageLine } = require('./provider-usage');
 const { stderrKind } = require('./claude-review-adapter');
+const { createReadTracker, readsLine } = require('./provider-reads');
 
 const codex = '/app/node_modules/@openai/codex/bin/codex.js';
 function codexArgs(prompts) {
   // The disposable reviewer Job remains the sandbox; see bridge-bosun.yaml.
   return ['exec', '--json', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'danger-full-access', '--', ...prompts];
 }
-function createCollector() {
+function createCollector(root = process.cwd()) {
+  const tracker = createReadTracker(root);
   let finalResult = '';
   let error = '';
   let turns = 0;
@@ -35,6 +37,11 @@ function createCollector() {
       if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
         finalResult = event.item.text;
       }
+      // Only commands that ran: a failed or refused command read nothing.
+      if (event.type === 'item.completed' && event.item?.type === 'command_execution'
+          && (event.item.exit_code === 0 || (event.item.exit_code === undefined && event.item.status === 'completed'))) {
+        tracker.command(event.item.command);
+      }
       if (event.type === 'turn.completed' && !terminalSeen) {
         terminalSeen = true;
         activeTurn = false;
@@ -55,6 +62,7 @@ function createCollector() {
       usage.status = status(usage, incomplete || Boolean(error) || activeTurn || missingTurnUsage || damagedStream);
       return usage;
     },
+    reads() { return tracker.record('codex', 'command_parsing'); },
     failed() { return Boolean(error || !finalResult || !turns || activeTurn); },
     error() { return error; },
   };
@@ -71,6 +79,7 @@ if (require.main === module) {
   child.on('error', () => { startFailed = true; });
   child.on('close', code => {
     process.stdout.write(usageLine(collector.usage(code !== 0 || collector.failed())));
+    process.stdout.write(readsLine(collector.reads()));
     if (startFailed) process.stdout.write('Codex executable could not start\n');
     const output = collector.output();
     if (output) process.stdout.write(output + '\n');

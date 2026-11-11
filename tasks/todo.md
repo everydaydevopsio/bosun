@@ -1537,3 +1537,37 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 
 ## Outcome
 - Result: `go test ./...` green; `golangci-lint run --new-from-rev=main` 0 issues.
+
+# Task: Make review depth visible in results (#93)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-11
+- Mode: Autonomous
+- Requirement IDs: #93 proposals 1, 2, 4; #22 overlap; proposal 3 split to #95
+
+## Scope
+- In scope: residual risks in the findings contract, diff stats, measured read coverage from both adapters, coverage in `review-result` and hosted reviews, skill guidance, change-type prompt guidance.
+- Out of scope: `--effort` and chunked review (#95).
+
+## Acceptance Criteria
+- AC1: An empty-findings result carries `coverage` (diff size with generated files separate, files opened vs changed, full-diff flag, context files) and `residual_risks`.
+- AC2: Residual risks are change-specific; the prompt forbids generic "tests were not run" boilerplate.
+- AC3: Coverage is reported even when the findings line is missing; read paths never carry file content.
+- AC4: The bosun-review skill triages `findings: []` from coverage and residual risks, not elapsed time or tokens.
+
+## Execution Checklist
+- [ ] Failing tests written and confirmed failing
+- [ ] Adapters track reads and emit `BOSUN_READS_V1`
+- [ ] Worker computes diff stats and coverage, emits `coverage` event, hosted footer
+- [ ] `review-result` shows coverage and residual risks
+- [ ] Prompt, skill, docs updated
+- [ ] `go test ./...`, `node --test`, `make lint` green
+
+## Test Strategy
+- Unit: JS tracker command parsing; Go parse of residual risks, diff stats on a temp repo, recorder stripping, coverage join, result document.
+- Failure-path tests: no base resolvable, reads line missing, malformed/oversized reads line, impersonated marker in review text, paths outside the workspace.
+
+## Outcome
+- Result:
+- Evidence links/commands:

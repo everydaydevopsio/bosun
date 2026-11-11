@@ -31,7 +31,7 @@ function status(usage, incomplete) {
 function safeReview(text) {
   // Review text is model-authored, so it must not impersonate the adapter's
   // control line when the worker extracts numeric telemetry from stdout.
-  return text.replace(/^BOSUN_USAGE_V1 /gm, 'BOSUN_USAGE_TEXT_V1 ');
+  return text.replace(/^BOSUN_USAGE_V1 /gm, 'BOSUN_USAGE_TEXT_V1 ').replace(/^BOSUN_READS_V1 /gm, 'BOSUN_READS_TEXT_V1 ');
 }
 function usageLine(usage) { return prefix + JSON.stringify(usage) + '\n'; }
 

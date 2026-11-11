@@ -262,7 +262,15 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		return fail(StageReview, err)
 	}
 	output = withoutMarker(output)
+	// Measured after the provider finished, from the same checkout it read.
+	// A failure here only makes the coverage say so; it never fails a review.
+	coverage := reviewCoverage(ctx, workspace, local, meter)
 	if !local {
+		// A hosted review has no `review-result` to ask, so the measured
+		// coverage travels with the published review itself (#93).
+		if footer := coverage.Footer(); footer != "" {
+			output = strings.TrimRight(output, "\n") + "\n\n" + footer
+		}
 		reporter.Emit("stage", "publishing")
 		// The pull-request number is fixed when the Job is built. A branch
 		// pushed and then opened as a pull request minutes later -- the
@@ -307,6 +315,9 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	}
 	if reporter != nil {
 		emitUsage()
+		if payload, err := json.Marshal(coverage); err == nil {
+			reporter.Emit("coverage", sanitize(redact(string(payload), token)))
+		}
 		// The structured half goes out before the result so a consumer that
 		// stops at the first terminal event still has the findings.
 		if structured := StructuredResult(output); structured != "" {
@@ -318,6 +329,18 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	}
 	_, err = fmt.Fprintln(w.Output, humanReview(output))
 	return err
+}
+
+// reviewCoverage measures how the change was examined: the diff the reviewer
+// was asked to review, joined with the adapter's read evidence.
+func reviewCoverage(ctx context.Context, workspace string, local bool, meter *usageRecorder) Coverage {
+	workingTree := local && os.Getenv("BOSUN_COMMITTED_ONLY") != "1"
+	stats, err := diffStats(ctx, workspace, os.Getenv("BOSUN_BASE_SHA"), workingTree)
+	var reads *readRecord
+	if meter != nil {
+		reads = meter.reads
+	}
+	return buildCoverage(stats, err, reads)
 }
 
 // Preserve cancellation identity without reintroducing unredacted text.

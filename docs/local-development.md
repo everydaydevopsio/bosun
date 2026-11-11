@@ -432,6 +432,45 @@ document for an agent to triage without parsing prose. `findings_reported:
 false` distinguishes a reviewer that emitted no machine-readable findings from
 one that found none — they have the same empty list and mean opposite things.
 
+### Review coverage and residual risks
+
+An empty findings list cannot say on its own whether the change was read
+closely or skimmed, and elapsed time, tokens, and `turns` are poor proxies
+(`turns` is always 1 for a Codex review). The result carries evidence instead.
+
+`coverage` is measured by Bosun, not reported by the reviewer:
+
+| Field | Meaning |
+| --- | --- |
+| `diff.merge_base` | the commit the change was sized against |
+| `diff.reviewable` | files, additions, and deletions a reviewer has to read |
+| `diff.generated`, `diff.generated_paths` | lockfiles, vendored, and generated files (by name, or the repository's `linguist-generated`/`linguist-vendored` attributes), counted separately |
+| `reads.method` | `tool_calls` (Claude's Read tool plus parsed git commands) or `command_parsing` (Codex shell commands) |
+| `reads.full_diff_viewed` | a command printing the whole diff ran; a provider may truncate very long output |
+| `reads.changed_files_opened` / `changed_files` | reviewable changed files opened in full, of those that still exist |
+| `reads.changed_files_diffed` | changed files whose own diff was requested by path |
+| `reads.unexamined_paths` | changed files neither opened nor diffed by path (up to 50) |
+| `reads.context_files_opened` | files outside the diff read for context |
+
+Read counts are a lower bound: a file read through a tool the adapter does not
+recognise is not counted. The adapters record paths only, never file content.
+When either half is unavailable, `diff_note` or `reads_note` says why instead of
+reporting zeros.
+
+`residual_risks` comes from the reviewer: risks specific to this change that
+reading cannot settle, each with an `area`, the `risk`, and a `verify` step.
+The prompt rules out generic entries such as "tests were not run". `[]` means
+the reviewer said nothing is left to check; `null` means it was not reported.
+
+The text view summarises both:
+
+```text
+Diff: 71 files (+322/−343); 1 generated or lockfile (+19800/−19600) not counted
+Examined: full diff read; 12 of 70 changed files opened, 3 diffed by path, 55 not examined individually; 8 context files (command_parsing, a lower bound)
+Residual risks:
+  - [styles] Material components moved from legacy to MDC — verify: Compare the settings forms visually
+```
+
 `--against-ref REF` compares the reviewed commit with a ref in this checkout
 and says plainly when they differ: "This review covers 0ac3791; HEAD is
 1df570c. Changes after 0ac3791 were not reviewed." It never claims a finding

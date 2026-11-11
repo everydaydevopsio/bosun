@@ -57,8 +57,8 @@ RUN set -eux; \
 WORKDIR /app/bosun
 COPY prompts ./prompts
 COPY config ./config
-COPY scripts/*review-adapter*.js scripts/provider-usage.js ./scripts/
-RUN node --test scripts/*review-adapter.test.js
+COPY scripts/*review-adapter*.js scripts/provider-usage.js scripts/provider-reads*.js ./scripts/
+RUN node --test scripts/*review-adapter.test.js scripts/provider-reads.test.js
 COPY --from=build /out/bosun /usr/local/bin/bosun
 
 # The base image sets org.opencontainers.image.* to bridgectl's identity, and an
