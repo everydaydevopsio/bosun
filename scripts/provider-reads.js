@@ -19,9 +19,10 @@ const maxCommands = 100000;
 const readers = new Set(['cat', 'nl', 'head', 'tail', 'sed', 'awk', 'less', 'more', 'bat', 'batcat', 'view']);
 const shells = new Set(['sh', 'bash', 'zsh', 'dash']);
 // Diff options that print names or numbers but no content.
-// Diff options that print only some files or hunks. A diff limited this way
-// did not show the change, so it earns no credit at all.
-const filtered = /^(-[SG]|--(diff-filter|relative|find-object|skip-to|rotate-to|pickaxe-all|pickaxe-regex)(=|$))/;
+// Diff options that print only some files or hunks, or compare the index
+// rather than the working tree. Such a diff did not show the change, so it
+// earns no credit at all.
+const filtered = /^(-[SG]|--(cached|staged|diff-filter|relative|find-object|skip-to|rotate-to|pickaxe-all|pickaxe-regex)(=|$))/;
 const noContent = /^(-s|--(stat|numstat|shortstat|name-only|name-status|summary|dirstat|compact-summary|quiet|raw|no-patch)(=|$))/;
 
 // tokenize splits a shell script into the simple commands a successful exit
@@ -64,9 +65,10 @@ function tokenize(script) {
 
 // certain keeps the commands that must have run for the whole script to exit
 // successfully. A script's status is its last statement's, so every command of
-// the last statement up to an || ran; in an earlier statement only the first
-// unit is certain, because a failure there skips the rest of its && chain and
-// the script still succeeds. Pipelines run as one unit.
+// a last statement that is a plain && chain ran. Anywhere else only the first
+// unit is certain: in an earlier statement a failure skips the rest of its &&
+// chain and the script still succeeds, and in `a && b || c` a failing `a`
+// skips `b` while `c` makes the whole succeed. Pipelines run as one unit.
 function certain(items) {
   const statements = [];
   let current = [];
@@ -80,10 +82,10 @@ function certain(items) {
   if (current.length) statements.push(current);
   const out = [];
   statements.forEach((statement, index) => {
-    const last = index === statements.length - 1;
+    const firstOnly = index !== statements.length - 1 || statement.some(item => item.sep === '||');
     for (const item of statement) {
       out.push(item.words);
-      if (item.sep === '||' || (!last && item.sep === '&&')) break;
+      if (firstOnly && (item.sep === '&&' || item.sep === '||')) break;
     }
   });
   return out;

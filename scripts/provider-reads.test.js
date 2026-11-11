@@ -171,3 +171,26 @@ test('content-filtering diff options earn no credit', () => {
     assert.deepEqual(record.diffed, [], command);
   }
 });
+
+// Bosun review of #97 @ a1c0445, F1: in `a && b || c` a successful exit proves
+// only that `a` ran; `b` may have been skipped by a failing `a`.
+test('a chain with || credits only its first unit', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('bash -lc "false && git diff base...HEAD || true"');
+  tracker.command('bash -lc "cat README.md && cat src/app.ts || true"');
+  const record = tracker.record('codex', 'command_parsing');
+  assert.equal(record.full_diff, false);
+  assert.deepEqual(record.opened, ['README.md']);
+});
+
+// F2: --cached and --staged compare the index, not the working tree, so they
+// cannot stand in for `git diff <base>` and earn no credit.
+test('index-only diffs earn no credit', () => {
+  for (const command of ['git diff --cached base', 'git diff --staged base -- src/app.ts']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    const record = tracker.record('codex', 'command_parsing');
+    assert.equal(record.full_diff, false, command);
+    assert.deepEqual(record.diffed, [], command);
+  }
+});
