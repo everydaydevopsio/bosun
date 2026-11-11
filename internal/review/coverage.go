@@ -84,6 +84,9 @@ type DiffStats struct {
 	Generated      DiffCount `json:"generated"`
 	GeneratedPaths []string  `json:"generated_paths,omitempty"`
 	changed        []changedFile
+	// dirty is set when a working-tree review had tracked changes beyond
+	// HEAD, which no diff ending at a commit shows.
+	dirty bool
 }
 
 // ReadCoverage compares what the reviewer read with what changed. Only
@@ -242,6 +245,13 @@ func diffStats(ctx context.Context, dir, base string, workingTree bool) (*DiffSt
 		return nil, err
 	}
 	stats := &DiffStats{MergeBase: mergeBase, WorkingTree: workingTree, changed: files}
+	if workingTree {
+		uncommitted, err := coverageGit(ctx, dir, nil, append(append([]string{}, diff...), "--name-only", "HEAD")...)
+		if err != nil {
+			return nil, err
+		}
+		stats.dirty = len(bytes.TrimSpace(uncommitted)) > 0
+	}
 	for _, f := range files {
 		side := &stats.Reviewable
 		if f.generated {
@@ -348,7 +358,10 @@ var revisionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@{}^~-]{0,199
 // `A..HEAD`, `A HEAD`, and `A` alone compare A's own tree, so A has to be the
 // merge base: once the base branch moves on, `main..HEAD` also shows its
 // changes reversed. `git diff HEAD`, and `HEAD~1` on a longer branch, fail.
-func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []string) bool {
+//
+// When dirty, the review read uncommitted changes, and only `A` alone -- A
+// against the working tree -- shows them; a range ending at a commit does not.
+func verifiedFullDiff(ctx context.Context, dir, mergeBase string, dirty bool, ranges []string) bool {
 	resolve := func(rev string) string {
 		if !revisionPattern.MatchString(rev) {
 			return ""
@@ -380,6 +393,9 @@ func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []strin
 		default:
 			continue
 		}
+		if dirty && (right != "" || threeDot) {
+			continue
+		}
 		if right != "" && resolve(right) != head {
 			continue
 		}
@@ -404,14 +420,15 @@ func verifiedFullDiff(ctx context.Context, dir, mergeBase string, ranges []strin
 // verifyReads replaces the adapter's claims with what the merge base
 // supports: full_diff only for a verified whole-diff range, and path credit
 // only through a verified range.
-func verifyReads(ctx context.Context, dir, mergeBase string, reads *readRecord) {
-	reads.FullDiff = verifiedFullDiff(ctx, dir, mergeBase, reads.DiffRanges)
+func verifyReads(ctx context.Context, dir string, stats *DiffStats, reads *readRecord) {
+	mergeBase, dirty := stats.MergeBase, stats.dirty
+	reads.FullDiff = verifiedFullDiff(ctx, dir, mergeBase, dirty, reads.DiffRanges)
 	checked := map[string]bool{}
 	for i := range reads.Diffed {
 		rng := reads.Diffed[i].Range
 		ok, seen := checked[rng]
 		if !seen {
-			ok = verifiedFullDiff(ctx, dir, mergeBase, []string{rng})
+			ok = verifiedFullDiff(ctx, dir, mergeBase, dirty, []string{rng})
 			checked[rng] = ok
 		}
 		reads.Diffed[i].verified = ok

@@ -346,7 +346,7 @@ func reviewCoverage(ctx context.Context, workspace string, local bool, meter *us
 		// side has. Without it nothing is verified.
 		reads.FullDiff = false
 		if stats != nil {
-			verifyReads(ctx, workspace, stats.MergeBase, reads)
+			verifyReads(ctx, workspace, stats, reads)
 		}
 	}
 	return buildCoverage(stats, err, reads)

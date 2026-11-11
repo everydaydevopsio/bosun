@@ -283,7 +283,7 @@ func TestEndpointDiffsAgainstADivergedBaseAreNotTheChange(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "-m", "main moves")
 	gitRun(t, dir, "checkout", "-q", "feature")
 	for ranges, want := range map[string]bool{"main...HEAD": true, "main..HEAD": false, "main HEAD": false, "main": false, base + "..HEAD": true, base: true} {
-		if got := verifiedFullDiff(context.Background(), dir, base, []string{ranges}); got != want {
+		if got := verifiedFullDiff(context.Background(), dir, base, false, []string{ranges}); got != want {
 			t.Errorf("%q: got %v, want %v", ranges, got, want)
 		}
 	}
@@ -310,7 +310,7 @@ func TestFullDiffIsVerifiedAgainstTheMergeBase(t *testing.T) {
 		"nonexistent":       false,
 	}
 	for ranges, want := range cases {
-		if got := verifiedFullDiff(context.Background(), dir, stats.MergeBase, []string{ranges}); got != want {
+		if got := verifiedFullDiff(context.Background(), dir, stats.MergeBase, false, []string{ranges}); got != want {
 			t.Errorf("%q: got %v, want %v", ranges, got, want)
 		}
 	}
@@ -366,9 +366,40 @@ func TestPathDiffsAreCreditedOnlyThroughAVerifiedRange(t *testing.T) {
 	}
 	reads := &readRecord{Source: "codex", Method: "command_parsing",
 		Diffed: []pathDiff{{Range: "HEAD", Paths: []string{"src/app.ts"}}, {Range: base + "...HEAD", Paths: []string{"src/util.ts"}}}}
-	verifyReads(context.Background(), dir, stats.MergeBase, reads)
+	verifyReads(context.Background(), dir, stats, reads)
 	c := buildCoverage(stats, nil, reads)
 	if r := c.Reads; r.ChangedFilesDiffed != 1 || strings.Join(r.UnexaminedPaths, ",") != "src/app.ts" {
 		t.Fatalf("reads = %+v", r)
+	}
+}
+
+// Hosted Bosun review of #97, F2: a review that read uncommitted changes is
+// only shown in full by a diff against the working tree. `base...HEAD` stops
+// at the last commit, and when HEAD is the base it shows nothing at all.
+func TestDirtyWorkingTreeNeedsAWorkingTreeDiff(t *testing.T) {
+	dir, base := coverageRepo(t)
+	gitRun(t, dir, "reset", "-q", "--soft", base) // HEAD is the base; every change is uncommitted
+	stats, err := diffStats(context.Background(), dir, base, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := &readRecord{Source: "claude", Method: "tool_calls", DiffRanges: []string{base + "...HEAD"},
+		Diffed: []pathDiff{{Range: base + "...HEAD", Paths: []string{"src/app.ts"}}, {Range: base, Paths: []string{"src/util.ts"}}}}
+	verifyReads(context.Background(), dir, stats, reads)
+	if reads.FullDiff || reads.Diffed[0].verified || !reads.Diffed[1].verified {
+		t.Fatalf("reads = %+v", reads)
+	}
+	reads.DiffRanges = []string{base}
+	verifyReads(context.Background(), dir, stats, reads)
+	if !reads.FullDiff {
+		t.Fatal("`git diff <merge base>` compares the working tree and shows the whole change")
+	}
+	// The same ranges on a committed-only review are the change.
+	committed, err := diffStats(context.Background(), dir, base, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifiedFullDiff(context.Background(), dir, committed.MergeBase, false, []string{base + "...HEAD"}) {
+		t.Fatal("a committed-only review rejected a merge-base diff")
 	}
 }

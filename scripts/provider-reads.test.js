@@ -158,3 +158,16 @@ test('path diffs carry their range; a path diff with no revision earns nothing',
   tracker.command('git show abc123 -- src/util.ts');
   assert.deepEqual(tracker.record('claude', 'tool_calls').diffed, [{ range: 'base...HEAD', paths: ['package.json', 'src/app.ts'] }]);
 });
+
+// Hosted Bosun review of #97, F1: an option that limits which files or hunks a
+// diff prints means it did not show the change, whatever the revisions.
+test('content-filtering diff options earn no credit', () => {
+  for (const command of ['git diff --diff-filter=A base...HEAD', 'git diff -Sfoo base...HEAD', "git diff -G 'x' base...HEAD -- src/",
+    'git diff --relative=src base...HEAD', 'git diff --find-object=abc base...HEAD']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    const record = tracker.record('codex', 'command_parsing');
+    assert.equal(record.full_diff, false, command);
+    assert.deepEqual(record.diffed, [], command);
+  }
+});

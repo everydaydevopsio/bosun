@@ -446,7 +446,7 @@ closely or skimmed, and elapsed time, tokens, and `turns` are poor proxies
 | `diff.reviewable` | files, additions, and deletions a reviewer has to read |
 | `diff.generated`, `diff.generated_paths` | lockfiles, vendored, and generated files (by name, or the repository's `linguist-generated`/`linguist-vendored` attributes), counted separately |
 | `reads.method` | `tool_calls` (Claude's Read tool plus parsed git commands) or `command_parsing` (Codex shell commands) |
-| `reads.full_diff_viewed` | a command printed the whole change: Bosun checks the revisions it compared against the merge base, so `git diff HEAD` does not count. A provider may still truncate very long output |
+| `reads.full_diff_viewed` | a command printed the whole change: Bosun checks the revisions it compared against the merge base, so `git diff HEAD` does not count. A diff limited by `--diff-filter`, `-S`, `-G`, or `--relative` never counts, and when the review read uncommitted changes only `git diff <merge base>` (against the working tree) does. A provider may still truncate very long output |
 | `reads.changed_files_opened` / `changed_files` | reviewable changed files opened, of those with text content left to open (deleted and binary files are excluded) |
 | `reads.changed_files_diffed` | changed files whose diff was requested by path (or by a directory above them) through a comparison Bosun verified against the merge base |
 | `reads.unexamined_paths` | changed files neither opened nor diffed by path (up to 50) |

@@ -19,6 +19,9 @@ const maxCommands = 100000;
 const readers = new Set(['cat', 'nl', 'head', 'tail', 'sed', 'awk', 'less', 'more', 'bat', 'batcat', 'view']);
 const shells = new Set(['sh', 'bash', 'zsh', 'dash']);
 // Diff options that print names or numbers but no content.
+// Diff options that print only some files or hunks. A diff limited this way
+// did not show the change, so it earns no credit at all.
+const filtered = /^(-[SG]|--(diff-filter|relative|find-object|skip-to|rotate-to|pickaxe-all|pickaxe-regex)(=|$))/;
 const noContent = /^(-s|--(stat|numstat|shortstat|name-only|name-status|summary|dirstat|compact-summary|quiet|raw|no-patch)(=|$))/;
 
 // tokenize splits a shell script into the simple commands a successful exit
@@ -173,7 +176,7 @@ function createReadTracker(root = process.cwd()) {
       return;
     }
     if (verb !== 'diff') return;
-    if (before.some(word => noContent.test(word))) return;
+    if (before.some(word => noContent.test(word) || filtered.test(word))) return;
     const operands = before.filter(word => !word.startsWith('-'));
     const named = operands.map(word => existing(word, cwd));
     const paths = [...pathspec.map(word => relative(word, cwd)), ...named].filter(Boolean);
