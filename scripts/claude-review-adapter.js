@@ -6,6 +6,7 @@
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const { claudeUsage, safeReview, usageLine, zeroedExecutionFailure } = require('./provider-usage');
+const { createReadTracker, readsLine } = require('./provider-reads');
 
 const claude = '/app/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
 const allowed = [
@@ -64,7 +65,11 @@ function stderrKind(stderr) {
   return stderr ? 'OTHER_STDERR_ERROR' : '';
 }
 
-function createCollector() {
+function createCollector(root = process.cwd()) {
+  const tracker = createReadTracker(root);
+  // Tool calls awaiting a result. A read counts only once it succeeded: dontAsk
+  // denies most non-git Bash commands, and a denied read examined nothing.
+  const pending = new Map();
   let finalResult;
   let denials = [];
   let error = '';
@@ -83,10 +88,19 @@ function createCollector() {
           if (item?.type === 'tool_use' && item.id && tools.size < 100) {
             tools.set(item.id, { tool_name: item.name, tool_input: item.input });
           }
+          if (item?.type === 'tool_use' && item.id && (item.name === 'Read' || item.name === 'Bash') && pending.size < 1000) {
+            pending.set(item.id, { name: item.name, input: item.input });
+          }
         }
       }
       if (event.type === 'user') {
         for (const item of Array.isArray(event.message?.content) ? event.message.content : []) {
+          if (item?.type === 'tool_result' && pending.has(item.tool_use_id)) {
+            const call = pending.get(item.tool_use_id);
+            pending.delete(item.tool_use_id);
+            if (!item.is_error && call.name === 'Read') tracker.readFile(call.input?.file_path);
+            if (!item.is_error && call.name === 'Bash') tracker.command(call.input?.command);
+          }
           if (item?.type === 'tool_result' && item.is_error && tools.has(item.tool_use_id)
               && /permission|denied|not allowed/i.test(String(item.content).slice(0, 2000))) {
             deniedResults.push(tools.get(item.tool_use_id));
@@ -109,6 +123,7 @@ function createCollector() {
       return safeReview([summary, finalResult || ''].filter(Boolean).join('\n\n'));
     },
     usage(incomplete = false) { return claudeUsage(resultEvent, incomplete || Boolean(error) || damagedStream); },
+    reads() { return tracker.record('claude', 'tool_calls'); },
     failed() { return Boolean(error || !finalResult); },
     error() { return error; },
   };
@@ -134,6 +149,7 @@ if (require.main === module) {
   child.on('error', () => { startFailed = true; });
   child.on('close', code => {
     process.stdout.write(usageLine(collector.usage(code !== 0 || collector.failed())));
+    process.stdout.write(readsLine(collector.reads()));
     if (startFailed) process.stdout.write('Claude executable could not start\n');
     const output = collector.output();
     if (output) process.stdout.write(output + '\n');

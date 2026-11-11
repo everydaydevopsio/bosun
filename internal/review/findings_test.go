@@ -276,7 +276,7 @@ func TestPromptRequiresAnEmptyBlockForACleanReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(prompt), `{"findings":[]}`) {
+	if !strings.Contains(string(prompt), `{"findings":[],"residual_risks":[]}`) {
 		t.Fatal("the prompt does not require an empty findings block for a clean review")
 	}
 }
@@ -356,5 +356,60 @@ func TestParseReviewStillAcceptsTheFencedBlock(t *testing.T) {
 	_, findings, reported, _ := parseReview(output)
 	if !reported || len(findings) != 1 || findings[0].Path != "b.go" {
 		t.Fatalf("fenced fallback broke: reported=%v findings=%+v", reported, findings)
+	}
+}
+
+// #93 AC1: a clean review still says what reading could not settle, and an
+// absent field is distinguishable from an explicit "nothing".
+func TestResidualRisksAreParsedAndDistinguishedFromAbsent(t *testing.T) {
+	line := `BOSUN-FINDINGS {"findings":[],"residual_risks":[{"area":"build","risk":"Angular 16 builder config was rewritten","verify":"Run the ci.yml build job on Node 22"},{"risk":"  "},{"area":"styles","risk":"Legacy Material components moved to MDC","verify":"Visual check of forms"}]}`
+	risks := parseResidualRisks("Summary.\n" + line + "\n")
+	if len(risks) != 2 || risks[0].Area != "build" || risks[1].Verify != "Visual check of forms" {
+		t.Fatalf("risks = %+v", risks)
+	}
+	if got := parseResidualRisks("S.\nBOSUN-FINDINGS {\"findings\":[],\"residual_risks\":[]}\n"); got == nil || len(got) != 0 {
+		t.Fatalf("explicit none = %#v", got)
+	}
+	if got := parseResidualRisks("S.\nBOSUN-FINDINGS {\"findings\":[]}\n"); got != nil {
+		t.Fatalf("absent = %#v", got)
+	}
+	structured := StructuredResult("S.\n" + line + "\n")
+	var parsed Result
+	if err := json.Unmarshal([]byte(structured), &parsed); err != nil || len(parsed.ResidualRisks) != 2 {
+		t.Fatalf("structured = %s (%v)", structured, err)
+	}
+	if !strings.Contains(StructuredResult("S.\nBOSUN-FINDINGS {\"findings\":[]}\n"), `"residual_risks":null`) {
+		t.Fatal("an older reviewer's silence must read as unreported, not as no risks")
+	}
+}
+
+// #93 and #22: the prompt asks for change-specific residual risks and rules
+// out the boilerplate that would otherwise appear on every review.
+func TestPromptRequiresChangeSpecificResidualRisks(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "prompts", "code-review.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(raw)
+	for _, want := range []string{`"residual_risks"`, `{"findings":[],"residual_risks":[]}`, "tests were not run", "upgrade"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt is missing %q", want)
+		}
+	}
+}
+
+// Found live in #93: a payload whose own text names the marker -- a residual
+// risk about "the BOSUN-FINDINGS line" -- hid the whole payload, because the
+// last occurrence of the marker was inside it rather than at a line start.
+func TestPayloadThatMentionsTheMarkerIsStillParsed(t *testing.T) {
+	output := "Summary mentions `BOSUN-FINDINGS` in prose.\n" +
+		`BOSUN-FINDINGS {"findings":[{"path":"a.go","line":1,"severity":"low","title":"T"}],"residual_risks":[{"risk":"The footer follows the BOSUN-FINDINGS line."}]}` +
+		"\n"
+	summary, findings, reported, _ := parseReview(output)
+	if !reported || len(findings) != 1 || len(parseResidualRisks(output)) != 1 {
+		t.Fatalf("reported=%v findings=%+v", reported, findings)
+	}
+	if strings.Contains(summary, `"findings"`) {
+		t.Fatalf("payload left in the summary: %q", summary)
 	}
 }

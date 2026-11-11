@@ -12,7 +12,7 @@ description: >
 
 # Bosun code review
 
-<!-- bosun-skill-version: 4 -->
+<!-- bosun-skill-version: 5 -->
 
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
@@ -348,6 +348,33 @@ per finding with a stable `id`, `severity`, `path`, `line`/`end_line`,
 `findings_reported: false` means the reviewer did not emit machine-readable
 findings — not that it found nothing. The Markdown report is authoritative
 there, and an empty `findings` list in that case proves nothing.
+
+### Triaging a review with no findings
+
+An empty `findings` list with `findings_reported: true` is a clean review. Do
+not judge how thorough it was from `elapsed_seconds`, token counts, or `turns`:
+`turns` is always 1 for a Codex review, and output tokens measure the length of
+the report, not how much was read. Read the evidence the result carries instead.
+
+- `coverage.diff` sizes the change. `reviewable` excludes lockfiles, vendored,
+  and generated files, which are counted under `generated`. A 40,000-line diff
+  can be a few hundred reviewable lines.
+- `coverage.reads` is measured from the reviewer's tool calls, as a lower
+  bound. `full_diff_viewed` means it printed the whole diff;
+  `changed_files_opened` of `changed_files` were opened in full;
+  `unexamined_paths` lists changed files it neither opened nor diffed by path.
+  `context_files_opened` counts files outside the diff it read for context.
+  `method: command_parsing` (Codex) can miss reads done through other tools.
+- `residual_risks` is what the reviewer says reading cannot settle, each with a
+  `verify` step. Relay these to the user as the remaining checks, not as
+  findings.
+
+Report the result with that evidence: "clean; full diff read, 12 of 70 changed
+files opened; still to verify: …". Flag a thin review only from the evidence,
+for example a large reviewable diff with no full diff read and most changed
+files unexamined. `coverage: null` or `residual_risks: null` means the review
+predates them or the reviewer did not report them; say that rather than
+treating it as "nothing left to check".
 
 Before reusing a result from an earlier session, check that it still describes
 this checkout:

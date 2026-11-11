@@ -161,6 +161,20 @@ the marker, the metadata line, and the summary:
 Each inline comment opens with its severity: `**high** — <title>`, then the
 failure it causes and a remediation.
 
+The summary ends with a **Residual risks** section -- what this change could
+break that reading the code cannot settle, each with the check that settles it
+-- and a measured coverage line written by Bosun, not by the reviewer:
+
+```markdown
+<sub>Review coverage: 71 changed files (+322/−343), plus 1 generated or lockfile (+19800/−19600) not counted · full diff read · 12 of 70 changed files opened · 55 not examined individually · 8 context files opened.</sub>
+```
+
+The diff size comes from `git diff --numstat` against the merge base;
+lockfiles, vendored, and `linguist-generated` files are counted separately.
+The read counts come from the reviewer's tool calls and are a lower bound. See
+[Review coverage](local-development.md#review-coverage-and-residual-risks) for
+the fields.
+
 ### Finding the review
 
 Reviews live under `/repos/OWNER/REPO/pulls/N/reviews`; comments live under

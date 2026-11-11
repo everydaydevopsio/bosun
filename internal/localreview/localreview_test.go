@@ -247,6 +247,8 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 			reporter.Emit("stage", "reviewing")
 			usage := `{"schema_version":1,"run_id":"job","actual_cost_usd":null,"usage":{"source":"codex","status":"partial","input_tokens":123}}`
 			reporter.Emit("usage", usage)
+			coverage := `{"schema_version":1,"diff":{"merge_base":"abc","working_tree":false,"reviewable":{"files":2,"additions":5,"deletions":1},"generated":{"files":0,"additions":0,"deletions":0}},"reads":null,"reads_note":"none"}`
+			reporter.Emit("coverage", coverage)
 			// The worker also slogs the summary to stderr. That line is not a
 			// progress event, so without suppression the monitor prints the
 			// whole telemetry envelope through its diagnostic fallback.
@@ -292,6 +294,13 @@ func TestMonitorSeparatesResultAndHandlesFailure(t *testing.T) {
 			}
 			if strings.Contains(out.String(), "input_tokens") || strings.Contains(diag.String(), "input_tokens") {
 				t.Fatal("raw usage printed in human output")
+			}
+			// #93: coverage is durable state for review-result, like usage.
+			if stored.Coverage != coverage || document(stored).Coverage == nil {
+				t.Fatalf("coverage did not survive monitoring: %q", stored.Coverage)
+			}
+			if strings.Contains(out.String(), "merge_base") || strings.Contains(diag.String(), "merge_base") {
+				t.Fatal("raw coverage printed in human output")
 			}
 			if failed {
 				if code != 1 || out.Len() != 0 || !strings.Contains(diag.String(), "authentication failed") {

@@ -114,7 +114,53 @@ func parseReview(output string) (string, []Finding, bool, string) {
 type Result struct {
 	SchemaVersion int       `json:"schema_version"`
 	Findings      []Finding `json:"findings"`
-	Note          string    `json:"note,omitempty"`
+	// ResidualRisks is what reading the code could not settle (#93). Null
+	// means the reviewer did not report them -- an older prompt, or one it
+	// ignored -- and is not the same claim as an empty list.
+	ResidualRisks []ResidualRisk `json:"residual_risks"`
+	Note          string         `json:"note,omitempty"`
+}
+
+// ResidualRisk is a risk specific to this change that a reader of the code
+// cannot confirm or rule out, with how to check it by other means.
+type ResidualRisk struct {
+	Area   string `json:"area,omitempty"`
+	Risk   string `json:"risk"`
+	Verify string `json:"verify,omitempty"`
+}
+
+// residualRiskLimit bounds the list the way findingLimit bounds findings.
+const residualRiskLimit = 20
+
+// parseResidualRisks reads the residual risks from the findings payload. It
+// returns nil when the payload is absent or does not carry the field, and an
+// empty, non-nil list when the reviewer said there were none.
+func parseResidualRisks(output string) []ResidualRisk {
+	_, _, inner := findingsPayload(output)
+	if inner == "" {
+		return nil
+	}
+	var parsed struct {
+		Findings      []Finding       `json:"findings"`
+		ResidualRisks *[]ResidualRisk `json:"residual_risks"`
+	}
+	if json.Unmarshal([]byte(inner), &parsed) != nil || parsed.Findings == nil || parsed.ResidualRisks == nil {
+		return nil
+	}
+	risks := []ResidualRisk{}
+	for _, r := range *parsed.ResidualRisks {
+		r.Area = truncate(strings.TrimSpace(r.Area), titleLimit)
+		r.Risk = truncate(strings.TrimSpace(r.Risk), fieldLimit)
+		r.Verify = truncate(strings.TrimSpace(r.Verify), fieldLimit)
+		if r.Risk == "" {
+			continue
+		}
+		risks = append(risks, r)
+		if len(risks) == residualRiskLimit {
+			break
+		}
+	}
+	return risks
 }
 
 // ResultSchemaVersion is bumped when the shape above changes incompatibly.
@@ -131,7 +177,7 @@ func StructuredResult(output string) string {
 	if findings == nil {
 		findings = []Finding{}
 	}
-	payload, err := json.Marshal(Result{SchemaVersion: ResultSchemaVersion, Findings: findings, Note: note})
+	payload, err := json.Marshal(Result{SchemaVersion: ResultSchemaVersion, Findings: findings, ResidualRisks: parseResidualRisks(output), Note: note})
 	if err != nil {
 		return ""
 	}
@@ -209,26 +255,31 @@ func findingsPayload(output string) (int, int, string) {
 }
 
 func markerLine(output string) (int, int, string) {
-	start := strings.LastIndex(output, FindingsMarker)
-	if start < 0 {
-		return 0, 0, ""
+	// The last line that starts with the marker, so the word appearing in
+	// prose -- or inside the payload itself, as a residual risk that names
+	// the marker -- is not mistaken for the payload or allowed to hide it.
+	search := len(output)
+	for search > 0 {
+		start := strings.LastIndex(output[:search], FindingsMarker)
+		if start < 0 {
+			return 0, 0, ""
+		}
+		search = start
+		if start > 0 && output[start-1] != '\n' {
+			continue
+		}
+		rest := output[start+len(FindingsMarker):]
+		end := strings.IndexByte(rest, '\n')
+		if end < 0 {
+			end = len(rest)
+		}
+		inner := strings.TrimSpace(rest[:end])
+		if inner == "" {
+			continue
+		}
+		return start, start + len(FindingsMarker) + end, inner
 	}
-	// Only at the start of a line, so the word appearing in prose -- or in
-	// this file's own documentation, quoted back by a reviewer -- is not
-	// mistaken for the payload.
-	if start > 0 && output[start-1] != '\n' {
-		return 0, 0, ""
-	}
-	rest := output[start+len(FindingsMarker):]
-	end := strings.IndexByte(rest, '\n')
-	if end < 0 {
-		end = len(rest)
-	}
-	inner := strings.TrimSpace(rest[:end])
-	if inner == "" {
-		return 0, 0, ""
-	}
-	return start, start + len(FindingsMarker) + end, inner
+	return 0, 0, ""
 }
 
 func lastJSONBlock(output string) (int, int, string) {

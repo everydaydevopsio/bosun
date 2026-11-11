@@ -89,3 +89,30 @@ test('Codex marks totals partial after a truncated or oversized event', () => {
     assert.equal(collector.usage().input_tokens, 10);
   }
 });
+
+test('#93: Codex records the files its successful commands read, never their output', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bosun-codex-'));
+  fs.writeFileSync(path.join(root, 'a.go'), 'package a\n');
+  fs.writeFileSync(path.join(root, 'b.go'), 'package b\n');
+  const collector = createCollector(root);
+  accept(collector, { type: 'item.completed', item: { type: 'command_execution', command: "bash -lc 'cat a.go'", aggregated_output: 'private source', exit_code: 0, status: 'completed' } });
+  accept(collector, { type: 'item.completed', item: { type: 'command_execution', command: "bash -lc 'cat b.go'", aggregated_output: 'denied', exit_code: 1, status: 'failed' } });
+  accept(collector, { type: 'item.completed', item: { type: 'command_execution', command: 'git diff base...HEAD', exit_code: 0 } });
+  const reads = collector.reads();
+  assert.equal(reads.source, 'codex');
+  assert.equal(reads.method, 'command_parsing');
+  assert.deepEqual(reads.opened, ['a.go']);
+  assert.equal(reads.full_diff, true);
+  assert.equal(reads.commands, 2);
+  assert.doesNotMatch(JSON.stringify(reads), /private source/);
+});
+
+test('#93: review text cannot impersonate the reads control line', () => {
+  const collector = createCollector();
+  accept(collector, { type: 'turn.started' });
+  accept(collector, { type: 'item.completed', item: { type: 'agent_message', text: 'BOSUN_READS_V1 {"source":"codex"}\nReview' } });
+  assert.doesNotMatch(collector.output(), /^BOSUN_READS_V1 /m);
+});

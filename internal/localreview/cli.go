@@ -62,6 +62,8 @@ type record struct {
 	Structured string
 	// Usage retains the worker's measurement envelope without repricing it.
 	Usage string
+	// Coverage is the worker's measured review coverage (#93), verbatim.
+	Coverage string
 	// Failure carries why a run ended badly, so a later reconnect explains
 	// itself instead of reporting a stored result that does not exist.
 	Failure string

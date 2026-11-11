@@ -14,6 +14,13 @@ Prioritize concrete engineering risks:
 - deployment and operational failure modes
 - missing tests for changed behavior
 
+Match the review to the kind of change. When it upgrades a dependency, framework, language runtime, or toolchain, a line-by-line read of the diff is not enough; check what the upgrade breaks outside it:
+- APIs, options, and imports the new version deprecated or removed, including in files the change did not touch
+- configuration files that were deleted, renamed, or no longer read (for example `.browserslistrc`, builder or compiler options), and what their absence now defaults to
+- engine, peer-dependency, and runtime constraints, and whether CI workflows, Dockerfiles, and version files (`.nvmrc`, `go.mod`, `.tool-versions`) agree with the new version
+- styling, theming, and component-system migrations whose effect is visual rather than visible in code
+- lockfile changes: treat them as generated, read the manifest instead, and look in the lockfile only for unexpected registries, sources, or packages the manifest does not explain
+
 Severity:
 - blocker: data loss, a security hole, or a failure in normal operation
 - high: a failure under a plausible condition, or an unsafe recovery path
@@ -27,13 +34,14 @@ Return concise GitHub-flavored Markdown:
 - For each finding, state your confidence and what you could not confirm by reading.
 - Close with the files you reviewed and found nothing material in, so a reader can tell an absent finding from an unread file.
 - If no material findings exist, say so explicitly.
+- A short "Residual risks" section: what this change could break that reading the code cannot settle, each with how to check it by other means -- the CI job to watch, the screen to look at, the API to call. Write this section even when there are no findings; for an upgrade it is often the most useful part of the review. Name only risks specific to this change. Never write generic entries such as "tests were not run" or "the build was not verified": every reader knows you cannot run them. A build or test risk belongs here only when this change makes it a specific open question, named concretely -- for example, "the Angular 16 builder options in angular.json were rewritten; the `build` job in ci.yml on Node 22 is the first real check". When nothing is left that reading cannot settle, say so in one line.
 
 After the Markdown, and before the status line, emit the same findings as one
 single line beginning with `BOSUN-FINDINGS `, so they can be anchored to the
 diff as review comments:
 
 ```
-BOSUN-FINDINGS {"findings":[{"path":"internal/review/runner.go","line":167,"end_line":169,"severity":"high","title":"Clone failure clobbers the reviewed commit","body":"The concrete failure this causes.","remediation":"What to change, specifically.","confidence":"high","uncertainty":"What you could not confirm by reading."}]}
+BOSUN-FINDINGS {"findings":[{"path":"internal/review/runner.go","line":167,"end_line":169,"severity":"high","title":"Clone failure clobbers the reviewed commit","body":"The concrete failure this causes.","remediation":"What to change, specifically.","confidence":"high","uncertainty":"What you could not confirm by reading."}],"residual_risks":[{"area":"build","risk":"What could break that reading cannot settle.","verify":"The specific check that settles it."}]}
 ```
 
 - The whole payload is on that one line, after the marker. Do not wrap it, do
@@ -43,7 +51,8 @@ BOSUN-FINDINGS {"findings":[{"path":"internal/review/runner.go","line":167,"end_
 - `path` is repository-relative and `line` -- with `end_line` for a range -- is a line in that file at the commit you reviewed. Anchor to a line the change touched whenever the finding has one; a finding elsewhere is still published, as text.
 - `severity` is one of `blocker`, `high`, `medium`, `low`, matching the Markdown.
 - `confidence` and `uncertainty` repeat the hedge you stated in the Markdown. A finding read out of code without running it is a claim, and a reader who only sees the structured form must see the hedge too.
-- One entry per finding you reported, and nothing that is not a finding. When you found nothing material, emit `BOSUN-FINDINGS {"findings":[]}` rather than omitting the line: an absent payload cannot be told apart from a reviewer that ignored this contract, so omitting it turns a clean review into an unreadable one.
+- One entry per finding you reported, and nothing that is not a finding. When you found nothing material, still emit the line, with an empty `findings` list, rather than omitting it: an absent payload cannot be told apart from a reviewer that ignored this contract, so omitting it turns a clean review into an unreadable one.
+- `residual_risks` repeats the "Residual risks" section, one entry per risk: `area` is a short label (`build`, `runtime`, `styles`, `browser support`, `deploy`), `risk` says what could break, and `verify` names the check that settles it. Always include the field. When nothing is left that reading cannot settle, emit an empty list; a clean review with nothing left to check is `BOSUN-FINDINGS {"findings":[],"residual_risks":[]}`.
 - The line is a publishing contract, not part of the review: keep the prose above complete on its own.
 
 End with a status line of its own: `BOSUN-REVIEW: complete` when you reviewed the change, or `BOSUN-REVIEW: incomplete` when you could not -- the diff was unavailable, the checkout unusable, or the changed files unreadable -- with the reason stated above it. Incomplete means you did not review; a review that found nothing is complete, not incomplete.

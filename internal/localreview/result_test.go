@@ -214,3 +214,52 @@ func TestRecordsWithoutProvenanceReportUnknown(t *testing.T) {
 		t.Fatalf("invented a reviewed commit: %q", out)
 	}
 }
+
+const cleanWithRisks = `{"schema_version":1,"findings":[],"residual_risks":[{"area":"styles","risk":"Material components moved from legacy to MDC","verify":"Compare the settings forms visually"}]}`
+
+const measuredCoverage = `{"schema_version":1,"diff":{"merge_base":"74a168b36604a6d9a3f6e03210f9892b5bd875f0","working_tree":false,"reviewable":{"files":71,"additions":322,"deletions":343},"generated":{"files":1,"additions":19800,"deletions":19600},"generated_paths":["package-lock.json"]},"reads":{"source":"codex","method":"command_parsing","commands":40,"full_diff_viewed":true,"changed_files":70,"changed_files_opened":12,"changed_files_diffed":3,"changed_files_unexamined":55,"unexamined_paths":["src/a.ts"],"context_files_opened":8}}`
+
+// #93 AC1: an empty-findings result on a large diff says how it was examined
+// and what is left to check, so nobody has to infer depth from elapsed time.
+func TestCleanResultCarriesCoverageAndResidualRisks(t *testing.T) {
+	r := completed(cleanWithRisks)
+	r.Coverage = measuredCoverage
+	storeRecord(t, r)
+	out, _, _ := runResultFor(t, "review-bosun-feature-abc", options{json: true})
+	var d resultDocument
+	if err := json.Unmarshal([]byte(out), &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Coverage == nil || d.Coverage.Diff.Generated.Files != 1 || d.Coverage.Reads.ChangedFilesOpened != 12 {
+		t.Fatalf("coverage = %+v", d.Coverage)
+	}
+	if len(d.ResidualRisks) != 1 || d.ResidualRisks[0].Area != "styles" {
+		t.Fatalf("residual risks = %+v", d.ResidualRisks)
+	}
+
+	text, _, _ := runResultFor(t, "review-bosun-feature-abc", options{summary: true})
+	for _, want := range []string{
+		"Diff: 71 files (+322/−343); 1 generated or lockfile (+19800/−19600) not counted",
+		"Examined: full diff read; 12 of 70 changed files opened, 3 diffed by path, 55 not examined individually; 8 context files",
+		"Residual risks:",
+		"[styles] Material components moved from legacy to MDC — verify: Compare the settings forms visually",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+}
+
+// Records from before #93, and reviewers that ignored the new field, report
+// unknown rather than "nothing to check".
+func TestOlderResultsReportCoverageAndRisksAsUnknown(t *testing.T) {
+	storeRecord(t, completed(`{"schema_version":1,"findings":[]}`))
+	out, _, _ := runResultFor(t, "review-bosun-feature-abc", options{json: true})
+	if !strings.Contains(out, `"coverage": null`) || !strings.Contains(out, `"residual_risks": null`) {
+		t.Fatalf("unknown presented as known: %s", out)
+	}
+	text, _, _ := runResultFor(t, "review-bosun-feature-abc", options{summary: true})
+	if !strings.Contains(text, "Coverage: not recorded") || !strings.Contains(text, "Residual risks: not reported") {
+		t.Fatalf("text = %s", text)
+	}
+}
