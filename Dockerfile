@@ -40,12 +40,16 @@ USER root
 # ever stops matching, rather than silently falling back to the live mirror.
 #
 # git itself stays unpinned: the snapshot date is the pin.
+#
+# UBUNTU_SNAPSHOT=live skips the rewrite and installs from the live archive,
+# as arm64 always does. It exists for snapshot.ubuntu.com outages (#99) and is
+# opt-in only: the default stays the dated snapshot, failing closed.
 ARG UBUNTU_SNAPSHOT=20261108T000000Z
 # hadolint ignore=DL3008
 RUN set -eux; \
     sources=/etc/apt/sources.list.d/ubuntu.sources; \
     cp "$sources" /tmp/ubuntu.sources; \
-    if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+    if [ "$(dpkg --print-architecture)" = amd64 ] && [ "$UBUNTU_SNAPSHOT" != live ]; then \
       sed -i -E "s#^URIs: http://(archive|security)\.ubuntu\.com/ubuntu/?\$#URIs: https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/#" "$sources"; \
       [ "$(grep -c '^URIs: https://snapshot.ubuntu.com/' "$sources")" -eq 2 ]; \
     fi; \
