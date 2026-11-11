@@ -1537,3 +1537,24 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 
 ## Outcome
 - Result: `go test ./...` green; `golangci-lint run --new-from-rev=main` 0 issues.
+
+# Task: Build images from the live Ubuntu archive while snapshot.ubuntu.com is down (#99)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-12
+- Mode: Autonomous
+- Requirement IDs: #99
+
+## Acceptance Criteria
+- AC1: `UBUNTU_SNAPSHOT=live` builds amd64 from the live archive; the default still uses the dated snapshot and fails closed.
+- AC2: CI, validate, and publish pass `live` explicitly, each pointing at #99 for the revert.
+
+## Execution Checklist
+- [x] Dockerfile accepts `UBUNTU_SNAPSHOT=live`
+- [x] Workflows pass it, with a comment naming #99
+- [x] amd64 builds verified: `live` installs from archive.ubuntu.com (exit 0); default fails against the down snapshot (502)
+
+## Outcome
+- Result: stopgap in place; revert tracked in #99.
+- Evidence links/commands: `docker build --platform linux/amd64 --build-arg UBUNTU_SNAPSHOT=live .` and the same without the arg.
