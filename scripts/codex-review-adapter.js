@@ -9,9 +9,12 @@ const { stderrKind } = require('./claude-review-adapter');
 const { createReadTracker, readsLine } = require('./provider-reads');
 
 const codex = '/app/node_modules/@openai/codex/bin/codex.js';
-function codexArgs(prompts) {
+// effort is the worker's normalized BOSUN_REVIEW_EFFORT (#95): "deep" raises
+// the reasoning effort; anything else keeps the provider's default.
+function codexArgs(prompts, effort = process.env.BOSUN_REVIEW_EFFORT) {
   // The disposable reviewer Job remains the sandbox; see bridge-bosun.yaml.
-  return ['exec', '--json', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'danger-full-access', '--', ...prompts];
+  const reasoning = effort === 'deep' ? ['-c', 'model_reasoning_effort=high'] : [];
+  return ['exec', '--json', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'danger-full-access', ...reasoning, '--', ...prompts];
 }
 function createCollector(root = process.cwd()) {
   const tracker = createReadTracker(root);

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"github.com/everydaydevopsio/bosun/internal/config"
 	"strings"
 	"testing"
 
@@ -92,6 +93,20 @@ func TestUsageAdvertisesTheReviewFlagsTheSkillChecksFor(t *testing.T) {
 	for _, flag := range []string{"--detach", "--local-credentials"} {
 		if !strings.Contains(reviewLine, flag) {
 			t.Errorf("review usage line does not advertise %s:\n%s", flag, reviewLine)
+		}
+	}
+}
+
+// #95, Bosun review F1: a bad review.effort must stop the controller at start,
+// where a crash-looping Deployment is visible, rather than fail every review
+// while the server reports healthy.
+func TestServerRefusesAnUnknownReviewEffort(t *testing.T) {
+	if err := validateServer(config.Config{ReviewEffort: "max"}); err == nil || !strings.Contains(err.Error(), "invalid review effort") {
+		t.Fatalf("err = %v", err)
+	}
+	for _, ok := range []string{"", "standard", "deep"} {
+		if err := validateServer(config.Config{ReviewEffort: ok}); err != nil {
+			t.Fatalf("%q rejected: %v", ok, err)
 		}
 	}
 }

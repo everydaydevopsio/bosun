@@ -1636,3 +1636,25 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: snapshot dropped; #99 and #90 resolved.
 - Evidence links/commands: `docker build --platform linux/amd64 .`; loop simulation with stub apt-get/sleep.
+
+# Task: Review effort setting (#95)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-12
+- Mode: Autonomous
+- Requirement IDs: #95 (step 1; #105 and #106 track steps 2 and 3)
+
+## Acceptance Criteria
+- AC1: A caller can request a deeper review (`review.effort`, `--effort deep`), and the result records which effort ran.
+- AC2: With no setting, reviews behave exactly as before; an unknown level is refused, never silently downgraded.
+
+## Execution Checklist
+- [x] Failing tests: config defaults and validation, Job env and refusal, worker usage `effort`, result display, both adapters' flags, controller start, CLI pre-snapshot refusal
+- [x] Implementation across config, jobs, worker, CLI, result, adapters, chart
+- [x] Docs (local-development, setup) and plan
+- [x] Live deep reviews on Kind with codex-bosun and claude-bosun completed and recorded `effort: deep`
+
+## Outcome
+- Result: implemented; see plans/plan-review-effort.md.
+- Evidence links/commands: `bosun review --effort deep` on Kind (both providers); `go test ./...`; `node --test scripts/*.test.js`

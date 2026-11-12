@@ -225,3 +225,24 @@ func TestHostedJobCarriesThePullRequestBase(t *testing.T) {
 		t.Fatal("a request without a base set BOSUN_BASE_SHA")
 	}
 }
+
+// #95: the Job carries the effort the worker hands to the provider, and an
+// unknown level is refused at submission rather than silently ignored.
+func TestJobCarriesTheReviewEffort(t *testing.T) {
+	job, err := build(config.Config{ReviewTimeoutSeconds: 60, ReviewEffort: config.EffortDeep}, review.Request{Repo: "acme/widget"}, "review-effort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, v := range job.Spec.Template.Spec.Containers[0].Env {
+		if v.Name == "BOSUN_REVIEW_EFFORT" && v.Value == "deep" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("BOSUN_REVIEW_EFFORT=deep not on the Job")
+	}
+	if _, err := build(config.Config{ReviewTimeoutSeconds: 60, ReviewEffort: "max"}, review.Request{Repo: "acme/widget"}, "review-effort"); err == nil {
+		t.Fatal("an unknown effort level was accepted")
+	}
+}

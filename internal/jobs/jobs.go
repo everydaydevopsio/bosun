@@ -85,7 +85,9 @@ func submitLocked(ctx context.Context, client kubernetes.Interface, cfg config.C
 func ptr[T any](v T) *T { return &v }
 
 func env(cfg config.Config, req review.Request) []corev1.EnvVar {
-	base := []corev1.EnvVar{{Name: "BOSUN_REPO", Value: req.Repo}, {Name: "BOSUN_REF", Value: req.Ref}, {Name: "BOSUN_SHA", Value: req.SHA}, {Name: "BOSUN_TRIGGER", Value: req.Trigger}, {Name: "BOSUN_REVIEW_PROVIDER", Value: cfg.ReviewProvider}, {Name: "BOSUN_REVIEW_TIMEOUT_SECONDS", Value: fmt.Sprint(cfg.ReviewTimeoutSeconds)}, {Name: "BOSUN_PR_NUMBER", Value: fmt.Sprint(req.PRNumber)}}
+	// build has already validated the effort; an empty one means standard.
+	effort, _ := config.NormalizeEffort(cfg.ReviewEffort)
+	base := []corev1.EnvVar{{Name: "BOSUN_REPO", Value: req.Repo}, {Name: "BOSUN_REF", Value: req.Ref}, {Name: "BOSUN_SHA", Value: req.SHA}, {Name: "BOSUN_TRIGGER", Value: req.Trigger}, {Name: "BOSUN_REVIEW_PROVIDER", Value: cfg.ReviewProvider}, {Name: "BOSUN_REVIEW_EFFORT", Value: effort}, {Name: "BOSUN_REVIEW_TIMEOUT_SECONDS", Value: fmt.Sprint(cfg.ReviewTimeoutSeconds)}, {Name: "BOSUN_PR_NUMBER", Value: fmt.Sprint(req.PRNumber)}}
 	// The pull request's base (#96). Absent, not empty, when unknown: the
 	// reviewer then compares against the default branch.
 	if req.BaseSHA != "" {
@@ -158,6 +160,9 @@ func build(cfg config.Config, req review.Request, name string) (*batchv1.Job, er
 	deadline := cfg.ReviewTimeoutSeconds + startupAllowanceSeconds
 	resources, err := reviewResources(cfg.ReviewResources)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := config.NormalizeEffort(cfg.ReviewEffort); err != nil {
 		return nil, err
 	}
 	return &batchv1.Job{

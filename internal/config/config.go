@@ -1,15 +1,19 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Namespace            string
-	ReviewImage          string
-	ReviewProvider       string
+	Namespace      string
+	ReviewImage    string
+	ReviewProvider string
+	// ReviewEffort is how hard the reviewer works: EffortStandard (the
+	// provider's default) or EffortDeep (#95). See NormalizeEffort.
+	ReviewEffort         string
 	GitHubTokenSecret    string
 	AISecret             string
 	JobTTLSeconds        int32
@@ -69,7 +73,7 @@ type ReviewResources struct {
 func Load() Config {
 	return Config{
 		Namespace: env("BOSUN_NAMESPACE", "bosun"), ReviewImage: env("BOSUN_REVIEW_IMAGE", "ghcr.io/everydaydevopsio/bosun:latest"),
-		ReviewProvider: env("BOSUN_REVIEW_PROVIDER", "codex-bosun"), GitHubTokenSecret: env("BOSUN_GITHUB_TOKEN_SECRET", "bosun-github"), AISecret: env("BOSUN_AI_SECRET", "bosun-ai"),
+		ReviewProvider: env("BOSUN_REVIEW_PROVIDER", "codex-bosun"), ReviewEffort: env("BOSUN_REVIEW_EFFORT", EffortStandard), GitHubTokenSecret: env("BOSUN_GITHUB_TOKEN_SECRET", "bosun-github"), AISecret: env("BOSUN_AI_SECRET", "bosun-ai"),
 		JobTTLSeconds: int32(envInt("BOSUN_JOB_TTL_SECONDS", 3600)), ReviewTimeoutSeconds: int64(envInt("BOSUN_REVIEW_TIMEOUT_SECONDS", 1800)),
 		MaxConcurrentReviews: envInt("BOSUN_MAX_CONCURRENT_REVIEWS", 3), RunAsUser: int64(envInt("BOSUN_RUN_AS_USER", 1001)),
 		ReviewBranchCreated: envBool("BOSUN_REVIEW_BRANCH_CREATED"),
@@ -89,6 +93,29 @@ func Load() Config {
 		SweepLookbackSeconds:    envInt("BOSUN_SWEEP_LOOKBACK_SECONDS", 86400),
 		SweepGraceSeconds:       envInt("BOSUN_SWEEP_GRACE_SECONDS", 300),
 		SweepMaxPerPass:         envInt("BOSUN_SWEEP_MAX_PER_PASS", 10),
+	}
+}
+
+// Review effort levels (#95). Each provider adapter maps them to its own
+// control: standard passes nothing and keeps the provider's default; deep
+// raises Codex's model_reasoning_effort and Claude's --effort to high.
+const (
+	EffortStandard = "standard"
+	EffortDeep     = "deep"
+)
+
+// NormalizeEffort returns the canonical effort level for value, treating an
+// empty value as standard. An unknown level is an error rather than a silent
+// fallback: a caller who asked for a deeper review must not get a shallow one
+// because of a typo.
+func NormalizeEffort(value string) (string, error) {
+	switch level := strings.ToLower(strings.TrimSpace(value)); level {
+	case "", EffortStandard:
+		return EffortStandard, nil
+	case EffortDeep:
+		return EffortDeep, nil
+	default:
+		return "", fmt.Errorf("invalid review effort %q: use %s or %s", value, EffortStandard, EffortDeep)
 	}
 }
 

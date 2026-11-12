@@ -20,6 +20,10 @@ preStopSleepSeconds: 10
 terminationGracePeriodSeconds: 45
 review:
   provider: codex-bosun
+  # How hard the reviewer works. standard keeps the provider's default; deep
+  # raises Codex's reasoning effort and Claude's effort level to high, at
+  # higher cost and duration. Each review records the level that ran.
+  effort: standard
   # Empty means image.repository at the chart appVersion.
   image: ""
   ttlSecondsAfterFinished: 3600
