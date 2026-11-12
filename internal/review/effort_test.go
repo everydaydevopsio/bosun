@@ -120,3 +120,61 @@ func TestFooterNamesTheEffort(t *testing.T) {
 		t.Fatalf("footer = %s", got)
 	}
 }
+
+func TestInstructionFilesAreRecognised(t *testing.T) {
+	for _, p := range []string{"AGENTS.md", "CLAUDE.md", "docs/CLAUDE.md", "skills/release/SKILL.md", ".cursor/rules/go.mdc",
+		".claude/commands/ship.md", ".claude/rules/core.md", ".github/workflows/ci.yml", ".github/copilot-instructions.md",
+		"docs/runbook-deploy.md", "ops/runbooks/restore.md", "runbooks/restore.md", "Runbooks/Restore.md", "prompts/code-review.md", ".agents/AGENTS.md"} {
+		if !isInstructionFile(p) {
+			t.Errorf("%s not recognised", p)
+		}
+	}
+	for _, p := range []string{"README.md", "docs/setup.md", "internal/review/runner.go", "skills/release/helper.sh", "agents.go"} {
+		if isInstructionFile(p) {
+			t.Errorf("%s wrongly recognised", p)
+		}
+	}
+}
+
+// instructionRepo builds a branch whose change is mostly instruction prose.
+func instructionRepo(t *testing.T, instructionLines, codeLines int) (dir, base string) {
+	t.Helper()
+	dir = t.TempDir()
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	writeTree(t, filepath.Join(dir, "README.md"), "r\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "base")
+	base = gitRun(t, dir, "rev-parse", "HEAD")
+	gitRun(t, dir, "checkout", "-q", "-b", "feature")
+	writeTree(t, filepath.Join(dir, "skills", "ship", "SKILL.md"), strings.Repeat("step\n", instructionLines))
+	writeTree(t, filepath.Join(dir, "main.go"), strings.Repeat("x\n", codeLines))
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "feature")
+	return dir, base
+}
+
+// #110: a small change that is mostly agent instructions runs deep even
+// below the size threshold; a small or code-dominated one does not.
+func TestInstructionHeavyChangeEscalates(t *testing.T) {
+	cases := []struct {
+		instr, code int
+		effort, why string
+	}{
+		{120, 30, "deep", "instruction_lines=120 of 150"},
+		{20, 0, "standard", ""},
+		{60, 90, "standard", ""},
+	}
+	for _, c := range cases {
+		dir, base := instructionRepo(t, c.instr, c.code)
+		t.Setenv("BOSUN_COMMITTED_ONLY", "1")
+		effort, why := resolveAutoEffort(context.Background(), dir, base, true, 800)
+		if effort != c.effort || why != c.why {
+			t.Errorf("%d instruction + %d code lines: %q, %q; want %q, %q", c.instr, c.code, effort, why, c.effort, c.why)
+		}
+	}
+	// Escalation off disables this trigger too.
+	dir, base := instructionRepo(t, 120, 0)
+	if effort, _ := resolveAutoEffort(context.Background(), dir, base, true, 0); effort != "standard" {
+		t.Fatalf("threshold 0 escalated: %s", effort)
+	}
+}

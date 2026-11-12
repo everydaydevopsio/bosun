@@ -19,6 +19,7 @@ Active and in-flight implementation plans. Each plan graduates to an ADR under `
 | [plan-review-depth-evidence.md](plan-review-depth-evidence.md) | Merged in #97 |
 | [plan-hosted-pr-base.md](plan-hosted-pr-base.md) | Merged in #101 |
 | [plan-review-effort.md](plan-review-effort.md) | Merged in #107 |
-| [plan-effort-escalation.md](plan-effort-escalation.md) | Implemented; PR pending |
+| [plan-effort-escalation.md](plan-effort-escalation.md) | Merged in #111 |
+| [plan-instruction-reviews.md](plan-instruction-reviews.md) | Implemented; PR pending |
 
 Graduated plans live in [`adr/`](../adr/README.md).

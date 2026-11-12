@@ -370,7 +370,8 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 
 // resolveAutoEffort picks the level an auto review runs at (#105): deep when
 // the reviewable change, sized exactly as the coverage block sizes it, has
-// more added plus deleted lines than threshold; otherwise standard. The
+// more added plus deleted lines than threshold, or is mostly agent
+// instructions (#110); otherwise standard. threshold 0 disables both. The
 // second result says why it escalated, and is empty when it did not.
 // Sizing is a heuristic, so a change that cannot be sized runs standard
 // rather than failing the review.
@@ -384,10 +385,15 @@ func resolveAutoEffort(ctx context.Context, workspace, base string, local bool, 
 		return config.EffortStandard, ""
 	}
 	lines := stats.Reviewable.Additions + stats.Reviewable.Deletions
-	if lines <= threshold {
-		return config.EffortStandard, ""
+	if lines > threshold {
+		return config.EffortDeep, fmt.Sprintf("reviewable_lines=%d > %d", lines, threshold)
 	}
-	return config.EffortDeep, fmt.Sprintf("reviewable_lines=%d > %d", lines, threshold)
+	// Size is not the only signal: a short skill or runbook is a procedure to
+	// trace, and a skim of it misses unhandled branches (#110).
+	if why := instructionHeavy(stats); why != "" {
+		return config.EffortDeep, why
+	}
+	return config.EffortStandard, ""
 }
 
 // reviewCoverage measures how the change was examined: the diff the reviewer

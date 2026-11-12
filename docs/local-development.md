@@ -386,7 +386,13 @@ bosun review "$PWD" --effort standard   # never escalated
 exactly as the [coverage block](#review-coverage-and-residual-risks) does: added plus
 deleted lines from the merge base, lockfiles and generated files excluded.
 Above `BOSUN_REVIEW_ESCALATE_ABOVE_LINES` (default `800`) an `auto` review
-runs at `deep`; `0` disables escalation. A change that cannot be sized runs at
+runs at `deep`; `0` disables escalation. A smaller change also runs at `deep`
+when it is mostly agent instructions: at least 50 changed lines, and more than
+half the reviewable lines, in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SKILL.md`,
+`.cursor/rules/`, `.claude/`, `.agents/`, `.github/workflows/`, `prompts/`, or
+a runbook. These files are procedures an agent or operator executes, and a
+skim misses an unhandled branch, so the reason reads
+`instruction_lines=120 of 150`. A change that cannot be sized runs at
 `standard` rather than failing. An explicit `--effort standard` or `deep` is
 never escalated. The threshold is provisional until enough hosted reviews
 publish coverage to calibrate it (#106).

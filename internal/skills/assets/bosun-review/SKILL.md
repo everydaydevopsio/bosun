@@ -12,7 +12,7 @@ description: >
 
 # Bosun code review
 
-<!-- bosun-skill-version: 5 -->
+<!-- bosun-skill-version: 6 -->
 
 Bosun reviews a Git checkout with an independent AI reviewer running in a Kind
 cluster, and prints findings. It is a second reader, not a test runner.
@@ -396,6 +396,12 @@ Each finding carries a repository-relative path and line range, a severity, the
 concrete failure it causes, and the reviewer's confidence. Findings are
 claims, not verdicts.
 
+Every finding at `low` or above is reported, so expect low findings alongside
+the serious ones and triage them by severity rather than skipping them. A
+change that is mostly agent instructions, skills, runbooks, or CI workflows is
+reviewed as a procedure: steps out of order, a fallback branch that never
+rejoins, and hard-coded values that disagree with the repository are findings.
+
 ## After the review
 
 Do not apply findings blindly. For each one:
@@ -420,5 +426,5 @@ worth one retry, and `review` means the reviewer declined and said why.
   changes and the user chooses which one they want.
 - Do not re-run a review to "get a better answer"; each run spends model credits.
 - Do not treat an absent finding as proof that an area is correct. The review
-  lists the files it read and found nothing material in; anything outside that
+  lists the files it read and found no issues in; anything outside that
   list was not examined.

@@ -77,7 +77,9 @@ screen repaints that Bosun rejects rather than post to a pull request. See
 reasoning effort and Claude's effort level to `high`; `standard` keeps the
 provider's own default. `auto`, the default, runs `standard` unless the pull
 request has more than `review.escalateAboveLines` reviewable lines (added plus
-deleted, lockfiles and generated files excluded), when it runs `deep`. Set
+deleted, lockfiles and generated files excluded), or is mostly agent
+instructions, skills, runbooks or CI workflows (see
+[Review effort](local-development.md#review-effort)), when it runs `deep`. Set
 `escalateAboveLines: 0` to turn escalation off. Each review records the level
 that ran, and a deep review's coverage footer says whether it was escalated.
 See [Review effort](local-development.md#review-effort).
