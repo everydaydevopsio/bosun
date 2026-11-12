@@ -137,8 +137,8 @@ function withoutRedirections(words) {
   for (let i = 0; i < words.length; i++) {
     const r = redirection(words[i]);
     if (!r) { out.push(words[i]); continue; }
-    // A bare operator (`2>`, `>>`, `<`) takes the next word as its target.
-    if (/^(\d+|&)?[<>]+$/.test(r)) i++;
+    // A bare operator (`2>`, `>>`, `<`, `2>&`) takes the next word as its target.
+    if (/^(\d+|&)?([<>]+|[<>]&)$/.test(r)) i++;
   }
   return out;
 }
@@ -157,8 +157,8 @@ function redirectsStdout(words) {
     const m = /^(\d+|&)?(>&|>>?|<.*)(.*)$/.exec(r);
     if (!m || m[2].startsWith('<')) continue;
     let target = m[3];
-    // A bare operator (`2>`, `>`) takes the next word as its target.
-    if (target === '' && m[2] !== '>&') target = redirection(words[i + 1] || '') || words[++i] || '';
+    // A bare operator (`2>`, `>`, `2>&`) takes the next word as its target.
+    if (target === '') target = redirection(words[i + 1] || '') || words[++i] || '';
     let dest;
     if (m[2] === '>&' && /^\d+$/.test(target)) dest = fds[target] || 'other';
     else if (m[2] === '>&' && target === '-') dest = 'closed';
