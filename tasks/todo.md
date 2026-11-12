@@ -1614,3 +1614,25 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: implemented; see plans/plan-hosted-pr-base.md.
 - Evidence links/commands: `go test ./internal/review/ -run HostedReview`
+
+# Task: Keep the live Ubuntu mirror and drop the snapshot (#99, #90)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-12
+- Mode: Autonomous
+- Requirement IDs: #99, #90
+
+## Acceptance Criteria
+- AC1: Images install git from the base image's live mirrors on both architectures; no snapshot rewrite or `UBUNTU_SNAPSHOT` remains outside historical records.
+- AC2: A mirror mid-sync (a listed package answering 404) is retried with backoff before the build fails.
+
+## Execution Checklist
+- [x] Dockerfile installs from live mirrors with a 5-attempt backoff loop (30/60/120/240s)
+- [x] `UBUNTU_SNAPSHOT=live` removed from ci.yml, validate.yml, publish.yml
+- [x] ADR-002's lesson-learned note dated, not rewritten
+- [x] Verified: amd64 build installs git 2.43.0 from archive/security.ubuntu.com; the loop with stubs retries 30/60/120/240 and exits 1 after 5 failures; hadolint clean
+
+## Outcome
+- Result: snapshot dropped; #99 and #90 resolved.
+- Evidence links/commands: `docker build --platform linux/amd64 .`; loop simulation with stub apt-get/sleep.
