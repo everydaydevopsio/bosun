@@ -1702,3 +1702,25 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: implemented; see plans/plan-effort-escalation.md.
 - Evidence links/commands: `go test ./internal/review/ -run 'Escalat|AutoEffort|Explicit|Unsizable|Footer'`
+
+# Task: Review agent instructions as procedures and report every severity (#110)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-13
+- Mode: Autonomous
+- Requirement IDs: #110
+
+## Acceptance Criteria
+- AC1: The prompt traces instruction changes step by step (fallback paths, sibling hand-offs, hard-coded values) and reports every finding at `low` or above.
+- AC2: A clean review says so explicitly; low findings appear in both the Markdown and the `BOSUN-FINDINGS` payload.
+- AC3: A change dominated by instruction files runs at `deep` under `auto`.
+
+## Execution Checklist
+- [x] Failing tests for the prompt contract and the instruction trigger
+- [x] Prompt, escalation trigger, check-run title, skill v6, docs
+- [ ] Live fixture comparison on Kind (blocked: host disk full on 2026-11-13; tracked in the PR)
+
+## Outcome
+- Result: implemented; see plans/plan-instruction-reviews.md.
+- Evidence links/commands: `go test ./internal/review/ -run 'Instruction|Prompt'`

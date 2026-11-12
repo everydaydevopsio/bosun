@@ -1,6 +1,6 @@
 # Plan: Escalate review effort for large diffs
 
-- **Status:** Implemented; PR pending
+- **Status:** Merged in #111
 - **Branch:** `issue-105-effort-escalation`
 - **Created:** 2026-11-13
 - **Issue:** #105 (step 2 of #95). The threshold is recalibrated by #106.
@@ -32,7 +32,7 @@ A third setting, `auto`, becomes the default for `review.effort` and `--effort`.
 - [x] Implementation
 - [x] Docs
 - [x] Live escalated review on Kind (codex-bosun, threshold 50): `effort: deep`, `reviewable_lines=536 > 50`, no material findings
-- [ ] Hosted Bosun review; merge
+- [x] Hosted Bosun review; merged in #111
 
 ## Threshold
 

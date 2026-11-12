@@ -413,3 +413,31 @@ func TestPayloadThatMentionsTheMarkerIsStillParsed(t *testing.T) {
 		t.Fatalf("payload left in the summary: %q", summary)
 	}
 }
+
+// #110: instruction files are executed by an agent or a person, so the prompt
+// asks for them to be traced like code; every finding at low or above is
+// reported, and a first finding does not end the review.
+func TestPromptReviewsInstructionsAndReportsEverySeverity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "prompts", "code-review.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(raw)
+	for _, want := range []string{
+		"agent instructions, skills, runbooks",
+		"follow both paths",
+		"sibling instruction files",
+		"hard-coded",
+		"Report every finding at `low` or above",
+		"A first finding does not end the review",
+		"No findings.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt is missing %q", want)
+		}
+	}
+	// "Material" let the reviewer drop low findings without saying so.
+	if strings.Contains(strings.ToLower(prompt), "material findings") || strings.Contains(prompt, "nothing material") {
+		t.Error("prompt still filters findings by an unstated 'material' bar")
+	}
+}

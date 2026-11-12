@@ -111,7 +111,7 @@ func (g githubClient) postCheckRun(ctx context.Context, repo, token, ref, sha, o
 	conclusion := "neutral"
 	title := strconv.Itoa(len(findings)) + " finding(s)"
 	if len(findings) == 0 {
-		conclusion, title = "success", "No material findings"
+		conclusion, title = "success", "No findings"
 	}
 	body := map[string]any{
 		"name":       checkRunName,
