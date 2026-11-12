@@ -13,6 +13,17 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.4.1] - 2026-11-12
+
+### Highlights
+- Review agent instructions as procedures and report findings across all severity levels. (#110, #113)
+
+### Fixes
+- Corrected how diff output is credited by respecting redirection order during reviews. (#104, #112)
+
+### Changes
+- This patch updates review behavior and diff-output attribution since v0.4.0.
+
 ## [0.4.0] - 2026-11-12
 
 ### Highlights
