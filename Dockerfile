@@ -24,39 +24,27 @@ USER root
 # git is Bosun's own dependency: the reviewer clones with it and the agent
 # prompts run it. bridgectl does not need it, so the base image will not ship it.
 #
-# On amd64 apt reads a dated Ubuntu snapshot rather than the live mirrors. A
-# live mirror mid-sync can advertise packages it does not yet serve -- on
-# 2026-11-10 security.ubuntu.com listed perl 5.38.2-3.2ubuntu0.7, which git
-# depends on, while returning 404 for the files, and every image build failed
-# for over half an hour. A snapshot never changes, so the build is reproducible
-# and immune to that. Bump UBUNTU_SNAPSHOT to pick up security fixes.
+# apt installs from the base image's live Ubuntu mirrors on both architectures,
+# so every build picks up current security fixes; git itself is unpinned. The
+# image is therefore not byte-reproducible, by choice (#99).
 #
-# arm64 cannot do the same: snapshot.ubuntu.com does not serve ubuntu-ports
-# (it answers 401). It keeps the live ports mirror, a separate one from
-# security.ubuntu.com, with retries for brief outages.
-#
-# The original sources are restored afterwards so the runtime image's apt
-# configuration is the base image's. The grep fails the build if the rewrite
-# ever stops matching, rather than silently falling back to the live mirror.
-#
-# git itself stays unpinned: the snapshot date is the pin.
-#
-# UBUNTU_SNAPSHOT=live skips the rewrite and installs from the live archive,
-# as arm64 always does. It exists for snapshot.ubuntu.com outages (#99) and is
-# opt-in only: the default stays the dated snapshot, failing closed.
-ARG UBUNTU_SNAPSHOT=20261108T000000Z
+# A live mirror mid-sync can list packages it does not serve yet: on 2026-11-10
+# security.ubuntu.com listed a perl update git depends on while answering 404
+# for it for over half an hour. Acquire::Retries does not retry a 404, so the
+# whole update-and-install is retried with backoff (about 7.5 minutes in all)
+# before the build fails.
 # hadolint ignore=DL3008
 RUN set -eux; \
-    sources=/etc/apt/sources.list.d/ubuntu.sources; \
-    cp "$sources" /tmp/ubuntu.sources; \
-    if [ "$(dpkg --print-architecture)" = amd64 ] && [ "$UBUNTU_SNAPSHOT" != live ]; then \
-      sed -i -E "s#^URIs: http://(archive|security)\.ubuntu\.com/ubuntu/?\$#URIs: https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/#" "$sources"; \
-      [ "$(grep -c '^URIs: https://snapshot.ubuntu.com/' "$sources")" -eq 2 ]; \
-    fi; \
-    apt-get -o Acquire::Retries=5 update; \
-    apt-get -o Acquire::Retries=5 install -y --no-install-recommends git; \
+    for delay in 30 60 120 240 0; do \
+      if apt-get -o Acquire::Retries=5 update \
+        && apt-get -o Acquire::Retries=5 install -y --no-install-recommends git; then \
+        break; \
+      fi; \
+      [ "$delay" -gt 0 ] || exit 1; \
+      echo "apt failed; retrying in ${delay}s" >&2; \
+      sleep "$delay"; \
+    done; \
     git --version; \
-    mv /tmp/ubuntu.sources "$sources"; \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app/bosun
 COPY prompts ./prompts
