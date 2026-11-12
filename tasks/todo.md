@@ -1697,7 +1697,7 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 - [x] Failing tests for escalation above/at/below threshold, explicit override, unsizable change, Job env, validation, footer, result
 - [x] `auto` effort resolved by the reviewer before the provider starts
 - [x] Chart `effort: auto`, `escalateAboveLines: 800`; docs
-- [ ] Live escalated review on Kind
+- [x] Live escalated review on Kind (codex-bosun, threshold 50): `effort: deep`, `reviewable_lines=536 > 50`, no material findings
 
 ## Outcome
 - Result: implemented; see plans/plan-effort-escalation.md.

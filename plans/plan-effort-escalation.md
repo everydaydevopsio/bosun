@@ -31,7 +31,7 @@ A third setting, `auto`, becomes the default for `review.effort` and `--effort`.
 - [x] Failing tests: config defaults and validation, Job env, worker escalation above, at and below the threshold, explicit override, unsizable change, footer, result display
 - [x] Implementation
 - [x] Docs
-- [ ] Live escalated review on Kind
+- [x] Live escalated review on Kind (codex-bosun, threshold 50): `effort: deep`, `reviewable_lines=536 > 50`, no material findings
 - [ ] Hosted Bosun review; merge
 
 ## Threshold
