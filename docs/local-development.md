@@ -460,7 +460,8 @@ reads a successful exit proves ran are counted: in `a && cat x; b` and
 `a && cat x || b`, `cat x` may have been skipped, so it earns no credit. Output
 also has to reach the reviewer whole: `git diff A...HEAD | wc -l`,
 `cat x | head`, and `git diff A...HEAD > file` earn nothing, while a pipe into
-`cat`, `less`, `more`, or `tee` keeps the credit. The adapters record paths only, never file content.
+`cat`, `less`, `more`, or `tee` keeps the credit as long as that command reads
+the pipe (`| cat README.md` does not). The adapters record paths only, never file content.
 When either half is unavailable, `diff_note` or `reads_note` says why instead of
 reporting zeros.
 

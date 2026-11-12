@@ -236,3 +236,51 @@ test('output passed through unchanged still earns credit', () => {
   tracker.command('cat README.md | cat');
   assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md']);
 });
+
+// Bosun review of #103, F1: a pass-through command only passes the pipe on
+// when it reads stdin; `cat FILE` and `less < FILE` ignore it.
+test('a downstream reader of its own input does not pass the pipe through', () => {
+  for (const command of ['git diff base...HEAD | cat README.md', 'git diff base...HEAD | less package.json', 'git diff base...HEAD | cat < README.md']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  for (const command of ['git diff base...HEAD | cat -', 'git diff base...HEAD | cat -n', 'git diff base...HEAD | tee /tmp/p']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+});
+
+// F2: a redirection attached to a word still sends the output to a file; a
+// quoted `>` is a literal.
+test('attached redirections are recognised', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('cat README.md src/app.ts>/tmp/out');
+  tracker.command('git diff base...HEAD>/tmp/p');
+  tracker.command("cat package.json '>' ");
+  const record = tracker.record('codex', 'command_parsing');
+  assert.deepEqual(record.opened, ['package.json']);
+  assert.equal(record.full_diff, false);
+});
+
+// F3: a cd whose output is discarded still changes the directory.
+test('cd keeps its effect when its output is redirected', () => {
+  const root = workspace();
+  fs.writeFileSync(path.join(root, 'app.ts'), 'root-level decoy\n');
+  const tracker = createReadTracker(root);
+  tracker.command('bash -lc "cd src >/dev/null && cat app.ts"');
+  assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['src/app.ts']);
+});
+
+// A redirection and its target are not git operands: `2>&1` or `2> err.log`
+// must not end up in the recorded range, which the worker could never verify.
+test('redirections are not recorded as revisions or paths', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('git diff base...HEAD 2>&1');
+  tracker.command('git diff base2...HEAD 2> README.md');
+  tracker.command('git diff base3...HEAD -- src/app.ts 2>/dev/null');
+  const record = tracker.record('codex', 'command_parsing');
+  assert.deepEqual(record.diff_ranges, ['base...HEAD', 'base2...HEAD']);
+  assert.deepEqual(record.diffed, [{ range: 'base3...HEAD', paths: ['src/app.ts'] }]);
+});
