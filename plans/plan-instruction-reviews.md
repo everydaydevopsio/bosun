@@ -42,8 +42,8 @@ A 0.3.5 review of a PR adding a ~200-line agent skill found one high but missed 
 
 - [x] Failing tests: prompt contract, instruction path matching, escalation by share and minimum
 - [x] Implementation, docs, skill v6
-- [ ] Live comparison on a fixture reproducing the issue (0.4.0 prompt vs this prompt, standard effort). Blocked on 2026-11-13: the host disk was full and OrbStack stopped.
-- [ ] Hosted Bosun review; merge
+- [x] TASK-114: Live comparison on a fixture reproducing the issue, promoted to #114 (host disk full on 2026-11-13)
+- [x] Hosted Bosun review: no material findings at e24ea7c; merged
 
 ## Alternatives Rejected
 

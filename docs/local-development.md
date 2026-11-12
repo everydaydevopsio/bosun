@@ -503,7 +503,7 @@ reads a successful exit proves ran are counted: in `a && cat x; b` and
 also has to reach the reviewer whole: `git diff A...HEAD | wc -l`,
 `cat x | head`, and `git diff A...HEAD > file` earn nothing, while a pipe into
 `cat`, `less`, `more`, or `tee` keeps the credit as long as that command reads
-the pipe (`| cat README.md` does not). The adapters record paths only, never file content.
+the pipe (`| cat README.md` does not). Redirections apply left to right, as in a shell: `2>/dev/null 1>&2` discards the patch and earns nothing, while `1>&2 2>/dev/null` leaves it on the terminal. The adapters record paths only, never file content.
 When either half is unavailable, `diff_note` or `reads_note` says why instead of
 reporting zeros.
 

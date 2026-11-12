@@ -1703,6 +1703,27 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 - Result: implemented; see plans/plan-effort-escalation.md.
 - Evidence links/commands: `go test ./internal/review/ -run 'Escalat|AutoEffort|Explicit|Unsizable|Footer'`
 
+# Task: Follow redirection order when crediting output (#104)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-13
+- Mode: Autonomous
+- Requirement IDs: #104
+
+## Acceptance Criteria
+- AC1: `git diff <base>...HEAD 2>/dev/null 1>&2` earns no credit.
+- AC2: `1>&2 2>/dev/null` and `>&2` alone keep credit.
+
+## Execution Checklist
+- [x] Failing tests for duplication after and before stderr moves, closed and unknown descriptors, pipeline stages
+- [x] `redirectsStdout` tracks fd 1 and fd 2 left to right
+- [x] Docs updated
+
+## Outcome
+- Result: implemented.
+- Evidence links/commands: `node --test scripts/*.test.js` (55 pass)
+
 # Task: Review agent instructions as procedures and report every severity (#110)
 
 ## Context
@@ -1719,7 +1740,7 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Execution Checklist
 - [x] Failing tests for the prompt contract and the instruction trigger
 - [x] Prompt, escalation trigger, check-run title, skill v6, docs
-- [ ] Live fixture comparison on Kind (blocked: host disk full on 2026-11-13; tracked in the PR)
+- [x] TASK-114: Live fixture comparison on Kind, promoted to https://github.com/everydaydevopsio/bosun/issues/114 (blocked: host disk full on 2026-11-13)
 
 ## Outcome
 - Result: implemented; see plans/plan-instruction-reviews.md.
