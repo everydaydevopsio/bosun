@@ -284,3 +284,20 @@ test('redirections are not recorded as revisions or paths', () => {
   assert.deepEqual(record.diff_ranges, ['base...HEAD', 'base2...HEAD']);
   assert.deepEqual(record.diffed, [{ range: 'base3...HEAD', paths: ['src/app.ts'] }]);
 });
+
+// Bosun review of #103 @ c968e04: `&>file` and `>&file` send stdout to a file
+// (only `>&2`-style descriptor duplication keeps it visible), and a help or
+// version flag prints that instead of forwarding the pipe.
+test('combined redirections and help flags earn no credit', () => {
+  for (const command of ['git diff base...HEAD &>/tmp/patch', 'git diff base...HEAD &>> /tmp/patch', 'git diff base...HEAD >&/tmp/patch',
+    'git diff base...HEAD | cat --help', 'git diff base...HEAD | tee --version']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  for (const command of ['git diff base...HEAD >&2', 'git diff base...HEAD 1>&2', 'git diff base...HEAD 2>&1 | cat']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+});

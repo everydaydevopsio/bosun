@@ -57,6 +57,8 @@ function tokenize(script) {
     if (c === '\\' && i + 1 < script.length) { word += script[++i]; inWord = true; continue; }
     // `2>&1` and `<&3` are redirections, not background operators.
     if (c === '&' && (script[i - 1] === '>' || script[i - 1] === '<')) { word += c; inWord = true; continue; }
+    // `&>` and `&>>` redirect stdout and stderr together.
+    if (c === '&' && script[i + 1] === '>') { endWord(); word = c; inWord = true; redirect = true; continue; }
     // An unquoted redirection starts its own word even when attached
     // (`file.ts>/tmp/out`), keeping a file-descriptor prefix (`2>`, `&>`) and
     // a doubled operator (`>>`) with it. The target that follows joins it.
@@ -146,7 +148,9 @@ function withoutRedirections(words) {
 function redirectsStdout(words) {
   return words.some(word => {
     const r = redirection(word);
-    return /^(1?>>?|&>>?)/.test(r) && !/^1?>&/.test(r);
+    // `>&2` and `1>&2` duplicate a descriptor and stay on the terminal;
+    // `>&file` (bash) writes to a file like `&>file`.
+    return /^(1?>>?|&>>?)/.test(r) && !/^1?>&(\d+|-)$/.test(r);
   });
 }
 
@@ -157,6 +161,8 @@ function redirectsStdout(words) {
 function passesStdin(words) {
   if (!passthrough.has(path.basename(words[0] || ''))) return false;
   if (words.some(word => /^\d*</.test(redirection(word)))) return false;
+  // --help and --version print their own text and exit without reading stdin.
+  if (words.some(word => /^--(help|version)$/.test(word))) return false;
   if (path.basename(words[0]) === 'tee') return true;
   return words.slice(1).every(word => word === '-' || (word.startsWith('-') && word.length > 1) || redirection(word) !== '');
 }
