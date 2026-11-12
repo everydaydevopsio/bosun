@@ -11,18 +11,23 @@ type Config struct {
 	Namespace      string
 	ReviewImage    string
 	ReviewProvider string
-	// ReviewEffort is how hard the reviewer works: EffortStandard (the
-	// provider's default) or EffortDeep (#95). See NormalizeEffort.
-	ReviewEffort         string
-	GitHubTokenSecret    string
-	AISecret             string
-	JobTTLSeconds        int32
-	ReviewTimeoutSeconds int64
-	MaxConcurrentReviews int
-	RunAsUser            int64
-	ReviewCommand        string
-	AllowedAssociations  map[string]bool
-	WebhookSecret        string
+	// ReviewEffort is how hard the reviewer works: EffortAuto (standard,
+	// escalated to deep for a large change, #105), EffortStandard (the
+	// provider's default), or EffortDeep (#95). See NormalizeEffort.
+	ReviewEffort string
+	// ReviewEscalateAboveLines is the reviewable diff size, in added plus
+	// deleted lines, above which an EffortAuto review runs at EffortDeep.
+	// Zero disables escalation; an explicit effort is never escalated.
+	ReviewEscalateAboveLines int
+	GitHubTokenSecret        string
+	AISecret                 string
+	JobTTLSeconds            int32
+	ReviewTimeoutSeconds     int64
+	MaxConcurrentReviews     int
+	RunAsUser                int64
+	ReviewCommand            string
+	AllowedAssociations      map[string]bool
+	WebhookSecret            string
 	// ReviewResources is the resources block given to reviewer Jobs. An empty
 	// quantity string omits that entry, so an operator can drop a limit
 	// without having to drop the request with it.
@@ -73,7 +78,7 @@ type ReviewResources struct {
 func Load() Config {
 	return Config{
 		Namespace: env("BOSUN_NAMESPACE", "bosun"), ReviewImage: env("BOSUN_REVIEW_IMAGE", "ghcr.io/everydaydevopsio/bosun:latest"),
-		ReviewProvider: env("BOSUN_REVIEW_PROVIDER", "codex-bosun"), ReviewEffort: env("BOSUN_REVIEW_EFFORT", EffortStandard), GitHubTokenSecret: env("BOSUN_GITHUB_TOKEN_SECRET", "bosun-github"), AISecret: env("BOSUN_AI_SECRET", "bosun-ai"),
+		ReviewProvider: env("BOSUN_REVIEW_PROVIDER", "codex-bosun"), ReviewEffort: env("BOSUN_REVIEW_EFFORT", EffortAuto), ReviewEscalateAboveLines: envInt("BOSUN_REVIEW_ESCALATE_ABOVE_LINES", DefaultEscalateAboveLines), GitHubTokenSecret: env("BOSUN_GITHUB_TOKEN_SECRET", "bosun-github"), AISecret: env("BOSUN_AI_SECRET", "bosun-ai"),
 		JobTTLSeconds: int32(envInt("BOSUN_JOB_TTL_SECONDS", 3600)), ReviewTimeoutSeconds: int64(envInt("BOSUN_REVIEW_TIMEOUT_SECONDS", 1800)),
 		MaxConcurrentReviews: envInt("BOSUN_MAX_CONCURRENT_REVIEWS", 3), RunAsUser: int64(envInt("BOSUN_RUN_AS_USER", 1001)),
 		ReviewBranchCreated: envBool("BOSUN_REVIEW_BRANCH_CREATED"),
@@ -98,25 +103,46 @@ func Load() Config {
 
 // Review effort levels (#95). Each provider adapter maps them to its own
 // control: standard passes nothing and keeps the provider's default; deep
-// raises Codex's model_reasoning_effort and Claude's --effort to high.
+// raises Codex's model_reasoning_effort and Claude's --effort to high. auto
+// is not a provider level: the reviewer resolves it to standard or deep once
+// it has sized the change (#105).
 const (
+	EffortAuto     = "auto"
 	EffortStandard = "standard"
 	EffortDeep     = "deep"
 )
 
+// DefaultEscalateAboveLines is provisional: the first 0.3.5 reviews were all
+// under 500 reviewable lines, too few to calibrate from. #106 revisits it
+// with the coverage numbers hosted reviews publish.
+const DefaultEscalateAboveLines = 800
+
 // NormalizeEffort returns the canonical effort level for value, treating an
-// empty value as standard. An unknown level is an error rather than a silent
+// empty value as auto. An unknown level is an error rather than a silent
 // fallback: a caller who asked for a deeper review must not get a shallow one
 // because of a typo.
 func NormalizeEffort(value string) (string, error) {
 	switch level := strings.ToLower(strings.TrimSpace(value)); level {
-	case "", EffortStandard:
-		return EffortStandard, nil
-	case EffortDeep:
-		return EffortDeep, nil
+	case "", EffortAuto:
+		return EffortAuto, nil
+	case EffortStandard, EffortDeep:
+		return level, nil
 	default:
-		return "", fmt.Errorf("invalid review effort %q: use %s or %s", value, EffortStandard, EffortDeep)
+		return "", fmt.Errorf("invalid review effort %q: use %s, %s or %s", value, EffortAuto, EffortStandard, EffortDeep)
 	}
+}
+
+// ValidateReview checks the review settings every entry point must refuse
+// before starting anything: the controller at start, a submission, and the
+// local CLI before its snapshot.
+func (c Config) ValidateReview() error {
+	if _, err := NormalizeEffort(c.ReviewEffort); err != nil {
+		return err
+	}
+	if c.ReviewEscalateAboveLines < 0 {
+		return fmt.Errorf("invalid review escalate-above-lines %d: use 0 to disable escalation", c.ReviewEscalateAboveLines)
+	}
+	return nil
 }
 
 func env(key, fallback string) string {

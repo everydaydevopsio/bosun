@@ -1680,3 +1680,25 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: implemented.
 - Evidence links/commands: `node --test scripts/provider-reads.test.js`
+
+# Task: Escalate review effort for large diffs (#105)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-13
+- Mode: Autonomous
+- Requirement IDs: #105 (step 2 of #95; threshold recalibration in #106)
+
+## Acceptance Criteria
+- AC1: A diff above the threshold runs at `deep`, and the result says it was escalated and why.
+- AC2: An explicit effort always overrides escalation; `0` disables it.
+
+## Execution Checklist
+- [x] Failing tests for escalation above/at/below threshold, explicit override, unsizable change, Job env, validation, footer, result
+- [x] `auto` effort resolved by the reviewer before the provider starts
+- [x] Chart `effort: auto`, `escalateAboveLines: 800`; docs
+- [ ] Live escalated review on Kind
+
+## Outcome
+- Result: implemented; see plans/plan-effort-escalation.md.
+- Evidence links/commands: `go test ./internal/review/ -run 'Escalat|AutoEffort|Explicit|Unsizable|Footer'`

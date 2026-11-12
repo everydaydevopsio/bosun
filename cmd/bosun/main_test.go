@@ -2,9 +2,10 @@ package main
 
 import (
 	"bytes"
-	"github.com/everydaydevopsio/bosun/internal/config"
 	"strings"
 	"testing"
+
+	"github.com/everydaydevopsio/bosun/internal/config"
 
 	"github.com/everydaydevopsio/bosun/internal/version"
 )
@@ -104,9 +105,13 @@ func TestServerRefusesAnUnknownReviewEffort(t *testing.T) {
 	if err := validateServer(config.Config{ReviewEffort: "max"}); err == nil || !strings.Contains(err.Error(), "invalid review effort") {
 		t.Fatalf("err = %v", err)
 	}
-	for _, ok := range []string{"", "standard", "deep"} {
+	for _, ok := range []string{"", "auto", "standard", "deep"} {
 		if err := validateServer(config.Config{ReviewEffort: ok}); err != nil {
 			t.Fatalf("%q rejected: %v", ok, err)
 		}
+	}
+	// #105: so is a negative escalation threshold.
+	if err := validateServer(config.Config{ReviewEscalateAboveLines: -1}); err == nil {
+		t.Fatal("a negative escalation threshold was accepted")
 	}
 }

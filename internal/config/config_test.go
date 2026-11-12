@@ -4,6 +4,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -169,16 +170,16 @@ func TestTheChartRendersTheReviewCommand(t *testing.T) {
 	}
 }
 
-// #95: review effort defaults to standard and accepts only the levels Bosun
+// #95, #105: review effort defaults to auto and accepts only the levels Bosun
 // maps to each provider.
-func TestReviewEffortDefaultsToStandardAndIsValidated(t *testing.T) {
+func TestReviewEffortDefaultsToAutoAndIsValidated(t *testing.T) {
 	t.Setenv("BOSUN_REVIEW_EFFORT", "")
-	if got := Load().ReviewEffort; got != EffortStandard {
+	if got := Load().ReviewEffort; got != EffortAuto {
 		t.Fatalf("default effort = %q", got)
 	}
-	for _, level := range []string{"standard", "deep", "DEEP", " deep "} {
-		if got, err := NormalizeEffort(level); err != nil || (got != EffortStandard && got != EffortDeep) {
-			t.Errorf("NormalizeEffort(%q) = %q, %v", level, got, err)
+	for level, want := range map[string]string{"": EffortAuto, "auto": EffortAuto, "standard": EffortStandard, "deep": EffortDeep, "DEEP": EffortDeep, " deep ": EffortDeep} {
+		if got, err := NormalizeEffort(level); err != nil || got != want {
+			t.Errorf("NormalizeEffort(%q) = %q, %v; want %q", level, got, err, want)
 		}
 	}
 	for _, bad := range []string{"high", "max", "fast"} {
@@ -188,12 +189,37 @@ func TestReviewEffortDefaultsToStandardAndIsValidated(t *testing.T) {
 	}
 }
 
-func TestTheChartDefaultsEffortToStandard(t *testing.T) {
+// #105: escalation defaults on, can be turned off with 0, and refuses a
+// negative threshold rather than treating it as "always escalate".
+func TestEscalationThresholdDefaultsAndValidation(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_ESCALATE_ABOVE_LINES", "")
+	if got := Load().ReviewEscalateAboveLines; got != DefaultEscalateAboveLines {
+		t.Fatalf("default threshold = %d", got)
+	}
+	t.Setenv("BOSUN_REVIEW_ESCALATE_ABOVE_LINES", "0")
+	if got := Load().ReviewEscalateAboveLines; got != 0 {
+		t.Fatalf("threshold 0 was not kept: %d", got)
+	}
+	if err := (Config{ReviewEffort: EffortAuto}).ValidateReview(); err != nil {
+		t.Fatalf("valid settings refused: %v", err)
+	}
+	if err := (Config{ReviewEffort: "max"}).ValidateReview(); err == nil || !strings.Contains(err.Error(), "invalid review effort") {
+		t.Fatalf("unknown effort: %v", err)
+	}
+	if err := (Config{ReviewEscalateAboveLines: -1}).ValidateReview(); err == nil || !strings.Contains(err.Error(), "escalate") {
+		t.Fatalf("negative threshold: %v", err)
+	}
+}
+
+func TestTheChartDefaultsEffortToAutoWithAThreshold(t *testing.T) {
 	values, err := os.ReadFile("../../charts/bosun/values.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`(?m)^  effort: standard$`).Match(values) {
-		t.Fatal("charts/bosun/values.yaml does not default review.effort to standard")
+	if !regexp.MustCompile(`(?m)^  effort: auto$`).Match(values) {
+		t.Fatal("charts/bosun/values.yaml does not default review.effort to auto")
+	}
+	if !regexp.MustCompile(`(?m)^  escalateAboveLines: ` + strconv.Itoa(DefaultEscalateAboveLines) + `$`).Match(values) {
+		t.Fatal("charts/bosun/values.yaml does not default review.escalateAboveLines to the config default")
 	}
 }

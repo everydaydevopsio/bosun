@@ -26,7 +26,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--effort standard|deep] [--detach]
+const usage = `Usage: bosun review [PATH] [--branch REF] [--base REF] [--provider NAME] [--effort auto|standard|deep] [--detach]
                            [--local-credentials] [--timeout 30m]
        bosun review-status JOB [--follow]
        bosun review-result JOB [--json] [--summary] [--against-ref REF]
@@ -292,8 +292,7 @@ func newWebhookServer(handler http.Handler) *http.Server {
 // every review while the server reports healthy. Exiting at start makes it a
 // crash-looping Deployment, which ArgoCD and kubectl both show.
 func validateServer(cfg config.Config) error {
-	_, err := config.NormalizeEffort(cfg.ReviewEffort)
-	return err
+	return cfg.ValidateReview()
 }
 
 func main() {
@@ -353,7 +352,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "configure Kubernetes client:", err)
 		os.Exit(1)
 	}
-	slog.Info("bosun starting", "review_effort", cfg.ReviewEffort, "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews, "max_queued_reviews", cfg.MaxQueuedReviews)
+	slog.Info("bosun starting", "review_effort", cfg.ReviewEffort, "review_escalate_above_lines", cfg.ReviewEscalateAboveLines, "namespace", cfg.Namespace, "max_concurrent_reviews", cfg.MaxConcurrentReviews, "max_queued_reviews", cfg.MaxQueuedReviews)
 	startSentinel(ctx, client, cfg)
 	startDispatcher(ctx, client, cfg)
 	startSweep(ctx, client, cfg)

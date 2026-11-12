@@ -62,17 +62,20 @@ type UsageSummary struct {
 	CredentialMode string `json:"credential_mode"`
 	// Effort is the review effort level that ran (#95); empty on records
 	// from before it existed.
-	Effort          string        `json:"effort,omitempty"`
-	Outcome         string        `json:"outcome"`
-	FailureStage    Stage         `json:"failure_stage,omitempty"`
-	StartedAt       time.Time     `json:"started_at"`
-	FinishedAt      time.Time     `json:"finished_at"`
-	WorkerSeconds   float64       `json:"worker_seconds"`
-	ProviderSeconds float64       `json:"provider_seconds"`
-	ProviderStarted bool          `json:"provider_started"`
-	CostStatus      string        `json:"cost_status"`
-	ActualCostUSD   *float64      `json:"actual_cost_usd"`
-	Usage           ProviderUsage `json:"usage"`
+	Effort string `json:"effort,omitempty"`
+	// EffortEscalation says why an auto review ran at deep (#105), such as
+	// "reviewable_lines=1840 > 800"; empty when it was not escalated.
+	EffortEscalation string        `json:"effort_escalation,omitempty"`
+	Outcome          string        `json:"outcome"`
+	FailureStage     Stage         `json:"failure_stage,omitempty"`
+	StartedAt        time.Time     `json:"started_at"`
+	FinishedAt       time.Time     `json:"finished_at"`
+	WorkerSeconds    float64       `json:"worker_seconds"`
+	ProviderSeconds  float64       `json:"provider_seconds"`
+	ProviderStarted  bool          `json:"provider_started"`
+	CostStatus       string        `json:"cost_status"`
+	ActualCostUSD    *float64      `json:"actual_cost_usd"`
+	Usage            ProviderUsage `json:"usage"`
 }
 
 type usageKey struct{}

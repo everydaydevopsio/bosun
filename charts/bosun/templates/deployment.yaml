@@ -35,7 +35,9 @@ spec:
             - name: BOSUN_REVIEW_PROVIDER
               value: {{ .Values.review.provider | quote }}
             - name: BOSUN_REVIEW_EFFORT
-              value: {{ .Values.review.effort | default "standard" | quote }}
+              value: {{ .Values.review.effort | default "auto" | quote }}
+            - name: BOSUN_REVIEW_ESCALATE_ABOVE_LINES
+              value: {{ .Values.review.escalateAboveLines | default 0 | quote }}
             - name: BOSUN_REVIEW_IMAGE
               value: {{ .Values.review.image | default (printf "%s:%s" .Values.image.repository .Chart.AppVersion) | quote }}
             - name: BOSUN_JOB_TTL_SECONDS
