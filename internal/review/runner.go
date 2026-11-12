@@ -56,6 +56,8 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	ctx = context.WithValue(ctx, usageKey{}, meter)
 	credential := credentialMode(cfg.ReviewProvider)
 	providerStarted, metricsEmitted := false, false
+	// Validated below, before anything starts; recorded on every usage summary.
+	effort := ""
 	var providerSeconds float64
 	emitUsage := func() {
 		if metricsEmitted {
@@ -68,7 +70,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 			Repo: sanitize(req.Repo), Ref: sanitize(req.Ref), HeadSHA: sanitize(req.SHA),
 			BaseSHA: sanitize(os.Getenv("BOSUN_BASE_SHA")), PRNumber: req.PRNumber, Trigger: sanitize(req.Trigger),
 			Provider: sanitize(cfg.ReviewProvider), WorkerVersion: version.Version,
-			WorkerImage: sanitize(os.Getenv("BOSUN_WORKER_IMAGE")), CredentialMode: credential,
+			WorkerImage: sanitize(os.Getenv("BOSUN_WORKER_IMAGE")), CredentialMode: credential, Effort: effort,
 			Outcome: reviewOutcome(result), StartedAt: started.UTC(), FinishedAt: now.UTC(),
 			WorkerSeconds: now.Sub(started).Seconds(), ProviderSeconds: providerSeconds,
 			ProviderStarted: providerStarted, CostStatus: "unavailable", Usage: sanitizedUsage(meter.usage, sanitize),
@@ -130,6 +132,17 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	defer cancel()
 	if req.Repo == "" || req.Ref == "" {
 		return failf(StageSetup, "BOSUN_REPO and BOSUN_REF are required")
+	}
+	// The adapters read BOSUN_REVIEW_EFFORT from the environment bridgectl
+	// passes them, so it is normalized in place: they only need to recognise
+	// the canonical "deep".
+	normalized, err := config.NormalizeEffort(os.Getenv("BOSUN_REVIEW_EFFORT"))
+	if err != nil {
+		return fail(StageSetup, err)
+	}
+	effort = normalized
+	if err := os.Setenv("BOSUN_REVIEW_EFFORT", effort); err != nil {
+		return failf(StageSetup, "set review effort: %w", err)
 	}
 	if number := os.Getenv("BOSUN_PR_NUMBER"); number != "" {
 		n, err := strconv.Atoi(number)

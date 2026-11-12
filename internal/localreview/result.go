@@ -34,6 +34,9 @@ type resultDocument struct {
 	Repo          string `json:"repo,omitempty"`
 	Branch        string `json:"branch,omitempty"`
 	Provider      string `json:"provider,omitempty"`
+	// Effort is the review effort that ran, from the stored usage summary;
+	// empty when the review predates it.
+	Effort string `json:"effort,omitempty"`
 	// Revision provenance. Empty on records written before Bosun stored it;
 	// reported as "unknown" rather than guessed from the report text.
 	ReviewedHeadSHA string `json:"reviewed_head_sha,omitempty"`
@@ -90,6 +93,7 @@ func document(r record) resultDocument {
 		var usage review.UsageSummary
 		if err := json.Unmarshal([]byte(r.Usage), &usage); err == nil && usage.SchemaVersion == 1 {
 			d.Usage = &usage
+			d.Effort = usage.Effort
 		} else {
 			d.UsageNote = "stored usage is unreadable or uses an unsupported schema; cost remains unknown"
 		}
@@ -167,6 +171,9 @@ func renderResult(d resultDocument, summaryOnly bool, out io.Writer) {
 		value(d.Branch), short(d.ReviewedHeadSHA), short(d.BaseSHA), short(d.MergeBaseSHA), scope)
 	if d.Revision != nil && d.Revision.Note != "" {
 		fmt.Fprintln(out, d.Revision.Note)
+	}
+	if d.Effort != "" {
+		fmt.Fprintln(out, "Effort:", d.Effort)
 	}
 	switch {
 	case !d.FindingsReported:

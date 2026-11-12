@@ -34,6 +34,8 @@ spec:
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
             - name: BOSUN_REVIEW_PROVIDER
               value: {{ .Values.review.provider | quote }}
+            - name: BOSUN_REVIEW_EFFORT
+              value: {{ .Values.review.effort | default "standard" | quote }}
             - name: BOSUN_REVIEW_IMAGE
               value: {{ .Values.review.image | default (printf "%s:%s" .Values.image.repository .Chart.AppVersion) | quote }}
             - name: BOSUN_JOB_TTL_SECONDS

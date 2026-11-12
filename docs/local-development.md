@@ -366,6 +366,26 @@ Flags work before or after the path. `--provider` overrides
 `BOSUN_REVIEW_PROVIDER`; it does not change cluster credentials. Export the
 credentials and rerun `make kind-up` when adding or refreshing them.
 
+### Review effort
+
+`--effort deep` asks for a more thorough review, at higher cost and duration:
+
+```bash
+bosun review "$PWD" --effort deep
+```
+
+| Level | Codex (`codex-bosun`) | Claude (`claude-bosun`) |
+| --- | --- | --- |
+| `standard` (default) | provider default | provider default |
+| `deep` | `-c model_reasoning_effort=high` | `--effort high` |
+
+`--effort` overrides `BOSUN_REVIEW_EFFORT`. An unknown level fails the
+submission rather than silently running at standard. Every review records
+the level that ran: `bosun review-result <job> --json` has `effort`, the text
+view prints `Effort: deep`, and it is in the usage summary next to the token
+counts, so cost comparisons between reviews stay honest. Hosted reviews take
+the chart value `review.effort`; see [Setup](setup.md).
+
 ### Which image a review runs
 
 `bosun review` resolves the reviewer image in this order:

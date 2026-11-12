@@ -168,3 +168,32 @@ func TestTheChartRendersTheReviewCommand(t *testing.T) {
 		t.Error(`charts/bosun/values.yaml does not default review.command to "@bosun-review review"`)
 	}
 }
+
+// #95: review effort defaults to standard and accepts only the levels Bosun
+// maps to each provider.
+func TestReviewEffortDefaultsToStandardAndIsValidated(t *testing.T) {
+	t.Setenv("BOSUN_REVIEW_EFFORT", "")
+	if got := Load().ReviewEffort; got != EffortStandard {
+		t.Fatalf("default effort = %q", got)
+	}
+	for _, level := range []string{"standard", "deep", "DEEP", " deep "} {
+		if got, err := NormalizeEffort(level); err != nil || (got != EffortStandard && got != EffortDeep) {
+			t.Errorf("NormalizeEffort(%q) = %q, %v", level, got, err)
+		}
+	}
+	for _, bad := range []string{"high", "max", "fast"} {
+		if _, err := NormalizeEffort(bad); err == nil {
+			t.Errorf("NormalizeEffort(%q) accepted an unknown level", bad)
+		}
+	}
+}
+
+func TestTheChartDefaultsEffortToStandard(t *testing.T) {
+	values, err := os.ReadFile("../../charts/bosun/values.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^  effort: standard$`).Match(values) {
+		t.Fatal("charts/bosun/values.yaml does not default review.effort to standard")
+	}
+}

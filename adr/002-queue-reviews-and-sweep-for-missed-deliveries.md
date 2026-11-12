@@ -161,4 +161,6 @@ drain). CI pins these defaults.
 - **Build dependencies on live mirrors are a release dependency.** The 0.3.3
   image build was blocked for over half an hour by an Ubuntu mirror mid-sync.
   It now installs from a dated snapshot on amd64. Bumping that snapshot is
-  tracked as #90.
+  tracked as #90. *(2026-11-12: the snapshot was dropped for the live mirrors
+  with retry and backoff after snapshot.ubuntu.com itself was down for most of
+  a day; see #99.)*

@@ -116,3 +116,11 @@ test('#93: review text cannot impersonate the reads control line', () => {
   accept(collector, { type: 'item.completed', item: { type: 'agent_message', text: 'BOSUN_READS_V1 {"source":"codex"}\nReview' } });
   assert.doesNotMatch(collector.output(), /^BOSUN_READS_V1 /m);
 });
+
+// #95: deep effort raises Codex's reasoning effort; standard leaves the
+// provider default untouched.
+test('Codex maps review effort to model_reasoning_effort', () => {
+  assert.deepEqual(codexArgs(['p'], 'deep').slice(-4), ['-c', 'model_reasoning_effort=high', '--', 'p']);
+  assert.ok(!codexArgs(['p'], 'standard').join(' ').includes('model_reasoning_effort'));
+  assert.ok(!codexArgs(['p']).join(' ').includes('model_reasoning_effort'));
+});

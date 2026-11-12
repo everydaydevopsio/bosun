@@ -47,19 +47,22 @@ type ProviderUsage struct {
 // UsageSummary is a measurement record, not an invoice. ActualCostUSD stays
 // null until an external billing reconciliation can establish that amount.
 type UsageSummary struct {
-	SchemaVersion   int           `json:"schema_version"`
-	RunID           string        `json:"run_id"`
-	PodUID          string        `json:"pod_uid,omitempty"`
-	Repo            string        `json:"repo"`
-	Ref             string        `json:"ref"`
-	HeadSHA         string        `json:"head_sha"`
-	BaseSHA         string        `json:"base_sha,omitempty"`
-	PRNumber        int           `json:"pr_number,omitempty"`
-	Trigger         string        `json:"trigger,omitempty"`
-	Provider        string        `json:"provider"`
-	WorkerVersion   string        `json:"worker_version"`
-	WorkerImage     string        `json:"worker_image,omitempty"`
-	CredentialMode  string        `json:"credential_mode"`
+	SchemaVersion  int    `json:"schema_version"`
+	RunID          string `json:"run_id"`
+	PodUID         string `json:"pod_uid,omitempty"`
+	Repo           string `json:"repo"`
+	Ref            string `json:"ref"`
+	HeadSHA        string `json:"head_sha"`
+	BaseSHA        string `json:"base_sha,omitempty"`
+	PRNumber       int    `json:"pr_number,omitempty"`
+	Trigger        string `json:"trigger,omitempty"`
+	Provider       string `json:"provider"`
+	WorkerVersion  string `json:"worker_version"`
+	WorkerImage    string `json:"worker_image,omitempty"`
+	CredentialMode string `json:"credential_mode"`
+	// Effort is the review effort level that ran (#95); empty on records
+	// from before it existed.
+	Effort          string        `json:"effort,omitempty"`
 	Outcome         string        `json:"outcome"`
 	FailureStage    Stage         `json:"failure_stage,omitempty"`
 	StartedAt       time.Time     `json:"started_at"`

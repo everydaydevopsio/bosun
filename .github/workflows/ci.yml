@@ -237,8 +237,7 @@ jobs:
           dockerfile: Dockerfile
 
       - name: Build image
-        # snapshot.ubuntu.com is down; install from the live archive until #99 reverts this.
-        run: docker build --build-arg VERSION=ci --build-arg UBUNTU_SNAPSHOT=live -t bosun:test .
+        run: docker build --build-arg VERSION=ci -t bosun:test .
 
       - name: Go binary is present in the image
         run: docker run --rm --entrypoint test bosun:test -x /usr/local/bin/bosun
