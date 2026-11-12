@@ -1702,3 +1702,24 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: implemented; see plans/plan-effort-escalation.md.
 - Evidence links/commands: `go test ./internal/review/ -run 'Escalat|AutoEffort|Explicit|Unsizable|Footer'`
+
+# Task: Follow redirection order when crediting output (#104)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-13
+- Mode: Autonomous
+- Requirement IDs: #104
+
+## Acceptance Criteria
+- AC1: `git diff <base>...HEAD 2>/dev/null 1>&2` earns no credit.
+- AC2: `1>&2 2>/dev/null` and `>&2` alone keep credit.
+
+## Execution Checklist
+- [x] Failing tests for duplication after and before stderr moves, closed and unknown descriptors, pipeline stages
+- [x] `redirectsStdout` tracks fd 1 and fd 2 left to right
+- [x] Docs updated
+
+## Outcome
+- Result: implemented.
+- Evidence links/commands: `node --test scripts/*.test.js` (55 pass)

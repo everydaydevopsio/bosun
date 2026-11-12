@@ -143,15 +143,31 @@ function withoutRedirections(words) {
   return out;
 }
 
-// redirectsStdout reports whether a command sends its standard output to a
-// file. `2>`, `2>&1`, and `>&2` keep it on the terminal the reviewer reads.
+// redirectsStdout reports whether a command's standard output ends anywhere
+// but the terminal the reviewer reads. Redirections apply left to right, as
+// in a shell, so it tracks where descriptors 1 and 2 point (#104):
+// `2>/dev/null 1>&2` discards stdout, while `1>&2 2>/dev/null` keeps it on
+// the terminal. A file, a closed descriptor, or one not otherwise known
+// (`1>&3`) all count as not visible.
 function redirectsStdout(words) {
-  return words.some(word => {
-    const r = redirection(word);
-    // `>&2` and `1>&2` duplicate a descriptor and stay on the terminal;
-    // `>&file` (bash) writes to a file like `&>file`.
-    return /^(1?>>?|&>>?)/.test(r) && !/^1?>&(\d+|-)$/.test(r);
-  });
+  const fds = { 1: 'tty', 2: 'tty' };
+  for (let i = 0; i < words.length; i++) {
+    const r = redirection(words[i]);
+    if (!r) continue;
+    const m = /^(\d+|&)?(>&|>>?|<.*)(.*)$/.exec(r);
+    if (!m || m[2].startsWith('<')) continue;
+    let target = m[3];
+    // A bare operator (`2>`, `>`) takes the next word as its target.
+    if (target === '' && m[2] !== '>&') target = redirection(words[i + 1] || '') || words[++i] || '';
+    let dest;
+    if (m[2] === '>&' && /^\d+$/.test(target)) dest = fds[target] || 'other';
+    else if (m[2] === '>&' && target === '-') dest = 'closed';
+    else dest = 'file';
+    // `&>file` and bash's `>&file` send both stdout and stderr to the file.
+    if (m[1] === '&' || (m[2] === '>&' && dest === 'file' && !m[1])) { fds[1] = dest; fds[2] = dest; continue; }
+    fds[m[1] || '1'] = dest;
+  }
+  return fds[1] !== 'tty';
 }
 
 // passesStdin reports whether a pass-through command actually forwards the

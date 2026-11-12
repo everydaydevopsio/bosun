@@ -301,3 +301,21 @@ test('combined redirections and help flags earn no credit', () => {
     assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
   }
 });
+
+// #104: redirections apply left to right. Duplicating stdout onto stderr after
+// stderr went to a file discards the patch; duplicating it first does not.
+test('descriptor duplication follows redirection order', () => {
+  for (const command of ['git diff base...HEAD 2>/dev/null 1>&2', 'git diff base...HEAD 2>/dev/null >&2', 'git diff base...HEAD 2> err.log 1>&2',
+    'git diff base...HEAD >&-', 'git diff base...HEAD 1>&3', 'git diff base...HEAD 2>/dev/null 1>&2 | cat',
+    'git diff base...HEAD | cat 2>/dev/null 1>&2']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  for (const command of ['git diff base...HEAD 1>&2 2>/dev/null', 'git diff base...HEAD >&2', 'git diff base...HEAD 2>/dev/null',
+    'git diff base...HEAD 2>&1 1>&2', 'git diff base...HEAD 3>/tmp/x 2>&1']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+});
