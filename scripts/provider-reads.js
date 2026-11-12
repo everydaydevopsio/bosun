@@ -35,7 +35,11 @@ function tokenize(script) {
   let word = '';
   let inWord = false;
   let quote = '';
-  const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
+  // A word that began with an unquoted redirection operator. It is pushed
+  // with the REDIRECT prefix, so a quoted literal `>` is never mistaken for
+  // one, and so a redirection never resolves to a path.
+  let redirect = false;
+  const endWord = () => { if (inWord) words.push(redirect ? REDIRECT + word : word); word = ''; inWord = false; redirect = false; };
   const endCommand = sep => { endWord(); if (words.length) items.push({ words, sep }); words = []; };
   for (let i = 0; i < script.length; i++) {
     const c = script[i];
@@ -53,6 +57,19 @@ function tokenize(script) {
     if (c === '\\' && i + 1 < script.length) { word += script[++i]; inWord = true; continue; }
     // `2>&1` and `<&3` are redirections, not background operators.
     if (c === '&' && (script[i - 1] === '>' || script[i - 1] === '<')) { word += c; inWord = true; continue; }
+    // `&>` and `&>>` redirect stdout and stderr together.
+    if (c === '&' && script[i + 1] === '>') { endWord(); word = c; inWord = true; redirect = true; continue; }
+    // An unquoted redirection starts its own word even when attached
+    // (`file.ts>/tmp/out`), keeping a file-descriptor prefix (`2>`, `&>`) and
+    // a doubled operator (`>>`) with it. The target that follows joins it.
+    if (c === '>' || c === '<') {
+      const prefix = /^(\d+|&)$/.test(word) || (redirect && /^(\d+|&)?[<>]+$/.test(word));
+      if (!prefix) endWord();
+      word += c;
+      inWord = true;
+      redirect = true;
+      continue;
+    }
     if ((c === '&' || c === '|') && script[i + 1] === c) { endCommand(c + c); i++; continue; }
     if (c === ';' || c === '&' || c === '|' || c === '\n') { endCommand(c); continue; }
     if (c === ' ' || c === '\t' || c === '\r') { endWord(); continue; }
@@ -64,7 +81,7 @@ function tokenize(script) {
 }
 
 // certain keeps the commands that must have run for the whole script to exit
-// successfully. A script's status is its last statement's, so every command of
+// successfully, and whose output then reached the reviewer whole. A script's status is its last statement's, so every command of
 // a last statement that is a plain && chain ran. Anywhere else only the first
 // unit is certain: in an earlier statement a failure skips the rest of its &&
 // chain and the script still succeeds, and in `a && b || c` a failing `a`
@@ -83,12 +100,84 @@ function certain(items) {
   const out = [];
   statements.forEach((statement, index) => {
     const firstOnly = index !== statements.length - 1 || statement.some(item => item.sep === '||');
-    for (const item of statement) {
-      out.push(item.words);
-      if (firstOnly && (item.sep === '&&' || item.sep === '||')) break;
-    }
+    statement.forEach((item, position) => {
+      if (stopped(statement, position, firstOnly)) return;
+      // cd changes where later relative paths resolve whatever happened to
+      // its output, so it is kept for its effect; it earns no credit itself.
+      if (visible(statement, position) || path.basename(item.words[0] || '') === 'cd') out.push(item.words);
+    });
   });
   return out;
+}
+
+// stopped reports whether an earlier && or || in a first-unit-only statement
+// cut the statement off before this command.
+function stopped(statement, position, firstOnly) {
+  return firstOnly && statement.slice(0, position).some(item => item.sep === '&&' || item.sep === '||');
+}
+
+// Commands that hand their input on unchanged. Anything else in a pipeline --
+// wc, head, grep, sed -n -- summarises or truncates what it is given (#98).
+const passthrough = new Set(['cat', 'less', 'more', 'tee']);
+
+// REDIRECT marks a word the tokenizer read as an unquoted redirection. It is a
+// control character, which no credited path may contain.
+const REDIRECT = '\u0001';
+
+// redirection returns the redirection a word carries ("" for an ordinary
+// argument), without its marker.
+function redirection(word) {
+  return word.startsWith(REDIRECT) ? word.slice(REDIRECT.length) : '';
+}
+
+// withoutRedirections drops redirections and their targets, which are not
+// arguments: `2>&1` and `2> err.log` are not git revisions or file reads.
+function withoutRedirections(words) {
+  const out = [];
+  for (let i = 0; i < words.length; i++) {
+    const r = redirection(words[i]);
+    if (!r) { out.push(words[i]); continue; }
+    // A bare operator (`2>`, `>>`, `<`) takes the next word as its target.
+    if (/^(\d+|&)?[<>]+$/.test(r)) i++;
+  }
+  return out;
+}
+
+// redirectsStdout reports whether a command sends its standard output to a
+// file. `2>`, `2>&1`, and `>&2` keep it on the terminal the reviewer reads.
+function redirectsStdout(words) {
+  return words.some(word => {
+    const r = redirection(word);
+    // `>&2` and `1>&2` duplicate a descriptor and stay on the terminal;
+    // `>&file` (bash) writes to a file like `&>file`.
+    return /^(1?>>?|&>>?)/.test(r) && !/^1?>&(\d+|-)$/.test(r);
+  });
+}
+
+// passesStdin reports whether a pass-through command actually forwards the
+// pipe. `cat FILE` and `less < FILE` read something else and drop it; `-` is
+// stdin, and options such as `cat -n` keep reading it. tee always forwards
+// stdin, whatever files it also writes.
+function passesStdin(words) {
+  if (!passthrough.has(path.basename(words[0] || ''))) return false;
+  if (words.some(word => /^\d*</.test(redirection(word)))) return false;
+  // --help and --version print their own text and exit without reading stdin.
+  if (words.some(word => /^--(help|version)$/.test(word))) return false;
+  if (path.basename(words[0]) === 'tee') return true;
+  return words.slice(1).every(word => word === '-' || (word.startsWith('-') && word.length > 1) || redirection(word) !== '');
+}
+
+// visible reports whether a command's output reached the reviewer whole: it
+// is not redirected to a file, and every command it is piped into passes the
+// output through unchanged. A diff piped into `wc -l` was run, but only a
+// count was seen.
+function visible(statement, position) {
+  if (redirectsStdout(statement[position].words)) return false;
+  for (let next = position + 1; next < statement.length && statement[next - 1].sep === '|'; next++) {
+    const words = statement[next].words;
+    if (!passesStdin(words) || redirectsStdout(words)) return false;
+  }
+  return true;
 }
 
 // splitCommand turns a provider's command (a string, or an argv array) into
@@ -202,6 +291,7 @@ function createReadTracker(root = process.cwd()) {
   }
 
   function simple(words, state) {
+    words = withoutRedirections(words);
     while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words = words.slice(1);
     if (!words.length) return;
     const program = path.basename(words[0]);

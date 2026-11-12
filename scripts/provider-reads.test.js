@@ -18,8 +18,9 @@ function workspace() {
 }
 
 test('splitCommand unwraps a shell -c script and splits compound commands', () => {
+  // `cat package.json | head` truncates, so cat's output is not credited (#98).
   assert.deepEqual(splitCommand(`/bin/bash -lc "sed -n '1,40p' src/app.ts && cat package.json | head"`), [
-    ['sed', '-n', '1,40p', 'src/app.ts'], ['cat', 'package.json'], ['head'],
+    ['sed', '-n', '1,40p', 'src/app.ts'], ['head'],
   ]);
   assert.deepEqual(splitCommand(['bash', '-lc', 'git diff base..HEAD; nl -ba README.md']), [
     ['git', 'diff', 'base..HEAD'], ['nl', '-ba', 'README.md'],
@@ -145,7 +146,7 @@ test('a revision diff reports its operands for the worker to verify', () => {
 // In a statement that is not the last, only its first unit is certain.
 test('only commands that a successful exit proves ran are credited', () => {
   const tracker = createReadTracker(workspace());
-  tracker.command('bash -lc "false && cat src/app.ts; cat README.md | head; cat src/util.ts && cat package.json"');
+  tracker.command('bash -lc "false && cat src/app.ts; cat README.md | cat; cat src/util.ts && cat package.json"');
   assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md', 'package.json', 'src/util.ts']);
 });
 
@@ -204,5 +205,99 @@ test('a diff written to a file earns no credit', () => {
     const record = tracker.record('codex', 'command_parsing');
     assert.equal(record.full_diff, false, command);
     assert.deepEqual(record.diffed, [], command);
+  }
+});
+
+// #98: credit needs the output to reach the reviewer. A diff or file piped
+// into something that summarises or truncates it, or redirected to a file, was
+// not seen in full.
+test('output piped away or redirected earns no credit', () => {
+  for (const command of ['git diff base...HEAD | wc -l', 'git diff base...HEAD | head -50', 'git diff base...HEAD > /tmp/p.diff',
+    'git diff base...HEAD | grep -c ^+', 'git diff base...HEAD | cat | wc -l', "bash -lc 'git diff base...HEAD >>/tmp/p'"]) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  const tracker = createReadTracker(workspace());
+  tracker.command('cat src/app.ts | head -5');
+  tracker.command('git diff base...HEAD -- src/util.ts | wc -l');
+  const record = tracker.record('codex', 'command_parsing');
+  assert.deepEqual(record.opened, []);
+  assert.deepEqual(record.diffed, []);
+});
+
+test('output passed through unchanged still earns credit', () => {
+  for (const command of ['git diff base...HEAD | cat', 'git diff base...HEAD | less', 'git diff base...HEAD | tee /tmp/p', 'git diff base...HEAD 2>&1', 'git diff base...HEAD 2>/dev/null | cat']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+  const tracker = createReadTracker(workspace());
+  tracker.command('cat README.md | cat');
+  assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md']);
+});
+
+// Bosun review of #103, F1: a pass-through command only passes the pipe on
+// when it reads stdin; `cat FILE` and `less < FILE` ignore it.
+test('a downstream reader of its own input does not pass the pipe through', () => {
+  for (const command of ['git diff base...HEAD | cat README.md', 'git diff base...HEAD | less package.json', 'git diff base...HEAD | cat < README.md']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  for (const command of ['git diff base...HEAD | cat -', 'git diff base...HEAD | cat -n', 'git diff base...HEAD | tee /tmp/p']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+});
+
+// F2: a redirection attached to a word still sends the output to a file; a
+// quoted `>` is a literal.
+test('attached redirections are recognised', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('cat README.md src/app.ts>/tmp/out');
+  tracker.command('git diff base...HEAD>/tmp/p');
+  tracker.command("cat package.json '>' ");
+  const record = tracker.record('codex', 'command_parsing');
+  assert.deepEqual(record.opened, ['package.json']);
+  assert.equal(record.full_diff, false);
+});
+
+// F3: a cd whose output is discarded still changes the directory.
+test('cd keeps its effect when its output is redirected', () => {
+  const root = workspace();
+  fs.writeFileSync(path.join(root, 'app.ts'), 'root-level decoy\n');
+  const tracker = createReadTracker(root);
+  tracker.command('bash -lc "cd src >/dev/null && cat app.ts"');
+  assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['src/app.ts']);
+});
+
+// A redirection and its target are not git operands: `2>&1` or `2> err.log`
+// must not end up in the recorded range, which the worker could never verify.
+test('redirections are not recorded as revisions or paths', () => {
+  const tracker = createReadTracker(workspace());
+  tracker.command('git diff base...HEAD 2>&1');
+  tracker.command('git diff base2...HEAD 2> README.md');
+  tracker.command('git diff base3...HEAD -- src/app.ts 2>/dev/null');
+  const record = tracker.record('codex', 'command_parsing');
+  assert.deepEqual(record.diff_ranges, ['base...HEAD', 'base2...HEAD']);
+  assert.deepEqual(record.diffed, [{ range: 'base3...HEAD', paths: ['src/app.ts'] }]);
+});
+
+// Bosun review of #103 @ c968e04: `&>file` and `>&file` send stdout to a file
+// (only `>&2`-style descriptor duplication keeps it visible), and a help or
+// version flag prints that instead of forwarding the pipe.
+test('combined redirections and help flags earn no credit', () => {
+  for (const command of ['git diff base...HEAD &>/tmp/patch', 'git diff base...HEAD &>> /tmp/patch', 'git diff base...HEAD >&/tmp/patch',
+    'git diff base...HEAD | cat --help', 'git diff base...HEAD | tee --version']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  for (const command of ['git diff base...HEAD >&2', 'git diff base...HEAD 1>&2', 'git diff base...HEAD 2>&1 | cat']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
   }
 });
