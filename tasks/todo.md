@@ -1614,3 +1614,25 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 ## Outcome
 - Result: implemented; see plans/plan-hosted-pr-base.md.
 - Evidence links/commands: `go test ./internal/review/ -run HostedReview`
+
+# Task: Credit only output that reached the reviewer (#98)
+
+## Context
+- Owner: Mark C Allen
+- Date: 2026-11-12
+- Mode: Autonomous
+- Requirement IDs: #98
+
+## Acceptance Criteria
+- AC1: `git diff <base>...HEAD | wc -l` and `cat file | head -5` earn no full-diff or opened-file credit.
+- AC2: Output redirected to a file earns nothing; pipes into `cat`, `less`, `more`, `tee` and `2>&1` keep credit.
+
+## Execution Checklist
+- [x] Failing tests for piped, truncated, and redirected output; pass-through cases
+- [x] `certain()` keeps only commands whose output is visible
+- [x] Docs updated
+- [x] `node --test` (47 pass), `go test ./...`, `make lint` green
+
+## Outcome
+- Result: implemented.
+- Evidence links/commands: `node --test scripts/provider-reads.test.js`

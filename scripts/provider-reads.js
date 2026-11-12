@@ -64,7 +64,7 @@ function tokenize(script) {
 }
 
 // certain keeps the commands that must have run for the whole script to exit
-// successfully. A script's status is its last statement's, so every command of
+// successfully, and whose output then reached the reviewer whole. A script's status is its last statement's, so every command of
 // a last statement that is a plain && chain ran. Anywhere else only the first
 // unit is certain: in an earlier statement a failure skips the rest of its &&
 // chain and the script still succeeds, and in `a && b || c` a failing `a`
@@ -83,12 +83,41 @@ function certain(items) {
   const out = [];
   statements.forEach((statement, index) => {
     const firstOnly = index !== statements.length - 1 || statement.some(item => item.sep === '||');
-    for (const item of statement) {
-      out.push(item.words);
-      if (firstOnly && (item.sep === '&&' || item.sep === '||')) break;
-    }
+    statement.forEach((item, position) => {
+      if (stopped(statement, position, firstOnly)) return;
+      if (visible(statement, position)) out.push(item.words);
+    });
   });
   return out;
+}
+
+// stopped reports whether an earlier && or || in a first-unit-only statement
+// cut the statement off before this command.
+function stopped(statement, position, firstOnly) {
+  return firstOnly && statement.slice(0, position).some(item => item.sep === '&&' || item.sep === '||');
+}
+
+// Commands that hand their input on unchanged. Anything else in a pipeline --
+// wc, head, grep, sed -n -- summarises or truncates what it is given (#98).
+const passthrough = new Set(['cat', 'less', 'more', 'tee']);
+
+// redirectsStdout reports whether a command sends its standard output to a
+// file. `2>`, `2>&1`, and `>&2` keep it on the terminal the reviewer reads.
+function redirectsStdout(words) {
+  return words.some(word => /^(1?>>?|&>>?)/.test(word) && !/^1?>&/.test(word));
+}
+
+// visible reports whether a command's output reached the reviewer whole: it
+// is not redirected to a file, and every command it is piped into passes the
+// output through unchanged. A diff piped into `wc -l` was run, but only a
+// count was seen.
+function visible(statement, position) {
+  if (redirectsStdout(statement[position].words)) return false;
+  for (let next = position + 1; next < statement.length && statement[next - 1].sep === '|'; next++) {
+    const words = statement[next].words;
+    if (!passthrough.has(path.basename(words[0] || '')) || redirectsStdout(words)) return false;
+  }
+  return true;
 }
 
 // splitCommand turns a provider's command (a string, or an argv array) into

@@ -18,8 +18,9 @@ function workspace() {
 }
 
 test('splitCommand unwraps a shell -c script and splits compound commands', () => {
+  // `cat package.json | head` truncates, so cat's output is not credited (#98).
   assert.deepEqual(splitCommand(`/bin/bash -lc "sed -n '1,40p' src/app.ts && cat package.json | head"`), [
-    ['sed', '-n', '1,40p', 'src/app.ts'], ['cat', 'package.json'], ['head'],
+    ['sed', '-n', '1,40p', 'src/app.ts'], ['head'],
   ]);
   assert.deepEqual(splitCommand(['bash', '-lc', 'git diff base..HEAD; nl -ba README.md']), [
     ['git', 'diff', 'base..HEAD'], ['nl', '-ba', 'README.md'],
@@ -145,7 +146,7 @@ test('a revision diff reports its operands for the worker to verify', () => {
 // In a statement that is not the last, only its first unit is certain.
 test('only commands that a successful exit proves ran are credited', () => {
   const tracker = createReadTracker(workspace());
-  tracker.command('bash -lc "false && cat src/app.ts; cat README.md | head; cat src/util.ts && cat package.json"');
+  tracker.command('bash -lc "false && cat src/app.ts; cat README.md | cat; cat src/util.ts && cat package.json"');
   assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md', 'package.json', 'src/util.ts']);
 });
 
@@ -205,4 +206,33 @@ test('a diff written to a file earns no credit', () => {
     assert.equal(record.full_diff, false, command);
     assert.deepEqual(record.diffed, [], command);
   }
+});
+
+// #98: credit needs the output to reach the reviewer. A diff or file piped
+// into something that summarises or truncates it, or redirected to a file, was
+// not seen in full.
+test('output piped away or redirected earns no credit', () => {
+  for (const command of ['git diff base...HEAD | wc -l', 'git diff base...HEAD | head -50', 'git diff base...HEAD > /tmp/p.diff',
+    'git diff base...HEAD | grep -c ^+', 'git diff base...HEAD | cat | wc -l', "bash -lc 'git diff base...HEAD >>/tmp/p'"]) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, false, command);
+  }
+  const tracker = createReadTracker(workspace());
+  tracker.command('cat src/app.ts | head -5');
+  tracker.command('git diff base...HEAD -- src/util.ts | wc -l');
+  const record = tracker.record('codex', 'command_parsing');
+  assert.deepEqual(record.opened, []);
+  assert.deepEqual(record.diffed, []);
+});
+
+test('output passed through unchanged still earns credit', () => {
+  for (const command of ['git diff base...HEAD | cat', 'git diff base...HEAD | less', 'git diff base...HEAD | tee /tmp/p', 'git diff base...HEAD 2>&1', 'git diff base...HEAD 2>/dev/null | cat']) {
+    const tracker = createReadTracker(workspace());
+    tracker.command(command);
+    assert.equal(tracker.record('codex', 'command_parsing').full_diff, true, command);
+  }
+  const tracker = createReadTracker(workspace());
+  tracker.command('cat README.md | cat');
+  assert.deepEqual(tracker.record('codex', 'command_parsing').opened, ['README.md']);
 });
