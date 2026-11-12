@@ -13,6 +13,23 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.3.5] - 2026-11-12
+
+### Highlights
+
+- **More informative review reports:** Reviews now include measured coverage and residual risks, making it clearer what was assessed and what may still need attention. (#93, #97)
+
+### Fixes
+
+- **Correct baseline for hosted reviews:** Hosted reviews now compare changes against the pull request’s base. (#96, #101)
+- **Image builds during the Ubuntu snapshot outage:** CI now uses the live Ubuntu archive while the snapshot service is unavailable. (#99, #100)
+
+### Changes
+
+- Promoted the `plan-review-queue` design plan to architecture decision record **ADR-002**. (#92)
+
+**Full changelog:** [v0.3.4…v0.3.5](../../compare/v0.3.4...v0.3.5)
+
 ## [0.3.4] - 2026-11-10
 
 ### Highlights
