@@ -124,7 +124,7 @@ func TestFooterNamesTheEffort(t *testing.T) {
 func TestInstructionFilesAreRecognised(t *testing.T) {
 	for _, p := range []string{"AGENTS.md", "CLAUDE.md", "docs/CLAUDE.md", "skills/release/SKILL.md", ".cursor/rules/go.mdc",
 		".claude/commands/ship.md", ".claude/rules/core.md", ".github/workflows/ci.yml", ".github/copilot-instructions.md",
-		"docs/runbook-deploy.md", "ops/runbooks/restore.md", "prompts/code-review.md", ".agents/AGENTS.md"} {
+		"docs/runbook-deploy.md", "ops/runbooks/restore.md", "runbooks/restore.md", "Runbooks/Restore.md", "prompts/code-review.md", ".agents/AGENTS.md"} {
 		if !isInstructionFile(p) {
 			t.Errorf("%s not recognised", p)
 		}

@@ -33,7 +33,8 @@ func isInstructionFile(p string) bool {
 			return true
 		}
 	}
-	return strings.Contains(strings.ToLower(path.Base(p)), "runbook") || strings.Contains(strings.ToLower(p), "/runbooks/")
+	lower := strings.ToLower(p)
+	return strings.Contains(path.Base(lower), "runbook") || strings.HasPrefix(lower, "runbooks/") || strings.Contains(lower, "/runbooks/")
 }
 
 // instructionHeavy reports whether a sized change is mostly instruction
