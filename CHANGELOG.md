@@ -13,6 +13,21 @@ the previous tag. Do not hand-edit released sections.
   publishing, and signed and notarized macOS CLI archives distributed through
   the `everydaydevopsio/homebrew-bosun` tap.
 
+## [0.4.0] - 2026-11-12
+
+### Highlights
+
+- **Configurable review effort:** Set the effort level for reviews, with the selected setting recorded for each review. (#95, #107)
+- **Deeper reviews for large diffs:** Reviews using automatic effort now escalate to deep effort for large diffs. (#105, #111)
+
+### Fixes
+
+- Corrected review accounting to credit only diff and file output actually delivered to the reviewer. (#98, #103)
+
+### Changes
+
+- Updated build dependencies to install from live Ubuntu mirrors instead of a pinned snapshot. (#99, #90, #102)
+
 ## [0.3.5] - 2026-11-12
 
 ### Highlights
