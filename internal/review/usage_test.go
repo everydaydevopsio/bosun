@@ -277,3 +277,64 @@ func TestMalformedRecordIsDroppedNotPublished(t *testing.T) {
 		t.Fatal("malformed record was recorded")
 	}
 }
+
+// #95: the usage summary records which effort ran, so cost comparisons
+// between reviews are honest.
+func TestUsageRecordsTheReviewEffort(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(t.TempDir(), "prompt.md")
+	writeTestFile(t, prompt, "review this")
+	t.Setenv("BOSUN_EVENTS", "1")
+	t.Setenv("BOSUN_RUN_ID", "run")
+	t.Setenv("BOSUN_LOCAL_PATH", repo)
+	t.Setenv("BOSUN_REPO", "everydaydevopsio/bosun")
+	t.Setenv("BOSUN_REF", "refs/heads/main")
+	t.Setenv("BOSUN_REVIEW_EFFORT", "deep")
+	var events bytes.Buffer
+	w := Worker{PromptPath: prompt, Events: &events, Output: &bytes.Buffer{}, Agent: func(context.Context, string, string, string, time.Duration) (string, error) {
+		return "Clean.", nil
+	}}
+	if err := w.Run(context.Background(), config.Config{ReviewProvider: "codex-bosun", ReviewTimeoutSeconds: 60}); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&events)
+	for decoder.More() {
+		var e progress.Event
+		if err := decoder.Decode(&e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Type == "usage" {
+			var u UsageSummary
+			if err := json.Unmarshal([]byte(e.Message), &u); err != nil || u.Effort != "deep" {
+				t.Fatalf("usage = %s (%v)", e.Message, err)
+			}
+			return
+		}
+	}
+	t.Fatal("no usage event")
+}
+
+func TestAnUnknownEffortFailsSetup(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(t.TempDir(), "prompt.md")
+	writeTestFile(t, prompt, "review this")
+	t.Setenv("BOSUN_LOCAL_PATH", repo)
+	t.Setenv("BOSUN_REPO", "everydaydevopsio/bosun")
+	t.Setenv("BOSUN_REF", "refs/heads/main")
+	t.Setenv("BOSUN_REVIEW_EFFORT", "max")
+	ran := false
+	w := Worker{PromptPath: prompt, Output: &bytes.Buffer{}, Agent: func(context.Context, string, string, string, time.Duration) (string, error) {
+		ran = true
+		return "Clean.", nil
+	}}
+	err := w.Run(context.Background(), config.Config{ReviewProvider: "codex-bosun", ReviewTimeoutSeconds: 60})
+	if err == nil || ran || !strings.Contains(err.Error(), "effort") {
+		t.Fatalf("err = %v, provider ran = %v", err, ran)
+	}
+}

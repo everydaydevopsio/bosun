@@ -129,14 +129,21 @@ function createCollector(root = process.cwd()) {
   };
 }
 
-if (require.main === module) {
-  const child = spawn(claude, [
+// effort is the worker's normalized BOSUN_REVIEW_EFFORT (#95): "deep" raises
+// Claude's effort level; anything else keeps the provider's default.
+function claudeArgs(prompts, effort = process.env.BOSUN_REVIEW_EFFORT) {
+  return [
     '--print', '--output-format', 'stream-json', '--verbose',
     '--no-session-persistence', '--permission-mode', 'dontAsk',
     '--tools', 'Read,Glob,Grep,Bash', '--allowedTools', allowed,
     '--disallowedTools', disallowed,
-    '--', ...process.argv.slice(2),
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ...(effort === 'deep' ? ['--effort', 'high'] : []),
+    '--', ...prompts,
+  ];
+}
+
+if (require.main === module) {
+  const child = spawn(claude, claudeArgs(process.argv.slice(2)), { stdio: ['ignore', 'pipe', 'pipe'] });
   const collector = createCollector();
   let stderr = '';
   child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-2048); });
@@ -160,4 +167,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { commandKind, denialSummary, createCollector, stderrKind };
+module.exports = { commandKind, denialSummary, createCollector, stderrKind, claudeArgs };

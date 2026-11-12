@@ -59,6 +59,7 @@ image:
 review:
   image: ghcr.io/YOUR_ORG/bosun:YOUR_VERSION
   provider: codex-bosun
+  effort: standard   # or deep: a more thorough, costlier review
 ingress:
   enabled: true
   className: nginx
@@ -70,6 +71,11 @@ Use `codex-bosun` or `claude-bosun`, not the packaged provider names. The
 packaged `codex` provider runs an interactive terminal UI, so its output is
 screen repaints that Bosun rejects rather than post to a pull request. See
 [bridgectl.md](bridgectl.md#choosing-a-provider).
+
+`review.effort` sets how hard every hosted review works. `deep` raises Codex's
+reasoning effort and Claude's effort level to `high`; `standard`, the default,
+keeps the provider's own default. Each review records the level that ran. See
+[Review effort](local-development.md#review-effort).
 
 Then install:
 

@@ -263,3 +263,19 @@ func TestOlderResultsReportCoverageAndRisksAsUnknown(t *testing.T) {
 		t.Fatalf("text = %s", text)
 	}
 }
+
+// #95: a result says which effort ran, read from the usage it stored.
+func TestResultReportsTheEffortThatRan(t *testing.T) {
+	r := completed(`{"schema_version":1,"findings":[]}`)
+	r.Usage = `{"schema_version":1,"run_id":"x","effort":"deep","actual_cost_usd":null,"usage":{"source":"codex","status":"missing"}}`
+	storeRecord(t, r)
+	out, _, _ := runResultFor(t, "review-bosun-feature-abc", options{json: true})
+	var d resultDocument
+	if err := json.Unmarshal([]byte(out), &d); err != nil || d.Effort != "deep" {
+		t.Fatalf("effort = %q (%v)", d.Effort, err)
+	}
+	text, _, _ := runResultFor(t, "review-bosun-feature-abc", options{summary: true})
+	if !strings.Contains(text, "Effort: deep") {
+		t.Fatalf("text = %s", text)
+	}
+}

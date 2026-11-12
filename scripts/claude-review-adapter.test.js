@@ -242,3 +242,12 @@ test('#93: Claude records Read and successful git calls, not denied ones', () =>
   assert.equal(reads.commands, 2);
   assert.doesNotMatch(JSON.stringify(reads), /private/);
 });
+
+// #95: deep effort raises Claude's effort level; standard passes nothing.
+test('Claude maps review effort to --effort', () => {
+  const { claudeArgs } = require('./claude-review-adapter');
+  const deep = claudeArgs(['p'], 'deep');
+  assert.equal(deep[deep.indexOf('--effort') + 1], 'high');
+  assert.deepEqual(deep.slice(-2), ['--', 'p']);
+  assert.ok(!claudeArgs(['p'], 'standard').includes('--effort'));
+});
