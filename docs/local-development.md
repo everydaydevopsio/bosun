@@ -368,23 +368,38 @@ credentials and rerun `make kind-up` when adding or refreshing them.
 
 ### Review effort
 
-`--effort deep` asks for a more thorough review, at higher cost and duration:
+By default (`auto`) a review runs at the provider's default effort, and is
+escalated to `deep` when the change is large. `--effort` pins a level:
 
 ```bash
-bosun review "$PWD" --effort deep
+bosun review "$PWD" --effort deep       # always deep
+bosun review "$PWD" --effort standard   # never escalated
 ```
 
 | Level | Codex (`codex-bosun`) | Claude (`claude-bosun`) |
 | --- | --- | --- |
-| `standard` (default) | provider default | provider default |
+| `auto` (default) | `standard`, or `deep` above the threshold | same |
+| `standard` | provider default | provider default |
 | `deep` | `-c model_reasoning_effort=high` | `--effort high` |
 
-`--effort` overrides `BOSUN_REVIEW_EFFORT`. An unknown level fails the
-submission rather than silently running at standard. Every review records
-the level that ran: `bosun review-result <job> --json` has `effort`, the text
-view prints `Effort: deep`, and it is in the usage summary next to the token
-counts, so cost comparisons between reviews stay honest. Hosted reviews take
-the chart value `review.effort`; see [Setup](setup.md).
+**Escalation.** Before the provider starts, the reviewer sizes the change
+exactly as the [coverage block](#review-coverage-and-residual-risks) does: added plus
+deleted lines from the merge base, lockfiles and generated files excluded.
+Above `BOSUN_REVIEW_ESCALATE_ABOVE_LINES` (default `800`) an `auto` review
+runs at `deep`; `0` disables escalation. A change that cannot be sized runs at
+`standard` rather than failing. An explicit `--effort standard` or `deep` is
+never escalated. The threshold is provisional until enough hosted reviews
+publish coverage to calibrate it (#106).
+
+`--effort` overrides `BOSUN_REVIEW_EFFORT`. An unknown level, or a negative
+threshold, fails the submission rather than silently running at another
+level. Every review records the level that ran and, when escalated, why:
+`bosun review-result <job> --json` has `effort` and `effort_escalation`, the
+text view prints `Effort: deep (escalated: reviewable_lines=1840 > 800)`, and
+both are in the usage summary next to the token counts, so cost comparisons
+between reviews stay honest. Hosted reviews take the chart values
+`review.effort` and `review.escalateAboveLines`, and a deep review's coverage
+footer says so; see [Setup](setup.md).
 
 ### Which image a review runs
 
@@ -471,6 +486,7 @@ closely or skimmed, and elapsed time, tokens, and `turns` are poor proxies
 | `reads.changed_files_diffed` | changed files whose diff was requested by path (or by a directory above them) through a comparison Bosun verified against the merge base. Untracked files appear in no diff and count only when opened |
 | `reads.unexamined_paths` | changed files neither opened nor diffed by path (up to 50) |
 | `reads.context_files_opened` | files outside the diff read for context |
+| `effort`, `effort_escalation` | the level the review ran at, and why an `auto` review was raised to `deep` (see [Review effort](#review-effort)) |
 
 Read counts are a lower bound: a file read through a tool the adapter does not
 recognise is not counted, and neither is a search (`grep`, `rg`, Claude's Grep

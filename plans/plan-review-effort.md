@@ -1,6 +1,6 @@
 # Plan: Review effort setting
 
-- **Status:** Implemented; PR pending
+- **Status:** Merged in #107
 - **Branch:** `issue-95-review-effort`
 - **Created:** 2026-11-12
 - **Issue:** #95 (step 1). Step 2 is #105 (automatic escalation); step 3 is #106 (chunking decision).
@@ -32,7 +32,7 @@ A single setting with two levels, `standard` and `deep`, set by chart value `rev
 - [x] Failing tests, then implementation
 - [x] Docs
 - [x] Live deep review per provider on Kind: Codex (2m, 426k in) and Claude (1m42s) both completed with `effort: deep` recorded
-- [ ] Hosted Bosun review; merge
+- [x] Hosted Bosun review; merged in #107
 
 ## Alternatives Rejected
 

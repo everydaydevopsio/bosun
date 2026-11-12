@@ -22,8 +22,14 @@ review:
   provider: codex-bosun
   # How hard the reviewer works. standard keeps the provider's default; deep
   # raises Codex's reasoning effort and Claude's effort level to high, at
-  # higher cost and duration. Each review records the level that ran.
-  effort: standard
+  # higher cost and duration. auto runs standard, and deep when the change has
+  # more reviewable lines than escalateAboveLines. Each review records the
+  # level that ran and, when escalated, why.
+  effort: auto
+  # Added plus deleted lines, lockfiles and generated files excluded, above
+  # which an auto review runs at deep. 0 disables escalation. standard or deep
+  # in effort is never escalated.
+  escalateAboveLines: 800
   # Empty means image.repository at the chart appVersion.
   image: ""
   ttlSecondsAfterFinished: 3600

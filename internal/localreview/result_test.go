@@ -279,3 +279,19 @@ func TestResultReportsTheEffortThatRan(t *testing.T) {
 		t.Fatalf("text = %s", text)
 	}
 }
+
+// #105: an escalated review says so, and why.
+func TestResultReportsAnEscalatedEffort(t *testing.T) {
+	r := completed(`{"schema_version":1,"findings":[]}`)
+	r.Usage = `{"schema_version":1,"run_id":"x","effort":"deep","effort_escalation":"reviewable_lines=1840 > 800","actual_cost_usd":null,"usage":{"source":"codex","status":"missing"}}`
+	storeRecord(t, r)
+	out, _, _ := runResultFor(t, "review-bosun-feature-abc", options{json: true})
+	var d resultDocument
+	if err := json.Unmarshal([]byte(out), &d); err != nil || d.EffortEscalation != "reviewable_lines=1840 > 800" {
+		t.Fatalf("escalation = %q (%v)", d.EffortEscalation, err)
+	}
+	text, _, _ := runResultFor(t, "review-bosun-feature-abc", options{summary: true})
+	if !strings.Contains(text, "Effort: deep (escalated: reviewable_lines=1840 > 800)") {
+		t.Fatalf("text = %s", text)
+	}
+}

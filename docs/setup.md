@@ -59,7 +59,8 @@ image:
 review:
   image: ghcr.io/YOUR_ORG/bosun:YOUR_VERSION
   provider: codex-bosun
-  effort: standard   # or deep: a more thorough, costlier review
+  effort: auto       # standard, or deep above escalateAboveLines; or pin standard|deep
+  escalateAboveLines: 800   # reviewable lines; 0 disables escalation
 ingress:
   enabled: true
   className: nginx
@@ -73,9 +74,13 @@ screen repaints that Bosun rejects rather than post to a pull request. See
 [bridgectl.md](bridgectl.md#choosing-a-provider).
 
 `review.effort` sets how hard every hosted review works. `deep` raises Codex's
-reasoning effort and Claude's effort level to `high`; `standard`, the default,
-keeps the provider's own default. Each review records the level that ran. See
-[Review effort](local-development.md#review-effort).
+reasoning effort and Claude's effort level to `high`; `standard` keeps the
+provider's own default. `auto`, the default, runs `standard` unless the pull
+request has more than `review.escalateAboveLines` reviewable lines (added plus
+deleted, lockfiles and generated files excluded), when it runs `deep`. Set
+`escalateAboveLines: 0` to turn escalation off. Each review records the level
+that ran, and a deep review's coverage footer says whether it was escalated.
+See [Review effort](local-development.md#review-effort).
 
 Then install:
 

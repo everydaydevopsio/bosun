@@ -246,3 +246,22 @@ func TestJobCarriesTheReviewEffort(t *testing.T) {
 		t.Fatal("an unknown effort level was accepted")
 	}
 }
+
+// #105: the worker decides whether to escalate, so the Job carries the
+// threshold and an unresolved auto effort; a negative threshold is refused.
+func TestJobCarriesTheEscalationThreshold(t *testing.T) {
+	job, err := build(config.Config{ReviewTimeoutSeconds: 60, ReviewEffort: config.EffortAuto, ReviewEscalateAboveLines: 800}, review.Request{Repo: "acme/widget"}, "review-escalate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, v := range job.Spec.Template.Spec.Containers[0].Env {
+		got[v.Name] = v.Value
+	}
+	if got["BOSUN_REVIEW_EFFORT"] != "auto" || got["BOSUN_REVIEW_ESCALATE_ABOVE_LINES"] != "800" {
+		t.Fatalf("effort env = %q, threshold env = %q", got["BOSUN_REVIEW_EFFORT"], got["BOSUN_REVIEW_ESCALATE_ABOVE_LINES"])
+	}
+	if _, err := build(config.Config{ReviewTimeoutSeconds: 60, ReviewEscalateAboveLines: -5}, review.Request{Repo: "acme/widget"}, "review-escalate"); err == nil {
+		t.Fatal("a negative threshold was accepted")
+	}
+}

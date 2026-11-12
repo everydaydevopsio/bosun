@@ -37,6 +37,8 @@ type resultDocument struct {
 	// Effort is the review effort that ran, from the stored usage summary;
 	// empty when the review predates it.
 	Effort string `json:"effort,omitempty"`
+	// EffortEscalation says why an auto review ran at deep (#105).
+	EffortEscalation string `json:"effort_escalation,omitempty"`
 	// Revision provenance. Empty on records written before Bosun stored it;
 	// reported as "unknown" rather than guessed from the report text.
 	ReviewedHeadSHA string `json:"reviewed_head_sha,omitempty"`
@@ -94,6 +96,7 @@ func document(r record) resultDocument {
 		if err := json.Unmarshal([]byte(r.Usage), &usage); err == nil && usage.SchemaVersion == 1 {
 			d.Usage = &usage
 			d.Effort = usage.Effort
+			d.EffortEscalation = usage.EffortEscalation
 		} else {
 			d.UsageNote = "stored usage is unreadable or uses an unsupported schema; cost remains unknown"
 		}
@@ -173,7 +176,11 @@ func renderResult(d resultDocument, summaryOnly bool, out io.Writer) {
 		fmt.Fprintln(out, d.Revision.Note)
 	}
 	if d.Effort != "" {
-		fmt.Fprintln(out, "Effort:", d.Effort)
+		if d.EffortEscalation != "" {
+			fmt.Fprintf(out, "Effort: %s (escalated: %s)\n", d.Effort, d.EffortEscalation)
+		} else {
+			fmt.Fprintln(out, "Effort:", d.Effort)
+		}
 	}
 	switch {
 	case !d.FindingsReported:

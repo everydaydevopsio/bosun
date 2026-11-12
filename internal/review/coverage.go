@@ -63,6 +63,10 @@ type Coverage struct {
 	DiffNote      string        `json:"diff_note,omitempty"`
 	Reads         *ReadCoverage `json:"reads"`
 	ReadsNote     string        `json:"reads_note,omitempty"`
+	// Effort is the level the review ran at, and EffortEscalation why an
+	// auto review was raised to deep (#105).
+	Effort           string `json:"effort,omitempty"`
+	EffortEscalation string `json:"effort_escalation,omitempty"`
 }
 
 // DiffCount sizes one side of the change. Binary files count as files with no
@@ -452,8 +456,10 @@ func buildCoverage(diff *DiffStats, diffErr error, reads *readRecord) Coverage {
 		c.ReadsNote = "the provider adapter reported no read evidence; files examined are unknown"
 		return c
 	}
-	r := &ReadCoverage{Source: reads.Source, Method: reads.Method, Commands: reads.Commands,
-		FullDiffViewed: reads.FullDiff, Truncated: reads.Truncated}
+	r := &ReadCoverage{
+		Source: reads.Source, Method: reads.Method, Commands: reads.Commands,
+		FullDiffViewed: reads.FullDiff, Truncated: reads.Truncated,
+	}
 	c.Reads = r
 	opened := setOf(reads.Opened)
 	diffed := map[string]bool{}
@@ -544,6 +550,14 @@ func (c Coverage) Footer() string {
 			}
 		}
 		parts = append(parts, fmt.Sprintf("%d context files opened", r.ContextFilesOpened))
+	}
+	// Standard is the default and says nothing worth a reader's attention.
+	if c.Effort == "deep" {
+		effort := "deep review"
+		if c.EffortEscalation != "" {
+			effort += ", escalated: " + c.EffortEscalation
+		}
+		parts = append(parts, effort)
 	}
 	if len(parts) == 0 {
 		return ""

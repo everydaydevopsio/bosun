@@ -158,7 +158,7 @@ func parse(command string, args []string, errout io.Writer) (options, []string, 
 		f.StringVar(&o.branch, "branch", "", "Committed branch/ref to review (default: current checkout including dirty files)")
 		f.StringVar(&o.base, "base", "", "Comparison base (default: repository default branch)")
 		f.StringVar(&o.provider, "provider", cfg.ReviewProvider, "Headless bridgectl provider")
-		f.StringVar(&o.effort, "effort", cfg.ReviewEffort, "Review effort: standard (the provider's default) or deep")
+		f.StringVar(&o.effort, "effort", cfg.ReviewEffort, "Review effort: auto (standard, or deep above BOSUN_REVIEW_ESCALATE_ABOVE_LINES reviewable lines), standard, or deep")
 		f.DurationVar(&o.timeout, "timeout", time.Duration(cfg.ReviewTimeoutSeconds)*time.Second, "Review execution timeout")
 		f.BoolVar(&o.detach, "detach", false, "Submit without waiting; retain snapshot")
 		f.BoolVar(&o.localCredentials, "local-credentials", false, "Load this machine's provider sign-in into the cluster before reviewing")
@@ -264,7 +264,7 @@ func Run(ctx context.Context, command string, args []string, out, errout io.Writ
 		return 2
 	}
 	// Before any snapshot or record: a refused review must leave nothing behind.
-	if _, e := config.NormalizeEffort(o.effort); e != nil {
+	if e := (config.Config{ReviewEffort: o.effort, ReviewEscalateAboveLines: config.Load().ReviewEscalateAboveLines}).ValidateReview(); e != nil {
 		fmt.Fprintln(errout, e)
 		return 2
 	}

@@ -57,7 +57,9 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	credential := credentialMode(cfg.ReviewProvider)
 	providerStarted, metricsEmitted := false, false
 	// Validated below, before anything starts; recorded on every usage summary.
-	effort := ""
+	// An auto effort stays "auto" until the change is sized, so a review that
+	// fails before then does not claim a level it never ran at.
+	effort, escalation := "", ""
 	var providerSeconds float64
 	emitUsage := func() {
 		if metricsEmitted {
@@ -70,7 +72,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 			Repo: sanitize(req.Repo), Ref: sanitize(req.Ref), HeadSHA: sanitize(req.SHA),
 			BaseSHA: sanitize(os.Getenv("BOSUN_BASE_SHA")), PRNumber: req.PRNumber, Trigger: sanitize(req.Trigger),
 			Provider: sanitize(cfg.ReviewProvider), WorkerVersion: version.Version,
-			WorkerImage: sanitize(os.Getenv("BOSUN_WORKER_IMAGE")), CredentialMode: credential, Effort: effort,
+			WorkerImage: sanitize(os.Getenv("BOSUN_WORKER_IMAGE")), CredentialMode: credential, Effort: effort, EffortEscalation: escalation,
 			Outcome: reviewOutcome(result), StartedAt: started.UTC(), FinishedAt: now.UTC(),
 			WorkerSeconds: now.Sub(started).Seconds(), ProviderSeconds: providerSeconds,
 			ProviderStarted: providerStarted, CostStatus: "unavailable", Usage: sanitizedUsage(meter.usage, sanitize),
@@ -134,16 +136,17 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 		return failf(StageSetup, "BOSUN_REPO and BOSUN_REF are required")
 	}
 	// The adapters read BOSUN_REVIEW_EFFORT from the environment bridgectl
-	// passes them, so it is normalized in place: they only need to recognise
-	// the canonical "deep".
+	// passes them, so it is set in place before the provider starts: they only
+	// need to recognise the canonical "deep". auto is resolved further down,
+	// once the checkout exists to size.
 	normalized, err := config.NormalizeEffort(os.Getenv("BOSUN_REVIEW_EFFORT"))
 	if err != nil {
 		return fail(StageSetup, err)
 	}
-	effort = normalized
-	if err := os.Setenv("BOSUN_REVIEW_EFFORT", effort); err != nil {
-		return failf(StageSetup, "set review effort: %w", err)
+	if cfg.ReviewEscalateAboveLines < 0 {
+		return failf(StageSetup, "invalid review escalate-above-lines %d: use 0 to disable escalation", cfg.ReviewEscalateAboveLines)
 	}
+	effort = normalized
 	if number := os.Getenv("BOSUN_PR_NUMBER"); number != "" {
 		n, err := strconv.Atoi(number)
 		if err != nil || n < 0 {
@@ -256,6 +259,15 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	if err := materialiseCredentials(); err != nil {
 		return fail(StageSetup, err)
 	}
+	if effort == config.EffortAuto {
+		effort, escalation = resolveAutoEffort(ctx, workspace, req.BaseSHA, local, cfg.ReviewEscalateAboveLines)
+		if escalation != "" {
+			reporter.Emit("stage", "escalated to a deep review: "+escalation)
+		}
+	}
+	if err := os.Setenv("BOSUN_REVIEW_EFFORT", effort); err != nil {
+		return failf(StageSetup, "set review effort: %w", err)
+	}
 	instructions, err := os.ReadFile(w.PromptPath)
 	if err != nil {
 		return failf(StageSetup, "read review prompt: %w", err)
@@ -289,6 +301,7 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	// Measured after the provider finished, from the same checkout it read.
 	// A failure here only makes the coverage say so; it never fails a review.
 	coverage := reviewCoverage(ctx, workspace, req.BaseSHA, local, meter)
+	coverage.Effort, coverage.EffortEscalation = effort, escalation
 	if !local {
 		// A hosted review has no `review-result` to ask, so the measured
 		// coverage travels with the published review itself (#93).
@@ -353,6 +366,28 @@ func (w Worker) Run(ctx context.Context, cfg config.Config) (result error) {
 	}
 	_, err = fmt.Fprintln(w.Output, humanReview(output))
 	return err
+}
+
+// resolveAutoEffort picks the level an auto review runs at (#105): deep when
+// the reviewable change, sized exactly as the coverage block sizes it, has
+// more added plus deleted lines than threshold; otherwise standard. The
+// second result says why it escalated, and is empty when it did not.
+// Sizing is a heuristic, so a change that cannot be sized runs standard
+// rather than failing the review.
+func resolveAutoEffort(ctx context.Context, workspace, base string, local bool, threshold int) (string, string) {
+	if threshold <= 0 {
+		return config.EffortStandard, ""
+	}
+	stats, err := diffStats(ctx, workspace, base, local && os.Getenv("BOSUN_COMMITTED_ONLY") != "1")
+	if err != nil {
+		slog.Warn("could not size the change; reviewing at standard effort", "error", err)
+		return config.EffortStandard, ""
+	}
+	lines := stats.Reviewable.Additions + stats.Reviewable.Deletions
+	if lines <= threshold {
+		return config.EffortStandard, ""
+	}
+	return config.EffortDeep, fmt.Sprintf("reviewable_lines=%d > %d", lines, threshold)
 }
 
 // reviewCoverage measures how the change was examined: the diff the reviewer
