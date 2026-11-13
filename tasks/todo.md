@@ -51,9 +51,9 @@
 - [x] `.github/dependabot.yml`, `LICENSE`, `CHANGELOG.md`, README badges
 - [x] `docs/releasing.md` and `docs/README.md`
 - [x] File the Windows release issue (#5) and the golangci-lint issue (#6)
-- [ ] Grant `OPENAI_API_KEY`, `APPLE_*`, `HOMEBREW_TAP_GITHUB_TOKEN`, `CODECOV_TOKEN`
+- [x] Grant `OPENAI_API_KEY`, `APPLE_*`, `HOMEBREW_TAP_GITHUB_TOKEN`, `CODECOV_TOKEN` (done: APPLE_* and HOMEBREW_TAP_GITHUB_TOKEN are repo secrets, OPENAI_API_KEY is an org secret used by every release, Codecov uploads pass; verified 2026-11-14)
       to `everydaydevopsio/bosun` (repository configuration, not a code change)
-- [ ] Create the public `everydaydevopsio/homebrew-bosun` repository
+- [x] Create the public `everydaydevopsio/homebrew-bosun` repository (done: exists and is public; verified 2026-11-14)
 
 ## Test Strategy
 - Unit: `cmd/bosun/main_test.go` covers `version`, `help`, their flag aliases, the
@@ -82,13 +82,13 @@
 
 # Task: Go migration plan
 
-- [ ] Map the Python controller and reviewer contracts to Go packages (GO-1, GO-2).
-- [ ] Add Go module, generated protobuf bindings, and red tests for controller behavior.
-- [ ] Implement the Go controller, Kubernetes Job submission, and GitHub auth.
-- [ ] Implement the Go reviewer, cloning, bridgectl session client, and output posting.
-- [ ] Replace Dockerfile, Makefile, scripts, and docs with Go runtime commands (GO-3).
-- [ ] Run unit tests, lint, image build, Helm rendering, and the credential-free local smoke path.
-- [ ] Record evidence, rollback guidance, and lessons.
+- [x] Map the Python controller and reviewer contracts to Go packages (GO-1, GO-2).
+- [x] Add Go module, generated protobuf bindings, and red tests for controller behavior.
+- [x] Implement the Go controller, Kubernetes Job submission, and GitHub auth.
+- [x] Implement the Go reviewer, cloning, bridgectl session client, and output posting.
+- [x] Replace Dockerfile, Makefile, scripts, and docs with Go runtime commands (GO-3).
+- [x] Run unit tests, lint, image build, Helm rendering, and the credential-free local smoke path.
+- [x] Record evidence, rollback guidance, and lessons. (Go migration done: the repository is Go with no Python left; boxes ticked 2026-11-14)
 
 # Task: Reviewer image preflight and release-aware image default
 
@@ -1199,7 +1199,7 @@ and fixed:
   delivery its acknowledgement while its Job was created anyway. Another
   regression from the pass-1 fix. Fixed: a 10s `identityResolveBudget`, with
   the server's write timeout now checked against resolution plus admission.
-- [ ] **Medium** — publications correlate to a commit, not to the attempt. Same
+- [x] **Medium** — publications correlate to a commit, not to the attempt. Same
   finding as pass 3; tracked in #74 and deliberately not fixed here.
 
 ## Outcome
@@ -1388,7 +1388,7 @@ arrives, so rapid pushes still queue and can exhaust the cap. #42 touches it.
 - [x] Failing tests: config default, chart renders and defaults the value
 - [x] Default changed in `config.Load`; chart value and env added
 - [x] README, `docs/setup.md`, and every doc example updated
-- [ ] Post-merge: release, deploy to mca-cluster, verify with a live comment (evidence goes on #80, which closes then)
+- [x] Post-merge: release, deploy to mca-cluster, verify with a live comment (done: #80 closed 2026-11-04 with the evidence)
 
 ## Test Strategy
 - Unit: `TestTheDefaultReviewCommandMentionsTheBosunReviewAccount`,
